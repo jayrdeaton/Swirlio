@@ -3,23 +3,72 @@
     "name": "Swirlio",
     "slug": "Swirlio",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "orientation": "default",
+    "scheme": "swirlio",
+    "icon": "./assets/images/dark-icon.png",
+    "userInterfaceStyle": "automatic",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jayrdeaton.Swirlio",
+      "icon": {
+        "dark": "./assets/images/dark-icon.png",
+        "light": "./assets/images/light-icon.png"
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.jayrdeaton.Swirlio",
+      "permissions": [
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
-    }
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/dark-icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/light-splash.png",
+          "resizeMode": "cover",
+          "backgroundColor": "#F0F0F0",
+          "dark": {
+            "image": "./assets/images/dark-splash.png",
+            "backgroundColor": "#0F0F0F"
+          }
+        }
+      ],
+      "expo-font",
+      [
+        "react-native-audio-api",
+        {
+          "iosBackgroundMode": false,
+          "iosMicrophonePermission": "Swirlio uses the microphone to make the swirl react to sound.",
+          "androidForegroundService": false
+        }
+      ]
+    ],
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c1efdb14-4a4f-4615-88ad-139c325abc7e"
+      }
+    },
+    "owner": "jayrdeaton"
   }
 }
