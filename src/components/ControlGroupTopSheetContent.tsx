@@ -186,13 +186,21 @@ export function ControlGroupTopSheetContent() {
             resetMirror), in one tap. 'Reset' alone (matching Mirror/Pattern/Colors' own buttons) would
             read as scoped to whichever sheet happens to be open, same as those three — 'Reset all'
             says plainly that this one isn't. The mic toggle is the one exception — see
-            resetSettings' own comment for why it survives this. */}
+            resetSettings' own comment for why it survives this.
+            themeSettings' own `color` field is deliberately left out of this reset (every other field
+            resets to defaultThemeSettings' value, color doesn't): it isn't a user preference to reset
+            at all, it's a live mirror of light/dark mode that MonochromeThemeBridge (_layout.tsx) keeps
+            in sync — resetting it to the library's own baseline accent (a purple, defaultThemeSettings'
+            own seed color, meant for apps that don't override it the way this one does) would fight
+            that bridge, which only re-derives color when light/dark mode itself actually changes, not
+            on every settings change — so the reset purple would otherwise sit there undoing the app's
+            entire black/white theming until the next time light/dark mode flips or the app restarts. */}
             <ActionFab
               icon='backup-restore'
               label='Reset all'
               onPress={() => {
                 resetSettings()
-                setThemeSettings(defaultThemeSettings)
+                setThemeSettings({ appearance: defaultThemeSettings.appearance, blur: defaultThemeSettings.blur, blurTint: defaultThemeSettings.blurTint, harmony: defaultThemeSettings.harmony })
                 resetPattern()
                 resetMirror()
               }}

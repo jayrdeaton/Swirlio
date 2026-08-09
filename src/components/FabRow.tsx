@@ -10,6 +10,10 @@ type FabRowProps = {
 // See the "same line" comment below — generous enough to absorb Yoga's sub-pixel rounding noise,
 // nowhere close to a real line wrap's smallest possible gap (a whole FAB height plus the row gap).
 const SAME_LINE_TOLERANCE_PX = 2
+// Shared with styles.row's own `gap` below (not duplicated as a literal there) — a hidden divider's
+// wrapper needs to cancel exactly one gap unit (see hideDivider's own style below), so it has to track
+// whatever the row's real gap actually is rather than an independent guess that could drift from it.
+const ROW_GAP_PX = 12
 
 // Wraps whatever picker/toggle FABs a sheet groups together, so unrelated pickers wrap as one block
 // instead of each claiming its own line — see each *Content.tsx's usage. Top-aligned (not centered):
@@ -36,8 +40,15 @@ const SAME_LINE_TOLERANCE_PX = 2
 // A hidden divider's own wrapper stays mounted (rendering null inside it, not removing it) rather
 // than being dropped from the tree — dropping it would stop it from ever being measured again, so a
 // later resize/relayout that would put it back on the same line as its neighbours could never bring
-// it back. Its own width is a hairline either way, so the wrapper contributes essentially the same
-// gap whether or not the divider inside it is actually drawn.
+// it back. Collapsing its own content to nothing isn't enough on its own, though: the row's `gap`
+// applies uniformly between flex siblings regardless of their own size, so a hidden-but-still-mounted
+// divider that wraps to the start of a new line (the strandedFromPrev case — always position 0 on
+// whatever line it lands on, see the strandedFromPrev comment below) still claimed a full gap unit
+// before the first real item after it, inset a whole gap's worth from where that line should actually
+// start. styles.hiddenDivider's negative marginRight cancels exactly that one gap, pulling the real
+// item back flush with how every other line starts. A divider hidden only via strandedFromNext (stranded at
+// the *end* of a line, nothing after it there) has nothing after it on that line for the cancelled gap
+// to affect either way, so the same style is harmless to apply unconditionally.
 export function FabRow({ children }: FabRowProps) {
   const items = React.Children.toArray(children)
   const [tops, setTops] = useState<Record<number, number>>({})
@@ -58,6 +69,7 @@ export function FabRow({ children }: FabRowProps) {
         return (
           <View
             key={index}
+            style={hideDivider ? styles.hiddenDivider : undefined}
             onLayout={(event: LayoutChangeEvent) => {
               const top = Math.round(event.nativeEvent.layout.y)
               setTops((prev) => (prev[index] === top ? prev : { ...prev, [index]: top }))
@@ -72,11 +84,14 @@ export function FabRow({ children }: FabRowProps) {
 }
 
 const styles = StyleSheet.create({
+  hiddenDivider: {
+    marginRight: -ROW_GAP_PX
+  },
   row: {
     alignItems: 'flex-start',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: ROW_GAP_PX,
     justifyContent: 'flex-start',
     marginTop: 6
   }
