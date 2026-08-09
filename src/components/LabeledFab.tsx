@@ -7,6 +7,7 @@ import { Text, useTheme } from 'react-native-paper'
 import { disabledFabTheme, disabledIconColor, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
 import { useSwirlSettings } from '@/hooks/useSwirlSettings'
 
+import { resolveIcon } from './MdIcon'
 import { useToggleFabAppearance } from './useToggleFabAppearance'
 
 const LABEL_MAX_WIDTH = 72
@@ -74,13 +75,24 @@ export function LabeledFab({ icon, label, active, colorOverride, disabled = fals
   // getForegroundColor/getBackgroundColor), always rendering disabledFabTheme's own onSurfaceDisabled
   // color instead — the border needs to track THAT, not whichever color was computed for a state paper
   // isn't actually using right now.
-  const fabStyle = { backgroundColor: showBlurBackdrop ? 'transparent' : backgroundColor, borderColor: disabled ? disabledIconColor(colors.primary) : borderColor, borderWidth: VISIBLE_HAIRLINE_WIDTH }
+  // height/width/boxSizing: react-native-paper's FAB Surface has no size of its own — it's sized
+  // purely by its content (fabStyle's own 40/56 box) plus whatever border this style adds. Without an
+  // explicit box-sizing, that border is added OUTSIDE the content box (RN's default), growing the
+  // Surface a couple pixels taller than `diameter` — which the wrapper's default cross-axis stretch
+  // above happens to clip back down on width but not on height (height is the main axis in a column
+  // flex, never stretched), so the Surface ends up a couple pixels TALLER than the `diameter`-sized
+  // BlurView backdrop behind it, both sharing the same top edge — a sliver of whatever's behind both
+  // shows through at the bottom, between the backdrop's edge and the border tracing the (taller)
+  // Surface. boxSizing: 'border-box' is what makes an explicit height/width actually include the
+  // border instead of adding to it, so the Surface's true rendered box matches `diameter` exactly, on
+  // both axes, same as the backdrop it needs to align with.
+  const fabStyle = { backgroundColor: showBlurBackdrop ? 'transparent' : backgroundColor, borderColor: disabled ? disabledIconColor(colors.primary) : borderColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: diameter, width: diameter, boxSizing: 'border-box' as const }
 
   return (
     <View style={styles.column}>
       <View style={{ height: diameter, width: diameter }}>
         {showBlurBackdrop && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, { borderRadius, overflow: 'hidden' }]} />}
-        <FAB testID={testID} size={size} icon={icon} disabled={disabled} accessibilityLabel={label} accessibilityState={{ disabled, selected: active }} color={iconColor} style={fabStyle} theme={disabledFabTheme(colors.primary)} onPress={onPress} />
+        <FAB testID={testID} size={size} icon={resolveIcon(icon)} disabled={disabled} accessibilityLabel={label} accessibilityState={{ disabled, selected: active }} color={iconColor} style={fabStyle} theme={disabledFabTheme(colors.primary)} onPress={onPress} />
       </View>
       {settings.showLabels && (
         <Text variant='labelSmall' style={styles.label}>

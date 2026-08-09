@@ -2,12 +2,13 @@ import { Dialog, getContrastColor } from '@rific/auto-paper'
 import { Button, TouchableOpacity } from '@rific/haptic-press'
 import React, { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
-import { Icon, useTheme } from 'react-native-paper'
+import { useTheme } from 'react-native-paper'
 
 import { NEUTRAL_AND_VIVID_COLORS } from '@/constants/colorSwatches'
 
 import { ActionFab } from './ActionFab'
 import { LabeledFab } from './LabeledFab'
+import { MdIcon, resolveIcon } from './MdIcon'
 
 const SWATCH_SIZE = 44
 const SELECTED_RING_WIDTH = 3
@@ -79,13 +80,13 @@ export function useColorListFabs(label: string, colors: string[], onChange: (col
             const selected = hex === editingColor
             return (
               <TouchableOpacity key={hex} testID={`color-swatch-${hex}`} onPress={() => pickSwatch(hex)} style={[styles.swatch, { backgroundColor: hex, borderColor: selected ? getContrastColor(hex) : themeColors.outlineVariant, borderWidth: selected ? SELECTED_RING_WIDTH : RESTING_RING_WIDTH }]}>
-                {selected && <Icon source='check' size={18} color={getContrastColor(hex)} />}
+                {selected && <MdIcon name='check' size={18} color={getContrastColor(hex)} />}
               </TouchableOpacity>
             )
           })}
         </View>
         {editingIndex != null && colors.length > 1 && (
-          <Button testID='color-remove' mode='outlined' icon='trash-can-outline' textColor={themeColors.error} style={styles.removeButton} onPress={removeEditing}>
+          <Button testID='color-remove' mode='outlined' icon={resolveIcon('trash-can-outline')} textColor={themeColors.error} style={styles.removeButton} onPress={removeEditing}>
             Remove
           </Button>
         )}

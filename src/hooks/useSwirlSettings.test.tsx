@@ -29,7 +29,9 @@ type TestApi = {
   setMirrorRotationSpeed: (speed: number) => void
   setPolygonSides: (sides: number) => void
   setRotationSpeed: (speed: number) => void
+  setShakeEnabled: (enabled: boolean) => void
   setStrokeWidth: (strokeWidth: number) => void
+  setTiltEnabled: (enabled: boolean) => void
   setZoomSpeed: (speed: number) => void
   resetSettings: () => void
 }
@@ -42,11 +44,11 @@ function requireApi(value: TestApi | null): TestApi {
 }
 
 function Probe({ onUpdate }: { onUpdate: (api: TestApi) => void }) {
-  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setZoomSpeed, resetSettings } = useSwirlSettings()
+  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings } = useSwirlSettings()
 
   useEffect(() => {
-    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setZoomSpeed, resetSettings })
-  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setZoomSpeed, resetSettings, settings])
+    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings })
+  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings, settings])
 
   return <Text testID='stroke'>{String(settings.strokeWidth)}</Text>
 }
@@ -850,5 +852,27 @@ describe('useSwirlSettings', () => {
 
     await waitFor(() => expect(getApi().settings.strokeWidth).toBe(6))
     expect(getApi().settings.audioReactiveEnabled).toBe(true)
+  })
+
+  // shakeEnabled/tiltEnabled are opt-outs, not look/tuning knobs — someone who's turned off shake-to-
+  // randomize or tilt warp shouldn't have Reset all silently switch them back on, mirroring
+  // audioReactiveEnabled's carve-out above. See resetSettings's own comment in useSwirlSettings.tsx.
+  it('resetSettings leaves shakeEnabled and tiltEnabled exactly as they were, on or off', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setShakeEnabled(false)
+      getApi().setTiltEnabled(false)
+    })
+    await waitFor(() => expect(getApi().settings.shakeEnabled).toBe(false))
+
+    await act(async () => {
+      getApi().resetSettings()
+    })
+
+    await waitFor(() => expect(getApi().settings.strokeWidth).toBe(6))
+    expect(getApi().settings.shakeEnabled).toBe(false)
+    expect(getApi().settings.tiltEnabled).toBe(false)
   })
 })

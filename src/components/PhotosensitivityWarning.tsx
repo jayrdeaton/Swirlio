@@ -2,10 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Button } from '@rific/haptic-press'
 import React, { useEffect, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
-import { Icon, Portal, Text, useTheme } from 'react-native-paper'
+import { Portal, Text, useTheme } from 'react-native-paper'
 import Animated, { Easing, useAnimatedStyle, withTiming } from 'react-native-reanimated'
 
 import { contrastColor } from '@/constants/fabTheme'
+
+import { MdIcon } from './MdIcon'
 
 const STORAGE_KEY = 'photosensitivity-warning-acknowledged'
 const FADE_DURATION_MS = 250
@@ -60,7 +62,7 @@ export function PhotosensitivityWarning() {
     <Portal>
       <Animated.View testID='photosensitivity-warning' style={[StyleSheet.absoluteFill, styles.backdrop, animatedStyle]}>
         <View style={[styles.card, { backgroundColor: colors.primary }]}>
-          <Icon source='alert' size={32} color={ink} />
+          <MdIcon name='alert' size={32} color={ink} />
           <Text variant='titleMedium' style={[styles.title, { color: ink }]}>
             Photosensitivity warning
           </Text>

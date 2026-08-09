@@ -284,7 +284,7 @@ describe('SwirlScreen gestures', () => {
 
     await act(async () => {
       pinchGesture.__handlers.start?.()
-      pinchGesture.__handlers.end?.({ velocity: 10 })
+      pinchGesture.__handlers.end?.({ scale: 1, velocity: 10 })
       rotationGesture.__handlers.start?.()
       rotationGesture.__handlers.update?.({ rotation: Math.PI / 2 })
     })
@@ -302,7 +302,7 @@ describe('SwirlScreen gestures', () => {
 
     await act(async () => {
       pinchGesture.__handlers.start?.()
-      pinchGesture.__handlers.end?.({ velocity: -10 })
+      pinchGesture.__handlers.end?.({ scale: 1, velocity: -10 })
     })
 
     expect(setZoomSpeed).toHaveBeenCalledWith(-6)
@@ -315,14 +315,14 @@ describe('SwirlScreen gestures', () => {
 
     await act(async () => {
       pinchGesture.__handlers.start?.()
-      pinchGesture.__handlers.end?.({ velocity: 100000 })
+      pinchGesture.__handlers.end?.({ scale: 1, velocity: 100000 })
     })
 
     expect(setZoomSpeed).toHaveBeenCalledWith(10)
 
     await act(async () => {
       pinchGesture.__handlers.start?.()
-      pinchGesture.__handlers.end?.({ velocity: -100000 })
+      pinchGesture.__handlers.end?.({ scale: 1, velocity: -100000 })
     })
 
     expect(setZoomSpeed).toHaveBeenCalledWith(-10)
@@ -1897,6 +1897,10 @@ describe('SwirlScreen gestures', () => {
       const [committedGap] = setMirrorGap.mock.calls[setMirrorGap.mock.calls.length - 1]
       expect(committedGap).toBeCloseTo(0.09, 5)
       expect(setZoomSpeed).not.toHaveBeenCalled()
+      // Line thickness/density ride along with zoom (see index.tsx's own comment on why) — neither
+      // should move at all while the pinch is mirror-only.
+      expect(setStrokeWidth).not.toHaveBeenCalled()
+      expect(setTightness).not.toHaveBeenCalled()
     })
 
     it("in 'both' mode, a pinch changes both zoomSpeed and mirrorGap from the same release", async () => {
@@ -1968,6 +1972,50 @@ describe('SwirlScreen gestures', () => {
       // useLoopingProgress's own "ride out the remaining fraction of this lap" duration math).
       const expectedFold = (((initialPulse + 0.1) % 1) + 1) % 1
       expect(getLastSpiralProps().pulse.value).toBeCloseTo(expectedFold, 5)
+    })
+
+    it("in 'pattern' mode (the default), a pinch live-tracks line thickness and density alongside zoom, then commits both on release", async () => {
+      await renderScreen()
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // PINCH_SCALE_TO_STROKE_WIDTH_SCALE is (36 - 1) / 1.5 ≈ 23.333, so (1.2 - 1) * 23.333 ≈ 4.667
+        // above the mocked strokeWidth: 6. PINCH_SCALE_TO_TIGHTNESS_SCALE is (2.5 - 0.4) / 1.5 = 1.4,
+        // so (1.2 - 1) * 1.4 = 0.28 above the mocked tightness: 1.
+        pinchGesture.__handlers.update?.({ scale: 1.2 })
+      })
+      // Live-tracked mid-gesture, before release — the same 1:1 feel as mirrorGap's own pinch tracking.
+      expect(getLastSpiralProps().strokeWidth.value).toBeCloseTo(10.667, 3)
+      expect(getLastSpiralProps().tightness.value).toBeCloseTo(1.28, 5)
+
+      await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 1.2, velocity: 0 })
+      })
+      expect(setStrokeWidth).toHaveBeenCalledTimes(1)
+      expect(setStrokeWidth.mock.calls[0][0]).toBeCloseTo(10.667, 3)
+      expect(setTightness).toHaveBeenCalledTimes(1)
+      expect(setTightness.mock.calls[0][0]).toBeCloseTo(1.28, 5)
+    })
+
+    it("in 'pattern' mode, a pinch clamps line thickness and density to their own MIN/MAX ranges, live and on release", async () => {
+      await renderScreen()
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // (2.5 - 1) * 23.333 ≈ 35 above the mocked strokeWidth: 6 — comfortably past MAX_STROKE_WIDTH
+        // (36). (2.5 - 1) * 1.4 = 2.1 above the mocked tightness: 1 — past MAX_TIGHTNESS (2.5).
+        pinchGesture.__handlers.update?.({ scale: 2.5 })
+      })
+      expect(getLastSpiralProps().strokeWidth.value).toBe(36)
+      expect(getLastSpiralProps().tightness.value).toBe(2.5)
+
+      await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 2.5, velocity: 0 })
+      })
+      expect(setStrokeWidth).toHaveBeenLastCalledWith(36)
+      expect(setTightness).toHaveBeenLastCalledWith(2.5)
     })
 
     it('clamps a mirror-targeted pinch to MAX_MIRROR_GAP rather than an out-of-range gap, live and on release', async () => {

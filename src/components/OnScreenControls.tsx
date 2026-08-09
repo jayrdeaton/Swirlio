@@ -11,7 +11,8 @@ import { ControlGroup, useControlGroups, useControlGroupSheetDrawer, useOpenCont
 import { GestureTarget } from '@/hooks/useEpicenter'
 
 import { GlassToggleFab } from './GlassToggleFab'
-import { FAB_HEIGHT_SMALL } from './LabeledFab'
+import { FAB_HEIGHT_MEDIUM, FAB_HEIGHT_SMALL } from './LabeledFab'
+import { MdIcon, resolveIcon } from './MdIcon'
 import { PatternIcon } from './PatternIcon'
 
 const FAB_EDGE_MARGIN = 16
@@ -44,11 +45,21 @@ const SIBLINGS_COLLAPSE_OFFSET = 24
 // (see PatternIcon) rather than a generic MaterialCommunityIcons stand-in ('shape') — the app's own
 // default pattern reads as a much clearer "this is the pattern group" mark than an arbitrary polygon.
 type GroupTriggerIcon = string | ((props: { size: number; color: string }) => React.ReactNode)
-const GROUP_TRIGGERS: { group: ControlGroup; icon: GroupTriggerIcon }[] = [
-  { group: 'mirror', icon: 'mirror' },
-  { group: 'colors', icon: 'palette' },
-  { group: 'pattern', icon: ({ size, color }) => <PatternIcon pattern='spiral' color={color} size={size} /> },
-  { group: 'line', icon: 'format-line-weight' }
+// Every one of these — string or render-function alike — now goes through resolveIcon before it
+// reaches the real FAB (see MdIcon's own comment), so a plain string icon no longer gets a stable
+// per-trigger testID derived from itself the way it used to: resolveIcon wraps it in an anonymous
+// closure just like a render-function icon, indistinguishable from any other by the time the Jest FAB
+// mock sees it. Every entry here carries its own testID explicitly rather than relying on that
+// fallback (see the Jest FAB mock's own comment).
+const GROUP_TRIGGERS: { group: ControlGroup; icon: GroupTriggerIcon; testID?: string }[] = [
+  { group: 'mirror', icon: 'mirror', testID: 'fab-mirror' },
+  { group: 'colors', icon: 'palette', testID: 'fab-palette' },
+  { group: 'pattern', icon: ({ size, color }) => <PatternIcon pattern='spiral' color={color} size={size} />, testID: 'fab-pattern' },
+  // Render-function icon rather than the plain string every other entry here uses — a trial fix for
+  // the off-center-glyph bug (see MdIcon's own comment): this is the exact icon a real-device
+  // screenshot proved visibly off-center, so it's the one call site converted first to confirm the fix
+  // actually helps on-device before rolling it out to every other icon in the app.
+  { group: 'line', icon: ({ size, color }) => <MdIcon name='format-line-weight' color={color} size={size} />, testID: 'fab-format-line-weight' }
 ]
 
 // One icon per gestureTarget mode (see useEpicenter.ts) — cycled by the transport row's own FAB
@@ -165,6 +176,15 @@ export function OnScreenControls({ visible, frozen, audioReactiveEnabled, gestur
   // canvas, not just the floating icon.
   const fabOutlineStyle = { borderColor: solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH }
   const solidFabStyle = { backgroundColor: colors.primary, ...fabOutlineStyle }
+  // Without an explicit box-sizing, the border above grows a FAB's own intrinsic Surface box a couple
+  // pixels past its true small/medium footprint (react-native-paper's FAB Surface has no size of its
+  // own — see LabeledFab's fabStyle for the full mechanism). Invisible on these solid FABs themselves
+  // (fill and border are the same element, so they can't drift apart from each other), but it still
+  // throws off anything measuring/aligning against their real footprint — merged in as a second style
+  // array entry (not baked into solidFabStyle itself) since that one constant is shared between both
+  // small and medium FABs below.
+  const solidFabSizeSmall = { height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' as const }
+  const solidFabSizeMedium = { height: FAB_HEIGHT_MEDIUM, width: FAB_HEIGHT_MEDIUM, boxSizing: 'border-box' as const }
 
   // The trigger stack needs to stay reachable while the group sheet is open, rather than getting
   // covered by it. A plain zIndex bump doesn't reach far enough for that, since it only wins within
@@ -191,7 +211,7 @@ export function OnScreenControls({ visible, frozen, audioReactiveEnabled, gestur
     // (see useShakeToRandomize), which isn't available on web/desktop and isn't discoverable at all
     // without knowing it exists. Top-left, balancing the trigger stack opposite it.
     <Animated.View testID='dice-fab-fade' style={[styles.fab, sheetFadeStyle, { top: insets.top + FAB_EDGE_MARGIN, left: FAB_EDGE_MARGIN }]} pointerEvents={anySheetVisible ? 'none' : 'auto'}>
-      <FAB icon='dice-multiple' size='small' color={solidFabColor} style={solidFabStyle} onPress={onRandomize} />
+      <FAB testID='fab-dice-multiple' icon={resolveIcon('dice-multiple')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onRandomize} />
     </Animated.View>
   )
 
@@ -214,14 +234,14 @@ export function OnScreenControls({ visible, frozen, audioReactiveEnabled, gestur
       down the screen as that list grows. Icon direction signals what tapping will do (chevron-up: tap
       to collapse; chevron-down: tap to expand), while active mirrors GlassToggleFab's usual "something's
       in a non-default state" meaning — solid exactly when the siblings are currently tucked away. */}
-      <GlassToggleFab icon={siblingsVisible ? 'chevron-up' : 'chevron-down'} active={!siblingsVisible} onPress={() => setSiblingsVisible((current) => !current)} />
+      <GlassToggleFab icon={siblingsVisible ? 'chevron-up' : 'chevron-down'} testID={siblingsVisible ? 'fab-chevron-up' : 'fab-chevron-down'} active={!siblingsVisible} onPress={() => setSiblingsVisible((current) => !current)} />
       {/* Collapsible siblings live in their own wrapper (rather than gap-ing directly under
       styles.triggerStack) so siblingsFadeStyle can fade+nudge the whole group as one unit without
       touching the collapse toggle above, which stays put — see siblingsFadeStyle's own comment. The
       gap/column styling that used to live on the outer View moves down onto this wrapper for the same
       reason: styles.triggerStack's own gap now only separates this wrapper from the toggle FAB. */}
       <Animated.View testID='trigger-stack-siblings' style={[styles.triggerStackSiblings, siblingsFadeStyle]} pointerEvents={siblingsVisible ? 'box-none' : 'none'}>
-        {[{ group: 'settings' as const, icon: 'cog' }, ...GROUP_TRIGGERS].map(({ group, icon }) => {
+        {[{ group: 'settings' as const, icon: 'cog', testID: 'fab-cog' }, ...GROUP_TRIGGERS].map(({ group, icon, testID }) => {
           // Only the trigger for whichever group is actually showing gets the "on" treatment, the same
           // solid/glass-scrim language the mic FAB already uses for its own on/off state (see
           // GlassToggleFab) — every other trigger reads as off, including all six when no sheet is open
@@ -232,7 +252,7 @@ export function OnScreenControls({ visible, frozen, audioReactiveEnabled, gestur
           // closes the sheet instead of re-opening the same group as a no-op — press-away was otherwise
           // the only way to dismiss it at all. Pressing any OTHER trigger still switches groups in place
           // rather than closing first, exactly as before.
-          return <GlassToggleFab key={group} icon={icon} active={isOpenGroup} onPress={() => (isOpenGroup ? closeGroupSheet() : openGroup(group))} />
+          return <GlassToggleFab key={group} icon={icon} testID={testID} active={isOpenGroup} onPress={() => (isOpenGroup ? closeGroupSheet() : openGroup(group))} />
         })}
       </Animated.View>
     </View>
@@ -259,20 +279,20 @@ export function OnScreenControls({ visible, frozen, audioReactiveEnabled, gestur
           further down — see its own comment for the full rationale. */}
           <View style={styles.disableableSmallFabWrapper}>
             {backDisabled && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, { borderRadius: 3 * (roundness ?? 4), overflow: 'hidden' }]} />}
-            <FAB icon='skip-previous' size='small' disabled={backDisabled} color={solidFabColor} style={{ backgroundColor: backDisabled ? 'transparent' : colors.primary, borderColor: backDisabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH }} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onGoBack} />
+            <FAB testID='fab-skip-previous' icon={resolveIcon('skip-previous')} size='small' disabled={backDisabled} color={solidFabColor} style={{ backgroundColor: backDisabled ? 'transparent' : colors.primary, borderColor: backDisabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' }} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onGoBack} />
           </View>
           {/* Same on/off treatment as the mirror toggles (solid fill when on, fixed neutral scrim —
           plus a glass blur wherever the platform renders one — when off, see GlassToggleFab) — this is
           the one on-screen control backed by a setting rather than a one-shot action, so it needs a
           state to show, not just an icon. */}
-          <GlassToggleFab icon='microphone' active={audioReactiveEnabled} onPress={onToggleAudioReactive} />
+          <GlassToggleFab icon='microphone' testID='fab-microphone' active={audioReactiveEnabled} onPress={onToggleAudioReactive} />
           {/* onLongPress is a bonus gesture layered on the same FAB as the ordinary tap-to-pause, not
           a separate control — "put it all back" (pattern rotation, mirror rotation, and the
           epicentre's position) is exactly the kind of undo a hold on the transport button already
           means in other players, and there's no on-screen real estate to spare for a sixth FAB here.
           React Native's own touchable already treats onLongPress as exclusive of onPress within the
           same gesture, so a hold doesn't also toggle frozen on release. */}
-          <FAB icon={frozen ? 'play' : 'pause'} size='medium' color={solidFabColor} style={solidFabStyle} onPress={onToggleFrozen} onLongPress={onResetSwirl} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
+          <FAB testID={frozen ? 'fab-play' : 'fab-pause'} icon={resolveIcon(frozen ? 'play' : 'pause')} size='medium' color={solidFabColor} style={[solidFabStyle, solidFabSizeMedium]} onPress={onToggleFrozen} onLongPress={onResetSwirl} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
           {/* Cycles pattern → mirror → both — which point(s) the canvas's one-finger drag and
           two-finger twist currently move (see useEpicenter.ts's gestureTarget). Solid like play/pause
           when there's an actual choice to make; disabled (and left showing the 'pattern' icon, its
@@ -298,13 +318,13 @@ export function OnScreenControls({ visible, frozen, audioReactiveEnabled, gestur
           not a gesture-target-specific name) since the back FAB above reuses this exact same treatment. */}
           <View style={styles.disableableSmallFabWrapper}>
             {gestureTargetDisabled && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, { borderRadius: 3 * (roundness ?? 4), overflow: 'hidden' }]} />}
-            <FAB testID='fab-target' icon={GESTURE_TARGET_ICONS[gestureTarget]} size='small' disabled={gestureTargetDisabled} color={solidFabColor} style={{ backgroundColor: gestureTargetDisabled ? 'transparent' : colors.primary, borderColor: gestureTargetDisabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH }} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onCycleGestureTarget} />
+            <FAB testID='fab-target' icon={resolveIcon(GESTURE_TARGET_ICONS[gestureTarget])} size='small' disabled={gestureTargetDisabled} color={solidFabColor} style={{ backgroundColor: gestureTargetDisabled ? 'transparent' : colors.primary, borderColor: gestureTargetDisabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' }} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onCycleGestureTarget} />
           </View>
           {/* onLongPress is a bonus gesture layered on the same FAB as forward's ordinary tap-to-tweak
           (see goForward/goForwardBatch in index.tsx for the one-tweak-vs-several distinction) — same
           onPress/onLongPress mutual exclusivity as play/pause above, and never disabled: a tweak is
           always possible regardless of how much history back has to work with. */}
-          <FAB icon='skip-next' size='small' color={solidFabColor} style={solidFabStyle} onPress={onGoForward} onLongPress={onGoForwardBatch} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
+          <FAB testID='fab-skip-next' icon={resolveIcon('skip-next')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onGoForward} onLongPress={onGoForwardBatch} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
         </Animated.View>
       </Animated.View>
 

@@ -8,6 +8,8 @@ import { buildSpiralArmPath, buildSpiralArmPoints, spiralSampleCount } from '@/c
 import { buildStarburstPath } from '@/constants/starburstMath'
 import { buildStarPath } from '@/constants/starMath'
 
+import { GLOBAL_NUDGE_X, GLOBAL_NUDGE_Y } from './MdIcon'
+
 const PREVIEW_RADIUS = 16
 const PREVIEW_PAD = 4
 const PREVIEW_BOUNDS = PREVIEW_RADIUS + PREVIEW_PAD
@@ -62,7 +64,11 @@ type PatternIconProps = {
 // stand-in glyph — so picking one shows you what you're actually about to get, not just a generic icon.
 export function PatternIcon({ pattern, color, size = 32 }: PatternIconProps) {
   return (
-    <Svg width={size} height={size} viewBox={`${-PREVIEW_BOUNDS} ${-PREVIEW_BOUNDS} ${PREVIEW_BOUNDS * 2} ${PREVIEW_BOUNDS * 2}`}>
+    // translateX/Y: the same flat, on-device-calibrated nudge MdIcon applies to every font-glyph
+    // icon in the app (see its own comment) — this is a custom SVG shape rather than a font glyph, so
+    // it doesn't go through MdIcon itself, but it sits in the same FAB slots as ones that do and needs
+    // the same correction to read as consistently centered next to them.
+    <Svg width={size} height={size} viewBox={`${-PREVIEW_BOUNDS} ${-PREVIEW_BOUNDS} ${PREVIEW_BOUNDS * 2} ${PREVIEW_BOUNDS * 2}`} style={{ transform: [{ translateX: GLOBAL_NUDGE_X }, { translateY: GLOBAL_NUDGE_Y }] }}>
       <PatternIconShape pattern={pattern} color={color} />
     </Svg>
   )

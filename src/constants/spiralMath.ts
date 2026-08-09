@@ -9,10 +9,25 @@ import type { SkPoint } from '@shopify/react-native-skia'
 //
 // It also grows with radius, hence the sqrt(radius) term: dragging the epicenter into a corner
 // pushes the outer turn much further out, where the same angular step spans more pixels.
-const POINTS_PER_TURN = 64
+//
+// That deviation formula is an average over the whole arm, though — within a single render the
+// angular step is uniform in t, so the *outermost* turn (largest r) always carries more of it than
+// the inner ones, which is what read as faceting specifically on the outer rings. Numerically
+// verifying against the true curve (not just the sagitta approximation above), today's constants
+// hold that outer-turn deviation to a strikingly consistent ~0.58 canvas units regardless of
+// screen size or tightness — consistent, but not small enough to disappear on a high-DPR screen.
+// Redistributing the existing budget toward the outer turn (a power-law or arc-length-uniform
+// remap of the sample parameter) looked like a free win but isn't: both undersample the first few
+// points near the center, where local curvature is actually highest even though r is tiny, and that
+// spikes deviation up to 2-11 units right at the pattern's core — worse than the problem it fixes.
+// Simply doubling the budget instead shrinks deviation everywhere, center included, with no new
+// edge case, and verified out to ~0.15-0.18 units worst-case across every scenario tried (default,
+// max-tightness corner-drag on a phone, and the same on a large tablet) — safely sub-pixel even at
+// 3x device pixel ratio.
+const POINTS_PER_TURN = 128
 const REFERENCE_RADIUS = 480
 const MIN_POINTS = 120
-const MAX_POINTS = 1200
+const MAX_POINTS = 2400
 
 export function spiralSampleCount(turns: number, radius: number): number {
   'worklet'

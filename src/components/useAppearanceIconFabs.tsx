@@ -1,15 +1,15 @@
 import { ThemeAppearance } from '@rific/auto-paper'
 import React from 'react'
-import { Icon } from 'react-native-paper'
 
+import { MdIcon } from './MdIcon'
 import { PreviewOption, usePreviewOptionFabs } from './usePreviewOptionFabs'
 
 // Same icon convention as @rific/auto-paper's own AppearancePicker (its DEFAULT_ICONS) — 'monitor'
 // reads more clearly as "match my device" than a brightness glyph.
 const APPEARANCE_OPTIONS: PreviewOption<ThemeAppearance>[] = [
-  { value: 'system', label: 'System', renderIcon: ({ color, size }) => <Icon source='monitor' size={size} color={color} /> },
-  { value: 'light', label: 'Light', renderIcon: ({ color, size }) => <Icon source='white-balance-sunny' size={size} color={color} /> },
-  { value: 'dark', label: 'Dark', renderIcon: ({ color, size }) => <Icon source='weather-night' size={size} color={color} /> }
+  { value: 'system', label: 'System', renderIcon: ({ color, size }) => <MdIcon name='monitor' size={size} color={color} /> },
+  { value: 'light', label: 'Light', renderIcon: ({ color, size }) => <MdIcon name='white-balance-sunny' size={size} color={color} /> },
+  { value: 'dark', label: 'Dark', renderIcon: ({ color, size }) => <MdIcon name='weather-night' size={size} color={color} /> }
 ]
 
 // A drop-in replacement for @rific/auto-paper's own AppearancePicker (SegmentedButtons-based, even

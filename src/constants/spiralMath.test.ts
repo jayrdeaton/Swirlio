@@ -18,7 +18,7 @@ describe('spiralSampleCount', () => {
   })
 
   it('stays within bounds that keep per-frame path building affordable', () => {
-    expect(spiralSampleCount(8.75, 4000)).toBeLessThanOrEqual(1200)
+    expect(spiralSampleCount(8.75, 4000)).toBeLessThanOrEqual(2400)
     expect(spiralSampleCount(0.4, 10)).toBeGreaterThanOrEqual(120)
   })
 

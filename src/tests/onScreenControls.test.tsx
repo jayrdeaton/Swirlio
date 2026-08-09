@@ -248,12 +248,20 @@ describe('OnScreenControls', () => {
     expect(onCycleGestureTarget).toHaveBeenCalledTimes(1)
     await pattern.unmount()
 
+    // 'mirror'/'both' are plain glyph names in GESTURE_TARGET_ICONS, but the FAB now receives them
+    // through resolveIcon (see OnScreenControls' own comment) — same render-function shape as the
+    // 'pattern' case above, so it's asserted the same way: call the icon function and check what it
+    // renders (MdIcon, with the glyph name as its own `name` prop) rather than comparing a string.
     const mirror = await renderControls({ gestureTarget: 'mirror' })
-    expect(mirror.getByTestId('fab-target').props.icon).toBe('mirror')
+    const mirrorFab = mirror.getByTestId('fab-target')
+    expect(typeof mirrorFab.props.icon).toBe('function')
+    expect(mirrorFab.props.icon({ size: 24, color: '#000000' }).props.name).toBe('mirror')
     await mirror.unmount()
 
     const both = await renderControls({ gestureTarget: 'both' })
-    expect(both.getByTestId('fab-target').props.icon).toBe('link-variant')
+    const bothFab = both.getByTestId('fab-target')
+    expect(typeof bothFab.props.icon).toBe('function')
+    expect(bothFab.props.icon({ size: 24, color: '#000000' }).props.name).toBe('link-variant')
   })
 
   // Mirroring off (mirrorLines === 0) means 'mirror'/'both' have no wedge to move — see index.tsx's

@@ -115,6 +115,21 @@ const PINCH_SCALE_TO_MIRROR_GAP_SCALE = 0.6
 // untestable-without-a-device disclaimer as ZOOM_VELOCITY_TO_SPEED_SCALE: a full, arm's-length
 // pinch spread sweeps the ripples through roughly half a lap; retune by feel on a real device.
 const PINCH_SCALE_TO_PULSE_OFFSET_SCALE = 0.5
+// A pinch targeting the pattern moves line thickness and density together with zoom (see
+// targetsPatternZoom's pinch handling further down), rather than zoom being the only thing it
+// touches — zoomSpeed's own pulse animation doesn't exist for every pattern (Spiral/Starburst have
+// no ripples to speed up at all — see their own components' props), but strokeWidth/tightness apply
+// to every pattern uniformly, so bundling all three into one pinch is what makes pinching actually
+// do something visible regardless of which pattern is showing, the same way the rotate gesture
+// already affects every pattern uniformly through the shared rotation transform. Live 1:1-tracked
+// the same way PINCH_SCALE_TO_MIRROR_GAP_SCALE drives mirrorGap — calibrated the same way too (a
+// full, arm's-length pinch spread sweeps close to the whole MIN..MAX range of each), just against
+// each property's own range: (MAX_STROKE_WIDTH - MIN_STROKE_WIDTH) and
+// (MAX_TIGHTNESS - MIN_TIGHTNESS) respectively, divided by 1.5 (scale ~2.5 at full spread, so
+// event.scale - 1 tops out around 1.5). Same untestable-without-a-device disclaimer as every other
+// pinch-derived scale above.
+const PINCH_SCALE_TO_STROKE_WIDTH_SCALE = (MAX_STROKE_WIDTH - MIN_STROKE_WIDTH) / 1.5
+const PINCH_SCALE_TO_TIGHTNESS_SCALE = (MAX_TIGHTNESS - MIN_TIGHTNESS) / 1.5
 // Caps how far audio-reactive mode itself is willing to push holeRadius — deliberately short of
 // MAX_HOLE_RADIUS (1, a fully-hollowed-out ring with no solid center left at all). At full loudness
 // the pattern should read as "the middle is punching through," not "there's nothing left but an
@@ -450,6 +465,12 @@ export default function SwirlScreen() {
   // an absolute offset from wherever the gesture began, rather than an accumulating per-frame delta,
   // which would double-count movement the fingers already made earlier in the same gesture.
   const startMirrorGap = useSharedValue(0)
+  // Captured at pinch-start the same way startMirrorGap is, just for the two properties a
+  // pattern-targeting pinch drives alongside zoom — see PINCH_SCALE_TO_STROKE_WIDTH_SCALE/
+  // PINCH_SCALE_TO_TIGHTNESS_SCALE's own comment for why line thickness and density move together
+  // with zoom in the first place.
+  const startStrokeWidth = useSharedValue(0)
+  const startTightness = useSharedValue(0)
   // Zoom direction only — rotation direction is handled entirely within the rotation effect below,
   // it doesn't need a shared value since nothing reads it inside a pattern's own render/worklet code.
   // effectiveZoomSpeed is never negative in audio-reactive mode (mid maps onto 0..MAX_ZOOM_SPEED, no
@@ -845,6 +866,8 @@ export default function SwirlScreen() {
     .onStart(() => {
       startMirrorGap.value = mirrorGap.value
       startPulseOffset.value = manualPulseOffset.value
+      startStrokeWidth.value = strokeWidth.value
+      startTightness.value = tightness.value
       runOnJS(hideControls)()
     })
     .onUpdate((event) => {
@@ -864,8 +887,17 @@ export default function SwirlScreen() {
       // reversed.value sign flip keeps "spread = grow, pinch = shrink" true regardless of which way
       // the pattern already happens to be zooming — without it, this would visually run backwards
       // whenever zoomSpeed is currently negative, which is an ordinary state, not an edge case.
+      // strokeWidth/tightness ride along live too, the same direct way mirrorGap does above — see
+      // PINCH_SCALE_TO_STROKE_WIDTH_SCALE/PINCH_SCALE_TO_TIGHTNESS_SCALE's own comment for why: unlike
+      // pulse (bipolar via zoomSpeed's own sign), these two are plain unsigned magnitudes with no
+      // "reversed" concept of their own, so spreading always grows them and pinching always shrinks
+      // them, no sign flip needed.
       if (targetsPatternZoom) {
         manualPulseOffset.value = startPulseOffset.value + (reversed.value ? -1 : 1) * (event.scale - 1) * PINCH_SCALE_TO_PULSE_OFFSET_SCALE
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        strokeWidth.value = clamp(startStrokeWidth.value + (event.scale - 1) * PINCH_SCALE_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        tightness.value = clamp(startTightness.value + (event.scale - 1) * PINCH_SCALE_TO_TIGHTNESS_SCALE, MIN_TIGHTNESS, MAX_TIGHTNESS)
       }
     })
     .onEnd((event) => {
@@ -888,6 +920,18 @@ export default function SwirlScreen() {
         // means the ripples grow outward.
         const nextZoomSpeed = clamp(event.velocity * ZOOM_VELOCITY_TO_SPEED_SCALE, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED)
         runOnJS(setZoomSpeed)(nextZoomSpeed)
+        // Recomputed from event.scale rather than trusting strokeWidth.value/tightness.value already
+        // landed here from the last onUpdate — same "onEnd's own event is authoritative" reasoning as
+        // mirrorGap's own commit below, and the same dual-write (SharedValue and setting agree
+        // immediately) shape too.
+        const nextStrokeWidth = clamp(startStrokeWidth.value + (event.scale - 1) * PINCH_SCALE_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        strokeWidth.value = nextStrokeWidth
+        runOnJS(setStrokeWidth)(nextStrokeWidth)
+        const nextTightness = clamp(startTightness.value + (event.scale - 1) * PINCH_SCALE_TO_TIGHTNESS_SCALE, MIN_TIGHTNESS, MAX_TIGHTNESS)
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        tightness.value = nextTightness
+        runOnJS(setTightness)(nextTightness)
       }
       if (targetsMirrorPinch) {
         // Recomputed from event.scale with the same formula as onUpdate above, rather than trusting

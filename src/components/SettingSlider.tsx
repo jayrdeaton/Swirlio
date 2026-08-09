@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react'
 import { LayoutChangeEvent, Platform, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import { Icon, Text, useTheme } from 'react-native-paper'
+import { Text, useTheme } from 'react-native-paper'
 import Animated, { SharedValue, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated'
 
 import { contrastColor, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
 import { positionToValue, valueToProgress } from '@/constants/sliderMath'
 import { useSwirlSettings } from '@/hooks/useSwirlSettings'
+
+import { MdIcon } from './MdIcon'
 
 // Deliberately tighter than the epicenter's own snap-back spring (useEpicenter.ts's SPRING is
 // 18/140) — that one is settling a large, freely-thrown drag, so a slow float reads as physical.
@@ -192,7 +194,7 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
           color, so the border now always matches what's drawn on top of it, not just what happens to
           be legible against the icon by coincidence. */}
           <Animated.View testID='setting-slider-thumb' style={[styles.thumb, styles.thumbBorder, { backgroundColor: colors.primary, borderColor: contrastColor(colors.primary) }, thumbAnimatedStyle]}>
-            {icon ? <Icon source={icon} size={THUMB_ICON_SIZE} color={contrastColor(colors.primary)} /> : null}
+            {icon ? <MdIcon name={icon} size={THUMB_ICON_SIZE} color={contrastColor(colors.primary)} /> : null}
           </Animated.View>
         </View>
       </GestureDetector>

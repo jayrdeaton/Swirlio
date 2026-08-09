@@ -16,11 +16,26 @@ jest.mock('react-native-paper', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
   return {
-    Icon: ({ source }: any) => <RN.Text testID='thumb-icon'>{source}</RN.Text>,
     // A real pass-through (not the usual `() => null`) so the showLabels tests below can assert on
     // rendered text — nothing else in this file inspects Text output, so this is safe to widen.
     Text: ({ children, ...props }: any) => <RN.Text {...props}>{children}</RN.Text>,
     useTheme: () => ({ colors: { onSurfaceVariant: '#49454f', outlineVariant: '#cac4d0', primary: '#6750a4', surfaceVariant: '#e7e0ec' } })
+  }
+})
+
+// SettingSlider's thumb no longer renders its icon through react-native-paper's Icon (which pairs a
+// glyph with a lineHeight that's been confirmed, on a real device, to render it off-center — see
+// MdIcon's own comment) — it renders MaterialCommunityIcons directly via MdIcon instead. The global
+// '@expo/vector-icons' mock in jest.setup.ts covers the bare package specifier (used by
+// react-native-paper's own icon renderer elsewhere), but MdIcon imports the MaterialCommunityIcons
+// subpath directly, and that mock only echoes back `children` — MdIcon never passes any, so it'd
+// render nothing to assert against. This local, more specific mock stands in for it here instead.
+jest.mock('@expo/vector-icons/MaterialCommunityIcons', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const RN = require('react-native')
+  return {
+    __esModule: true,
+    default: ({ name }: any) => <RN.Text testID='thumb-icon'>{name}</RN.Text>
   }
 })
 

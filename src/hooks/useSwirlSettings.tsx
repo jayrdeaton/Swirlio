@@ -404,11 +404,20 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       // per-field validation to run since defaultSettings is already known-valid, and going through
       // each setter would also mean this drifts out of sync the moment a new field's setter gains its
       // own extra branching (e.g. the empty-list guards on colors) that a plain reset should ignore
-      // anyway. audioReactiveEnabled is carried over from whatever it already was, not reset to the
-      // default's false — it's a live "is the mic actually feeding this" state tied to a mic the user
-      // just granted/plugged in for the session, not a look/tuning preference like everything else
-      // this button touches, so a flat reset shouldn't silently cut it off mid-use.
-      resetSettings: () => setSettings((prev) => ({ ...defaultSettings, audioReactiveEnabled: prev.audioReactiveEnabled }))
+      // anyway. audioReactiveEnabled, shakeEnabled, and tiltEnabled are all carried over from whatever
+      // they already were, not reset to their defaults — they're device-capability toggles (is the mic
+      // feeding this, does a shake randomize, does tilting the device warp it), not look/tuning
+      // preferences like everything else this button touches. audioReactiveEnabled is live session
+      // state tied to a mic the user just granted; shakeEnabled/tiltEnabled are explicit opt-outs the
+      // user made — either way, a flat reset shouldn't silently switch them back on/off underneath
+      // someone.
+      resetSettings: () =>
+        setSettings((prev) => ({
+          ...defaultSettings,
+          audioReactiveEnabled: prev.audioReactiveEnabled,
+          shakeEnabled: prev.shakeEnabled,
+          tiltEnabled: prev.tiltEnabled
+        }))
     }),
     [settings]
   )

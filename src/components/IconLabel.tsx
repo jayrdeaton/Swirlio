@@ -1,6 +1,8 @@
 import React from 'react'
 import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native'
-import { Icon, Text, useTheme } from 'react-native-paper'
+import { Text, useTheme } from 'react-native-paper'
+
+import { MdIcon } from './MdIcon'
 
 const LABEL_ICON_SIZE = 16
 
@@ -11,7 +13,7 @@ export function IconLabel({ icon, variant, style, children }: { icon: string; va
   const { colors } = useTheme()
   return (
     <View style={[styles.row, style]}>
-      <Icon source={icon} size={LABEL_ICON_SIZE} color={colors.onSurfaceVariant} />
+      <MdIcon name={icon} size={LABEL_ICON_SIZE} color={colors.onSurfaceVariant} />
       <Text variant={variant}>{children}</Text>
     </View>
   )
