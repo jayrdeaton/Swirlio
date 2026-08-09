@@ -1,13 +1,12 @@
-import React from 'react'
-import Animated, { SharedValue, useAnimatedProps } from 'react-native-reanimated'
-import { Circle } from 'react-native-svg'
+import { Skia } from '@shopify/react-native-skia'
+import { ReactNode } from 'react'
+import { SharedValue, useDerivedValue } from 'react-native-reanimated'
 
+import { PatternGeometry } from '@/components/Spiral'
 import { MAX_RADIUS_TO_REFERENCE_RATIO, RIPPLE_BASE_COUNT, RIPPLE_OFFSCREEN_COUNT, rippleModulus, rippleProgress, rippleSpacing } from '@/constants/rippleMath'
-import { dashArrayFor, DashStyle } from '@/constants/strokeDash'
+import { DashStyle, skiaDashIntervalsFor } from '@/constants/strokeDash'
 import { fitStrokeToSpacing } from '@/constants/strokeFit'
 import { MAX_TIGHTNESS } from '@/hooks/useSwirlSettings'
-
-const AnimatedCircle = Animated.createAnimatedComponent(Circle)
 
 // Sized for the tightest setting (ceil(RIPPLE_BASE_COUNT * MAX_TIGHTNESS) + RIPPLE_OFFSCREEN_COUNT)
 // — that's the most ripple-widths rippleModulus's wrap ever spans. At looser settings, the spares
@@ -25,69 +24,53 @@ type RingsPatternProps = {
   pulse: SharedValue<number>
   tightness: SharedValue<number>
   reversed: SharedValue<boolean>
-  foreground: string
   strokeWidth: SharedValue<number>
   dashStyle: SharedValue<DashStyle>
   // See useSwirlSettings' fixedSpacing field. referenceRadius is only read when it's on.
   fixedSpacing: boolean
   referenceRadius: number
+  // See PatternGeometry's own comment in Spiral.tsx — called once with this pattern's geometry
+  // instead of this component rendering shapes itself, so every kaleidoscope copy (Spiral's own
+  // renderCopies) can reuse the exact same computed path/width/intervals.
+  children: (geometry: PatternGeometry) => ReactNode
 }
 
-type RingProps = {
-  radius: SharedValue<number>
-  pulse: SharedValue<number>
-  tightness: SharedValue<number>
-  reversed: SharedValue<boolean>
-  foreground: string
-  strokeWidth: SharedValue<number>
-  dashStyle: SharedValue<DashStyle>
-  index: number
-  fixedSpacing: boolean
-  referenceRadius: number
-}
-
-function Ring({ radius, pulse, tightness, reversed, foreground, strokeWidth, dashStyle, index, fixedSpacing, referenceRadius }: RingProps) {
-  const animatedProps = useAnimatedProps(() => {
+// Fade-near-the-edge is no longer per-ripple opacity here — it's a single circular crop clip applied
+// once, over whichever pattern is active, up in Spiral.tsx. That's what lets it work uniformly across
+// every pattern, including Spiral/Starburst which aren't ripple-based at all and have no per-instance
+// value this component's old opacity approach could have hooked into.
+export function RingsPattern({ radius, pulse, tightness, reversed, strokeWidth, dashStyle, fixedSpacing, referenceRadius, children }: RingsPatternProps) {
+  const poolSize = fixedSpacing ? FIXED_SPACING_RING_POOL : RING_POOL
+  // Every ring in the pool merged into one Path (its own circular contour per ring, via repeated
+  // addCircle) rather than each ring staying its own native <Circle> — a single merged path is what
+  // lets every kaleidoscope copy share this same computed geometry (see PatternGeometry's own
+  // comment) instead of each of up to 12 copies re-running this same pool's math independently. Loses
+  // Skia's own dedicated-circle fast path, but at up to ~500 elements' worth of duplicated pool math
+  // across copies, not recomputing it 12 times over dominates.
+  const path = useDerivedValue(() => {
     const spacing = rippleSpacing(RIPPLE_BASE_COUNT, tightness.value)
     const modulus = rippleModulus(spacing, fixedSpacing ? MAX_RADIUS_TO_REFERENCE_RATIO : 1)
     // pulse's own lap duration (index.tsx) is scaled by this same modulus, so this still reaches
     // progress 1 — the visible radius — in the same wall-clock time regardless of tightness; only
     // the off-screen room beyond it grows or shrinks.
     const activePulse = pulse.value * modulus
-    // Negating pulse runs the same wrap-at-the-edge math backwards, so ripples shrink toward the
-    // epicenter instead of growing out of it — rippleProgress's own negative-input guard already
-    // handles the wrap, so no other math here needs to change.
-    const progress = rippleProgress(reversed.value ? -activePulse : activePulse, index, spacing, modulus)
-    // fixedSpacing anchors ring radius to the fixed referenceRadius instead of the live one, so
-    // consecutive rings stay `spacing * referenceRadius` pixels apart everywhere the epicentre goes,
-    // rather than spreading out as radius grows near a corner.
     const effectiveRadius = fixedSpacing ? referenceRadius : radius.value
-    const width = fitStrokeToSpacing(strokeWidth.value, spacing * effectiveRadius)
-
-    return {
-      r: progress * effectiveRadius,
-      strokeWidth: width,
-      strokeDasharray: dashArrayFor(dashStyle.value, width)
+    const builder = Skia.PathBuilder.Make()
+    for (let i = 0; i < poolSize; i++) {
+      // Negating pulse runs the same wrap-at-the-edge math backwards, so ripples shrink toward the
+      // epicenter instead of growing out of it — rippleProgress's own negative-input guard already
+      // handles the wrap, so no other math here needs to change.
+      const progress = rippleProgress(reversed.value ? -activePulse : activePulse, i, spacing, modulus)
+      builder.addCircle(0, 0, progress * effectiveRadius)
     }
+    return builder.detach()
   })
+  const width = useDerivedValue(() => {
+    const spacing = rippleSpacing(RIPPLE_BASE_COUNT, tightness.value)
+    const effectiveRadius = fixedSpacing ? referenceRadius : radius.value
+    return fitStrokeToSpacing(strokeWidth.value, spacing * effectiveRadius)
+  })
+  const intervals = useDerivedValue(() => skiaDashIntervalsFor(dashStyle.value, width.value))
 
-  // strokeLinecap has no effect on a solid stroke here — a circle is a closed loop with no open
-  // ends to cap — but a dashed one needs it: a near-zero-length dash with the default butt cap
-  // renders as essentially nothing, and round is what turns it into a visible dot.
-  return <AnimatedCircle cx={0} cy={0} animatedProps={animatedProps} stroke={foreground} fill='none' strokeLinecap='round' />
-}
-
-// Fade-near-the-edge is no longer per-ripple opacity here — it's a single radial-gradient mask
-// applied once, over whichever pattern is active, up in Spiral.tsx. That's what lets it work
-// uniformly across every pattern, including Spiral/Starburst which aren't ripple-based at all and
-// have no per-instance value this component's old opacity approach could have hooked into.
-export function RingsPattern({ radius, pulse, tightness, reversed, foreground, strokeWidth, dashStyle, fixedSpacing, referenceRadius }: RingsPatternProps) {
-  const poolSize = fixedSpacing ? FIXED_SPACING_RING_POOL : RING_POOL
-  return (
-    <>
-      {Array.from({ length: poolSize }, (_, i) => (
-        <Ring key={i} radius={radius} pulse={pulse} tightness={tightness} reversed={reversed} foreground={foreground} strokeWidth={strokeWidth} dashStyle={dashStyle} index={i} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius} />
-      ))}
-    </>
-  )
+  return children({ path, width, intervals })
 }

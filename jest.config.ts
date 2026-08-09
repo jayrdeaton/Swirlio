@@ -2,6 +2,7 @@ const config = {
   preset: 'jest-expo',
   setupFilesAfterEnv: ['./jest.setup.ts', './node_modules/react-native-gesture-handler/jestSetup.js'],
   transformIgnorePatterns: [],
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/worktrees/'],
   moduleNameMapper: {
     '^@/app/(.*)$': '<rootDir>/src/app/$1',
     '^@/components/(.*)$': '<rootDir>/src/components/$1',

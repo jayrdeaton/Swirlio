@@ -10,10 +10,10 @@ import SwirlScreen from '@/app/index'
 import { MAX_MIRROR_LINES, wedgeVector } from '@/constants/kaleidoscope'
 import { PatternType } from '@/constants/patterns'
 import { useControlGroupSheetDrawer } from '@/hooks/controlGroups'
-import { useRegisterRotationReset } from '@/hooks/rotationReset'
+import { useRegisterSwirlReset } from '@/hooks/swirlReset'
 import { useAudioReactive } from '@/hooks/useAudioReactive'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
-import { useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { MAX_MIRROR_GAP, MAX_STROKE_WIDTH, MIN_STROKE_WIDTH, useSwirlSettings } from '@/hooks/useSwirlSettings'
 import { useTiltWarp } from '@/hooks/useTiltWarp'
 
 const mockSpiralSpy = jest.fn()
@@ -28,20 +28,21 @@ const gestureTestUtils = (gestureHandlerModule as typeof gestureHandlerModule & 
 // passthrough mock to hand back — stepping it in a test means grabbing the registered callback
 // directly and invoking it with a fabricated FrameInfo, the same way gesture handlers are driven via
 // __handlers.
-type FrameCallbackHandle = { callback: (frameInfo: { timestamp: number; timeSincePreviousFrame: number | null; timeSinceFirstFrame: number }) => void; isActive: boolean; callbackId: number }
+type FrameCallbackHandle = { callback: (frameInfo: { timestamp: number; timeSincePreviousFrame: number | null; timeSinceFirstFrame: number }) => void }
 const frameCallbackTestUtils = (reanimatedModule as typeof reanimatedModule & { __frameCallbackTestUtils: unknown }).__frameCallbackTestUtils as {
   getLastFrameCallback: () => FrameCallbackHandle | null
   getFrameCallbacks: () => FrameCallbackHandle[]
   reset: () => void
 }
 
-// useEpicenter now drives two independent drag points (mirror anchor, then pattern epicentre — see
-// useDragPointPhysics), each registering its own frame callback for bounce physics, in that order.
-// mirror registers first because patternClamp's own worklet closure needs mirror's SharedValues to
-// already exist the moment it's defined, not just by the time it's actually called — see
-// useEpicenter.ts's own comment on why worklet closures can't rely on the usual lazy-resolution most
-// JS closures get. Every test in this file exercises the default 'pattern' gestureTarget, so the
-// pattern's own callback — registered second — is the one actually driven by a drag/bounce.
+// useEpicenter drives two independent drag points (mirror anchor, then
+// pattern epicentre — see useDragPointPhysics), each registering its own frame callback for bounce
+// physics, in that order. mirror registers first because patternClamp's own worklet closure needs
+// mirror's SharedValues to already exist the moment it's defined, not just by the time it's actually
+// called — see useEpicenter.ts's own comment on why worklet closures can't rely on the usual
+// lazy-resolution most JS closures get. Every test in this file exercises the default 'pattern'
+// gestureTarget, so the pattern's own callback — registered second, index 1 — is the one actually
+// driven by a drag/bounce.
 function patternFrameCallback() {
   return frameCallbackTestUtils.getFrameCallbacks()[1] ?? null
 }
@@ -109,11 +110,11 @@ jest.mock('@/hooks/controlGroups', () => ({
   useControlGroupSheetDrawer: jest.fn()
 }))
 
-// Real @/hooks/rotationReset would need a RotationResetProvider this tree doesn't render — mocked so
-// the reset tests below can grab exactly the two functions SwirlScreen registered and call them
-// directly, the same shortcut getLastGesture takes for gesture handlers instead of a real touch.
-jest.mock('@/hooks/rotationReset', () => ({
-  useRegisterRotationReset: jest.fn()
+// Real @/hooks/swirlReset would need a SwirlResetProvider this tree doesn't render — mocked so the
+// reset tests below can grab exactly the two functions SwirlScreen registered and call them directly,
+// the same shortcut getLastGesture takes for gesture handlers instead of a real touch.
+jest.mock('@/hooks/swirlReset', () => ({
+  useRegisterSwirlReset: jest.fn()
 }))
 
 const mockedUseSwirlSettings = useSwirlSettings as jest.MockedFunction<typeof useSwirlSettings>
@@ -122,26 +123,29 @@ const mockedUseTiltWarp = useTiltWarp as jest.MockedFunction<typeof useTiltWarp>
 const mockedUseAudioReactive = useAudioReactive as jest.MockedFunction<typeof useAudioReactive>
 const mockedUseShakeToRandomize = useShakeToRandomize as jest.MockedFunction<typeof useShakeToRandomize>
 const mockedUseControlGroupSheetDrawer = useControlGroupSheetDrawer as jest.MockedFunction<typeof useControlGroupSheetDrawer>
-const mockedUseRegisterRotationReset = useRegisterRotationReset as jest.MockedFunction<typeof useRegisterRotationReset>
+const mockedUseRegisterSwirlReset = useRegisterSwirlReset as jest.MockedFunction<typeof useRegisterSwirlReset>
 
 // SwirlScreen re-registers on every render (its two reset callbacks are recreated whenever their own
 // deps change), so the *last* call is the one actually still wired up to the current SharedValues.
 function getRegisteredResets() {
-  const lastCall = mockedUseRegisterRotationReset.mock.calls[mockedUseRegisterRotationReset.mock.calls.length - 1]
+  const lastCall = mockedUseRegisterSwirlReset.mock.calls[mockedUseRegisterSwirlReset.mock.calls.length - 1]
   if (!lastCall) {
-    throw new Error('Expected useRegisterRotationReset to have been called')
+    throw new Error('Expected useRegisterSwirlReset to have been called')
   }
-  const [resetRotation, resetMirrorRotation] = lastCall
-  return { resetMirrorRotation, resetRotation }
+  const [resetPattern, resetMirror] = lastCall
+  return { resetMirror, resetPattern }
 }
 
 const setBackgroundColors = jest.fn()
+const setCropRadius = jest.fn()
+const setCropShaped = jest.fn()
 const setDashStyle = jest.fn()
-const setFadeRadius = jest.fn()
-const setFadeSoftness = jest.fn()
 const setFixedSpacing = jest.fn()
 const setForegroundColors = jest.fn()
+const setHoleRadius = jest.fn()
+const setHoleShaped = jest.fn()
 const setMirrorAlternateColors = jest.fn()
+const setMirrorGap = jest.fn()
 const setMirrorLines = jest.fn()
 const setMirrorRotationSpeed = jest.fn()
 const setPattern = jest.fn()
@@ -151,6 +155,7 @@ const setStrokeWidth = jest.fn()
 const setTightness = jest.fn()
 const setZoomSpeed = jest.fn()
 const selection = jest.fn()
+const medium = jest.fn()
 
 function getLastSpiralProps() {
   const lastCall = mockSpiralSpy.mock.calls[mockSpiralSpy.mock.calls.length - 1]
@@ -194,14 +199,17 @@ const defaultMockSettings = {
   backgroundColors: ['#000000'],
   backgroundCycleSpeed: 1,
   bounceFriction: 1,
+  cropRadius: 1,
+  cropShaped: true,
   dashStyle: 'solid' as const,
-  fadeRadius: 1,
-  fadeSoftness: 1,
   fixedSpacing: false,
   foregroundColors: ['#ffffff'],
   foregroundCycleSpeed: 1,
   gravity: 0,
+  holeRadius: 0,
+  holeShaped: true,
   mirrorAlternateColors: false,
+  mirrorGap: 0,
   mirrorLines: 0,
   mirrorRotationSpeed: 0,
   pattern: 'spiral' as PatternType,
@@ -209,7 +217,6 @@ const defaultMockSettings = {
   rotationSpeed: 1,
   shakeEnabled: true,
   showLabels: false,
-  showMirrorLines: false,
   strokeWidth: 6,
   tightness: 1,
   tiltEnabled: true,
@@ -223,14 +230,17 @@ function mockSettings(overrides: Partial<typeof defaultMockSettings> = {}) {
     setBackgroundColors,
     setBackgroundCycleSpeed: jest.fn(),
     setBounceFriction: jest.fn(),
+    setCropRadius,
+    setCropShaped,
     setDashStyle,
-    setFadeRadius,
-    setFadeSoftness,
     setFixedSpacing,
     setForegroundColors,
     setForegroundCycleSpeed: jest.fn(),
     setGravity: jest.fn(),
+    setHoleRadius,
+    setHoleShaped,
     setMirrorAlternateColors,
+    setMirrorGap,
     setMirrorLines,
     setMirrorRotationSpeed,
     setPattern,
@@ -238,11 +248,11 @@ function mockSettings(overrides: Partial<typeof defaultMockSettings> = {}) {
     setRotationSpeed,
     setShakeEnabled: jest.fn(),
     setShowLabels: jest.fn(),
-    setShowMirrorLines: jest.fn(),
     setStrokeWidth,
     setTightness,
     setTiltEnabled: jest.fn(),
-    setZoomSpeed
+    setZoomSpeed,
+    resetSettings: jest.fn()
   })
 }
 
@@ -254,7 +264,7 @@ describe('SwirlScreen gestures', () => {
 
     mockSettings()
 
-    mockedUseVibration.mockReturnValue({ medium: jest.fn(), notification: jest.fn(), selection } as any)
+    mockedUseVibration.mockReturnValue({ medium, notification: jest.fn(), selection } as any)
     mockedUseTiltWarp.mockReturnValue({ tiltX: { value: 0 } as any, tiltY: { value: 0 } as any })
     mockedUseAudioReactive.mockReturnValue({ bass: { value: 0 } as any, mid: 0, treble: 0, loudness: 0 })
     mockedUseShakeToRandomize.mockImplementation(() => undefined)
@@ -279,8 +289,8 @@ describe('SwirlScreen gestures', () => {
       rotationGesture.__handlers.update?.({ rotation: Math.PI / 2 })
     })
 
-    // ZOOM_VELOCITY_TO_SPEED_SCALE is 0.005, so 10 * 0.005 = 0.05.
-    expect(setZoomSpeed).toHaveBeenCalledWith(0.05)
+    // ZOOM_VELOCITY_TO_SPEED_SCALE is 0.6, so 10 * 0.6 = 6.
+    expect(setZoomSpeed).toHaveBeenCalledWith(6)
     const after = getLastSpiralProps()
     expect(after.rotation.value - initialRotation).toBeCloseTo(90, 5)
   })
@@ -295,7 +305,7 @@ describe('SwirlScreen gestures', () => {
       pinchGesture.__handlers.end?.({ velocity: -10 })
     })
 
-    expect(setZoomSpeed).toHaveBeenCalledWith(-0.05)
+    expect(setZoomSpeed).toHaveBeenCalledWith(-6)
   })
 
   it('clamps the velocity-derived zoomSpeed from a pinch release to MIN/MAX_ZOOM_SPEED', async () => {
@@ -308,14 +318,14 @@ describe('SwirlScreen gestures', () => {
       pinchGesture.__handlers.end?.({ velocity: 100000 })
     })
 
-    expect(setZoomSpeed).toHaveBeenCalledWith(5)
+    expect(setZoomSpeed).toHaveBeenCalledWith(10)
 
     await act(async () => {
       pinchGesture.__handlers.start?.()
       pinchGesture.__handlers.end?.({ velocity: -100000 })
     })
 
-    expect(setZoomSpeed).toHaveBeenCalledWith(-5)
+    expect(setZoomSpeed).toHaveBeenCalledWith(-10)
   })
 
   it('mirrors the persisted tightness into the shared value the patterns read', async () => {
@@ -337,16 +347,17 @@ describe('SwirlScreen gestures', () => {
     expect(getLastSpiralProps().reversed.value).toBe(true)
   })
 
-  it('mirrors the persisted fadeRadius into the shared value the zoom patterns read', async () => {
+  it('passes the persisted cropRadius straight through to Spiral', async () => {
     await renderScreen()
 
-    expect(getLastSpiralProps().fadeRadius.value).toBe(1)
+    expect(getLastSpiralProps().cropRadius.value).toBe(1)
   })
 
-  it('mirrors the persisted fadeSoftness into the shared value the zoom patterns read', async () => {
+  it('passes the persisted holeRadius straight through to Spiral', async () => {
+    mockSettings({ holeRadius: 0.4 })
     await renderScreen()
 
-    expect(getLastSpiralProps().fadeSoftness.value).toBe(1)
+    expect(getLastSpiralProps().holeRadius.value).toBe(0.4)
   })
 
   it('passes the persisted mirrorLines value straight through to Spiral', async () => {
@@ -475,10 +486,16 @@ describe('SwirlScreen gestures', () => {
       panGesture.__handlers.end?.({ velocityX: width * 2, velocityY: 0 })
     })
 
-    expect(patternFrameCallback()?.isActive).toBe(true)
     // Nothing has snapped it anywhere else — it's still exactly where the drag left it, waiting for
     // the first frame step.
     expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.3, 5)
+
+    await act(async () => {
+      stepBounce(16)
+    })
+
+    // The bounce is actually running (not idle/settled) — a frame step moves it.
+    expect(getLastSpiralProps().epicenterX.value).not.toBeCloseTo(0.3, 5)
   })
 
   it('reflects off the drag boundary instead of stopping there, carrying velocity back inward', async () => {
@@ -513,6 +530,30 @@ describe('SwirlScreen gestures', () => {
     // With zero friction the reflected velocity is unchanged in magnitude, just flipped in sign — a
     // further step should carry it back toward the boundary it just left, not away from it.
     expect(getLastSpiralProps().epicenterX.value).toBeLessThan(positionAfterBounce)
+  })
+
+  it('fires a medium haptic the moment the epicenter reflects off the boundary', async () => {
+    const { width } = Dimensions.get('window')
+    mockSettings({ bounceFriction: 0 })
+    await renderScreen()
+
+    const panGesture = gestureTestUtils.getLastGesture('Pan')
+
+    await act(async () => {
+      panGesture.__handlers.start?.()
+      panGesture.__handlers.update?.({ translationX: width * 0.3, translationY: 0 })
+      // Same overshoot as the reflection test above — comfortably past the boundary within one step.
+      panGesture.__handlers.end?.({ velocityX: width * 5, velocityY: 0 })
+    })
+
+    // Nothing has reflected yet — releasing the drag itself isn't a bounce.
+    expect(medium).not.toHaveBeenCalled()
+
+    await act(async () => {
+      stepBounce(100)
+    })
+
+    expect(medium).toHaveBeenCalledTimes(1)
   })
 
   it('reflects off the real screen edge on release even through a mirrored wedge, not the old ±MAX_OFFSET box', async () => {
@@ -565,7 +606,12 @@ describe('SwirlScreen gestures', () => {
       panGesture.__handlers.end?.({ velocityX: width * 1, velocityY: 0 })
     })
 
-    expect(patternFrameCallback()?.isActive).toBe(true)
+    const runningX = getLastSpiralProps().epicenterX.value
+    await act(async () => {
+      stepBounce(16)
+    })
+    // The bounce is actually running — a frame step moves the epicentre.
+    expect(getLastSpiralProps().epicenterX.value).not.toBe(runningX)
 
     // A single big step is a stand-in for many small ones — friction=1 decays a lot of velocity away
     // over 5 (simulated) seconds, well under the settle threshold either way.
@@ -573,7 +619,12 @@ describe('SwirlScreen gestures', () => {
       stepBounce(5000)
     })
 
-    expect(patternFrameCallback()?.isActive).toBe(false)
+    const settledX = getLastSpiralProps().epicenterX.value
+    await act(async () => {
+      stepBounce(16)
+    })
+    // Once settled, a further step is a no-op — there's nothing left to decay.
+    expect(getLastSpiralProps().epicenterX.value).toBe(settledX)
   })
 
   it('pulls the epicenter back toward center over time when gravity is on, only settling once it actually gets there', async () => {
@@ -589,22 +640,29 @@ describe('SwirlScreen gestures', () => {
       panGesture.__handlers.end?.({ velocityX: width * 1, velocityY: 0 })
     })
 
-    expect(patternFrameCallback()?.isActive).toBe(true)
+    const runningX = getLastSpiralProps().epicenterX.value
 
     // Small steps (a 16ms frame each, not one big stand-in step like the friction-only test above):
     // with gravity in the mix the epicentre oscillates around center rather than monotonically
     // slowing down, so velocity dips near zero at every swing peak — including ones still well away
     // from center — well before it's actually settled. Checking every frame catches a stop-condition
     // that (as it once did) fires on a low-velocity instant alone, wherever that happens to land.
+    // Once settled the callback no-ops entirely, so two consecutive frames landing on the exact same
+    // position (not just a low velocity) is what "actually stopped" looks like from the outside.
+    let previousX = runningX
+    let previousY = getLastSpiralProps().epicenterY.value
     for (let frame = 0; frame < 1000; frame++) {
       await act(async () => {
         stepBounce(16)
       })
-      if (patternFrameCallback()?.isActive === false) {
+      const { epicenterX, epicenterY } = getLastSpiralProps()
+      if (epicenterX.value === previousX && epicenterY.value === previousY) {
         // 0.05 mirrors useEpicenter's own (unexported) SNAP_DISTANCE — "near enough to call centered".
-        expect(Math.hypot(getLastSpiralProps().epicenterX.value, getLastSpiralProps().epicenterY.value)).toBeLessThan(0.05)
+        expect(Math.hypot(epicenterX.value, epicenterY.value)).toBeLessThan(0.05)
         return
       }
+      previousX = epicenterX.value
+      previousY = epicenterY.value
     }
 
     throw new Error('bounce never settled within 1000 simulated frames')
@@ -620,17 +678,28 @@ describe('SwirlScreen gestures', () => {
       panGesture.__handlers.start?.()
       panGesture.__handlers.end?.({ velocityX: width * 2, velocityY: 0 })
     })
-    expect(patternFrameCallback()?.isActive).toBe(true)
+
+    const runningX = getLastSpiralProps().epicenterX.value
+    await act(async () => {
+      stepBounce(16)
+    })
+    // The bounce is actually running — a frame step moves the epicentre.
+    expect(getLastSpiralProps().epicenterX.value).not.toBe(runningX)
 
     await act(async () => {
       panGesture.__handlers.start?.()
     })
 
-    expect(patternFrameCallback()?.isActive).toBe(false)
+    const grabbedX = getLastSpiralProps().epicenterX.value
+    await act(async () => {
+      stepBounce(16)
+    })
+    // Grabbing it again stopped the bounce dead — a further step is now a no-op.
+    expect(getLastSpiralProps().epicenterX.value).toBe(grabbedX)
   })
 
-  it('interrupts an in-progress bounce when a tap recentres the epicentre', async () => {
-    const { width, height } = Dimensions.get('window')
+  it("interrupts an in-progress bounce when the pattern's Reset button recentres the epicentre", async () => {
+    const { width } = Dimensions.get('window')
     await renderScreen()
 
     const panGesture = gestureTestUtils.getLastGesture('Pan')
@@ -640,13 +709,24 @@ describe('SwirlScreen gestures', () => {
       panGesture.__handlers.update?.({ translationX: width * 0.3, translationY: 0 })
       panGesture.__handlers.end?.({ velocityX: width * 2, velocityY: 0 })
     })
-    expect(patternFrameCallback()?.isActive).toBe(true)
+
+    const runningX = getLastSpiralProps().epicenterX.value
+    await act(async () => {
+      stepBounce(16)
+    })
+    // The bounce is actually running — a frame step moves the epicentre.
+    expect(getLastSpiralProps().epicenterX.value).not.toBe(runningX)
 
     await act(async () => {
-      singleTap().__handlers.end?.({ x: width / 2 + 0.3 * width, y: height / 2 }, true)
+      getRegisteredResets().resetPattern()
     })
 
-    expect(patternFrameCallback()?.isActive).toBe(false)
+    expect(getLastSpiralProps().epicenterX.value).toBe(0)
+
+    await act(async () => {
+      stepBounce(16)
+    })
+    // Recentring stopped the bounce too, not just the position once — a further step stays at 0.
     expect(getLastSpiralProps().epicenterX.value).toBe(0)
   })
 
@@ -733,11 +813,11 @@ describe('SwirlScreen gestures', () => {
     expect(setForegroundColors).not.toHaveBeenCalled()
   })
 
-  it('flips both rotationSpeed and zoomSpeed on a long press', async () => {
+  it('flips both rotationSpeed and zoomSpeed on a two-finger long press', async () => {
     await renderScreen()
 
     await act(async () => {
-      singleLongPress().__handlers.start?.()
+      twoFingerLongPress().__handlers.start?.()
     })
 
     // Both default to 1 in the mocked settings, so flipping negates each.
@@ -756,15 +836,26 @@ describe('SwirlScreen gestures', () => {
     expect(setForegroundColors).not.toHaveBeenCalled()
   })
 
-  it('freezes the animation on a two-finger long press', async () => {
+  it('recentres the pattern epicentre on a one-finger long press', async () => {
+    const { width } = Dimensions.get('window')
+    // Stopped, so the rotation half of the recenter is observable too — see the 'reset' describe
+    // block's own tests for why an actively-rotating pattern would otherwise leave rotation as-is.
+    mockSettings({ rotationSpeed: 0 })
     await renderScreen()
-    ;(cancelAnimation as jest.Mock).mockClear()
+
+    const panGesture = gestureTestUtils.getLastGesture('Pan')
+    await act(async () => {
+      panGesture.__handlers.start?.()
+      panGesture.__handlers.update?.({ translationX: width * 0.3, translationY: 0 })
+    })
+    expect(getLastSpiralProps().epicenterX.value).not.toBe(0)
 
     await act(async () => {
-      twoFingerLongPress().__handlers.start?.()
+      singleLongPress().__handlers.start?.()
     })
 
-    expect(cancelAnimation).toHaveBeenCalled()
+    expect(getLastSpiralProps().epicenterX.value).toBe(0)
+    expect(selection).toHaveBeenCalled()
   })
 
   it('randomizes into a fresh set of foreground colors and a single contrasting background on shake', async () => {
@@ -794,7 +885,7 @@ describe('SwirlScreen gestures', () => {
     const randomize = shakeCall[1] as () => void
 
     // 0.9 lands PATTERN_ORDER's 6 entries on the last one ('flower', which has sides) and
-    // DASH_STYLE_ORDER's 3 entries on the last one ('dashes').
+    // DASH_STYLE_ORDER's 6 entries on the last one ('doubleDash').
     const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.9)
     await act(async () => {
       randomize()
@@ -803,14 +894,14 @@ describe('SwirlScreen gestures', () => {
 
     expect(setPattern).toHaveBeenLastCalledWith('flower')
     expect(setPolygonSides).toHaveBeenCalled()
-    expect(setDashStyle).toHaveBeenLastCalledWith('dashes')
+    expect(setDashStyle).toHaveBeenLastCalledWith('doubleDash')
   })
 
-  // Broadened alongside colors/pattern/sides/dash style — mirror count, its alternating-colors
-  // toggle, fixed spacing, tightness, stroke width, and fade all get a fresh value too now (see
-  // randomize's own comment in index.tsx for what's deliberately still excluded: speed, physics feel,
-  // and behavioral/interface toggles).
-  it('also rerolls mirror count, mirror alternate colors, fixed spacing, tightness, stroke width, and fade', async () => {
+  // Broadened alongside colors/pattern/sides/dash style — mirror count, its wedge gap, its
+  // alternating-colors toggle, tightness, stroke width, crop/hole radius, and their shape toggles all
+  // get a fresh value too now (see randomize's own comment in index.tsx for what's deliberately still
+  // excluded: speed, physics feel, fixed spacing, and behavioral/interface toggles).
+  it('also rerolls mirror count, mirror gap, mirror alternate colors, tightness, stroke width, crop/hole radius, and their shape toggles', async () => {
     await renderScreen()
     const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
     const randomize = shakeCall[1] as () => void
@@ -820,12 +911,14 @@ describe('SwirlScreen gestures', () => {
     })
 
     expect(setMirrorLines).toHaveBeenCalled()
+    expect(setMirrorGap).toHaveBeenCalled()
     expect(setMirrorAlternateColors).toHaveBeenCalled()
-    expect(setFixedSpacing).toHaveBeenCalled()
     expect(setTightness).toHaveBeenCalled()
     expect(setStrokeWidth).toHaveBeenCalled()
-    expect(setFadeRadius).toHaveBeenCalled()
-    expect(setFadeSoftness).toHaveBeenCalled()
+    expect(setCropRadius).toHaveBeenCalled()
+    expect(setHoleRadius).toHaveBeenCalled()
+    expect(setCropShaped).toHaveBeenCalled()
+    expect(setHoleShaped).toHaveBeenCalled()
   })
 
   // Regression guard for the new randomized fields specifically: confirms they land within their
@@ -844,28 +937,35 @@ describe('SwirlScreen gestures', () => {
       randomSpy.mockRestore()
 
       const [mirrorLines] = setMirrorLines.mock.calls[setMirrorLines.mock.calls.length - 1]
+      const [mirrorGap] = setMirrorGap.mock.calls[setMirrorGap.mock.calls.length - 1]
       const [tightness] = setTightness.mock.calls[setTightness.mock.calls.length - 1]
       const [strokeWidth] = setStrokeWidth.mock.calls[setStrokeWidth.mock.calls.length - 1]
-      const [fadeRadius] = setFadeRadius.mock.calls[setFadeRadius.mock.calls.length - 1]
-      const [fadeSoftness] = setFadeSoftness.mock.calls[setFadeSoftness.mock.calls.length - 1]
+      const [cropRadius] = setCropRadius.mock.calls[setCropRadius.mock.calls.length - 1]
+      const [holeRadius] = setHoleRadius.mock.calls[setHoleRadius.mock.calls.length - 1]
+      const [cropShaped] = setCropShaped.mock.calls[setCropShaped.mock.calls.length - 1]
+      const [holeShaped] = setHoleShaped.mock.calls[setHoleShaped.mock.calls.length - 1]
 
       expect(mirrorLines).toBeGreaterThanOrEqual(0)
       expect(mirrorLines).toBeLessThanOrEqual(MAX_MIRROR_LINES)
+      expect(mirrorGap).toBeGreaterThanOrEqual(0)
+      expect(mirrorGap).toBeLessThanOrEqual(0.9)
       expect(tightness).toBeGreaterThanOrEqual(0.4)
       expect(tightness).toBeLessThanOrEqual(2.5)
-      expect(strokeWidth).toBeGreaterThanOrEqual(1)
-      expect(strokeWidth).toBeLessThanOrEqual(30)
-      expect(fadeRadius).toBeGreaterThanOrEqual(0.05)
-      expect(fadeRadius).toBeLessThanOrEqual(1)
-      expect(fadeSoftness).toBeGreaterThanOrEqual(0)
-      expect(fadeSoftness).toBeLessThanOrEqual(1)
+      expect(strokeWidth).toBeGreaterThanOrEqual(MIN_STROKE_WIDTH)
+      expect(strokeWidth).toBeLessThanOrEqual(MAX_STROKE_WIDTH)
+      expect(cropRadius).toBeGreaterThanOrEqual(0.05)
+      expect(cropRadius).toBeLessThanOrEqual(1)
+      expect(holeRadius).toBeGreaterThanOrEqual(0)
+      expect(holeRadius).toBeLessThanOrEqual(1)
+      expect(typeof cropShaped).toBe('boolean')
+      expect(typeof holeShaped).toBe('boolean')
     }
   })
 
-  // Explicitly NOT touched by randomize — deliberate tuning (speed), gesture-feel physics, and
-  // behavioral/interface toggles, not "what does this look like" surprises. See randomize's own
-  // comment in index.tsx for the full reasoning.
-  it('leaves speed, physics feel, and behavioral/interface toggles untouched', async () => {
+  // Explicitly NOT touched by randomize — deliberate tuning (speed), gesture-feel physics, fixed
+  // spacing (a layout-precision preference), and behavioral/interface toggles, not "what does this
+  // look like" surprises. See randomize's own comment in index.tsx for the full reasoning.
+  it('leaves speed, physics feel, fixed spacing, and behavioral/interface toggles untouched', async () => {
     await renderScreen()
     const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
     const randomize = shakeCall[1] as () => void
@@ -877,6 +977,43 @@ describe('SwirlScreen gestures', () => {
     expect(setRotationSpeed).not.toHaveBeenCalled()
     expect(setZoomSpeed).not.toHaveBeenCalled()
     expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
+    expect(setFixedSpacing).not.toHaveBeenCalled()
+  })
+
+  // mirrorGap, tightness, strokeWidth, cropRadius, holeRadius, and polygonSides are each already
+  // live-overridden by an audio band while audio-reactive mode is on (see effectiveTightness and
+  // friends in index.tsx) — rerolling any of them here would be invisible until mic mode is switched
+  // back off, so randomize skips them entirely rather than spending a reroll on a no-op.
+  it('skips settings already driven by audio-reactive mode when randomizing', async () => {
+    mockSettings({ audioReactiveEnabled: true })
+    await renderScreen()
+    const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
+    const randomize = shakeCall[1] as () => void
+
+    // 0.9 lands PATTERN_ORDER's last entry ('flower', which has sides) — pinning the pattern draw is
+    // what makes the setPolygonSides assertion below a real proof of audio-reactive suppression,
+    // rather than a coincidence of whichever pattern happened to get picked.
+    const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.9)
+    await act(async () => {
+      randomize()
+    })
+    randomSpy.mockRestore()
+
+    expect(setMirrorGap).not.toHaveBeenCalled()
+    expect(setTightness).not.toHaveBeenCalled()
+    expect(setStrokeWidth).not.toHaveBeenCalled()
+    expect(setCropRadius).not.toHaveBeenCalled()
+    expect(setHoleRadius).not.toHaveBeenCalled()
+    expect(setPolygonSides).not.toHaveBeenCalled()
+
+    // Still rerolls everything else, including the pattern itself (only its side count is skipped).
+    expect(setForegroundColors).toHaveBeenCalled()
+    expect(setPattern).toHaveBeenLastCalledWith('flower')
+    expect(setDashStyle).toHaveBeenCalled()
+    expect(setMirrorLines).toHaveBeenCalled()
+    expect(setMirrorAlternateColors).toHaveBeenCalled()
+    expect(setCropShaped).toHaveBeenCalled()
+    expect(setHoleShaped).toHaveBeenCalled()
   })
 
   it("doesn't reroll the side count for a pattern that doesn't have one", async () => {
@@ -988,21 +1125,21 @@ describe('SwirlScreen gestures', () => {
       expect(setPattern).toHaveBeenCalledWith('rings')
     })
 
-    it('hides on a two-finger long press, alongside freezing', async () => {
+    it('hides on a one-finger long press, alongside recentring', async () => {
       await renderScreen()
 
       await act(async () => {
-        twoFingerLongPress().__handlers.start?.()
+        singleLongPress().__handlers.start?.()
       })
 
       expect(getLastControlsProps().visible).toBe(false)
     })
 
-    it('hides when the direction is flipped via long press', async () => {
+    it('hides when the direction is flipped via a two-finger long press', async () => {
       await renderScreen()
 
       await act(async () => {
-        singleLongPress().__handlers.start?.()
+        twoFingerLongPress().__handlers.start?.()
       })
 
       expect(getLastControlsProps().visible).toBe(false)
@@ -1151,229 +1288,6 @@ describe('SwirlScreen gestures', () => {
     })
   })
 
-  describe('tap-to-recenter', () => {
-    beforeEach(() => {
-      jest.useFakeTimers()
-    })
-
-    afterEach(() => {
-      jest.useRealTimers()
-    })
-
-    it('recenters instead of swapping colors when a tap lands near an off-center epicentre', async () => {
-      const { width, height } = Dimensions.get('window')
-      await renderScreen()
-
-      // Dragging force-hides the controls as a side effect, so the tap below is free to recenter or
-      // swap colors rather than just dismissing them.
-      const panGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        panGesture.__handlers.start?.()
-        panGesture.__handlers.update?.({ translationX: width * 0.2, translationY: 0 })
-      })
-      // Only X moved — Y stays at its untouched, still-centred screen position.
-      const epicenterScreenX = width / 2 + 0.2 * width
-      const epicenterScreenY = height / 2
-
-      await act(async () => {
-        singleTap().__handlers.end?.({ x: epicenterScreenX, y: epicenterScreenY }, true)
-      })
-
-      expect(getLastSpiralProps().epicenterX.value).toBe(0)
-      expect(setForegroundColors).not.toHaveBeenCalled()
-    })
-
-    // Regression: the recenter check used to run AFTER the "controls visible → just dismiss them"
-    // branch, so a tap aimed squarely at an off-center epicentre did nothing but dismiss the controls
-    // whenever they happened to be up (e.g. right after adjusting a slider) — the recenter only landed
-    // on a second, separate tap. Recentring is a corrective tap on a specific target, not something
-    // that risks "accidentally changing the art" the way a colour swap does, so it shouldn't have to
-    // wait for a dismiss-only tap first.
-    it('recenters on the very first tap even while the on-screen controls are still visible', async () => {
-      const { width, height } = Dimensions.get('window')
-      const { getByTestId } = await renderScreen()
-
-      const panGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        panGesture.__handlers.start?.()
-        panGesture.__handlers.update?.({ translationX: width * 0.2, translationY: 0 })
-      })
-      const epicenterScreenX = width / 2 + 0.2 * width
-      const epicenterScreenY = height / 2
-
-      // Bring the controls back up (e.g. via an edge hover) before recentring — dragging above already
-      // hid them, but that's incidental to what's under test here.
-      await act(async () => {
-        fireEvent(getByTestId('edge-reveal-left'), 'pressIn')
-      })
-      expect(getLastControlsProps().visible).toBe(true)
-
-      await act(async () => {
-        singleTap().__handlers.end?.({ x: epicenterScreenX, y: epicenterScreenY }, true)
-      })
-
-      expect(getLastSpiralProps().epicenterX.value).toBe(0)
-      expect(setForegroundColors).not.toHaveBeenCalled()
-    })
-
-    it('swaps colors on a tap far from an off-center epicentre, instead of recentering', async () => {
-      const { width } = Dimensions.get('window')
-      await renderScreen()
-
-      const panGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        panGesture.__handlers.start?.()
-        panGesture.__handlers.update?.({ translationX: width * 0.4, translationY: 0 })
-      })
-
-      // Tapping at the origin (x=0,y=0) is nowhere near where the epicentre was dragged to.
-      await act(async () => {
-        singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
-      })
-
-      expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.4, 5)
-      expect(setForegroundColors).toHaveBeenCalled()
-    })
-
-    it('swaps colors on a tap near a centered epicentre rather than treating it as a recenter', async () => {
-      await renderScreen()
-
-      // First tap dismisses the initially-visible controls; the epicentre is still centred (never
-      // dragged), so the second tap has nothing off-center to recenter and just swaps colors.
-      await act(async () => {
-        singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
-      })
-
-      await act(async () => {
-        singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
-      })
-
-      expect(setForegroundColors).toHaveBeenCalled()
-    })
-
-    // While paused, a recentering tap also reorients — snapping rotation back to 0 on top of the
-    // position, the same pairing resetSwirl's own long-press already does for both at once. Frozen
-    // only: mid-animation this would be an unrequested rotation snap tacked onto a plain positional
-    // correction (see the next test).
-    it('while paused, a recentering tap on the pattern epicentre also resets pattern rotation', async () => {
-      const { width, height } = Dimensions.get('window')
-      await renderScreen()
-
-      const panGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        panGesture.__handlers.start?.()
-        panGesture.__handlers.update?.({ translationX: width * 0.2, translationY: 0 })
-      })
-      const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
-      await act(async () => {
-        rotationGesture.__handlers.start?.()
-        rotationGesture.__handlers.update?.({ rotation: Math.PI / 2 })
-      })
-      expect(getLastSpiralProps().rotation.value).not.toBe(0)
-
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-
-      const epicenterScreenX = width / 2 + 0.2 * width
-      const epicenterScreenY = height / 2
-      await act(async () => {
-        singleTap().__handlers.end?.({ x: epicenterScreenX, y: epicenterScreenY }, true)
-      })
-
-      expect(getLastSpiralProps().epicenterX.value).toBe(0)
-      expect(getLastSpiralProps().rotation.value).toBe(0)
-    })
-
-    it('while playing (not paused), a recentering tap on the pattern epicentre leaves rotation untouched', async () => {
-      const { width, height } = Dimensions.get('window')
-      await renderScreen()
-
-      const panGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        panGesture.__handlers.start?.()
-        panGesture.__handlers.update?.({ translationX: width * 0.2, translationY: 0 })
-      })
-      const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
-      await act(async () => {
-        rotationGesture.__handlers.start?.()
-        rotationGesture.__handlers.update?.({ rotation: Math.PI / 2 })
-      })
-      const rotationBeforeTap = getLastSpiralProps().rotation.value
-      expect(rotationBeforeTap).not.toBe(0)
-
-      const epicenterScreenX = width / 2 + 0.2 * width
-      const epicenterScreenY = height / 2
-      await act(async () => {
-        singleTap().__handlers.end?.({ x: epicenterScreenX, y: epicenterScreenY }, true)
-      })
-
-      expect(getLastSpiralProps().epicenterX.value).toBe(0)
-      expect(getLastSpiralProps().rotation.value).toBe(rotationBeforeTap)
-    })
-
-    it('recenters the mirror anchor on a tap that lands near it, leaving the pattern epicentre untouched', async () => {
-      const { width, height } = Dimensions.get('window')
-      mockSettings({ mirrorLines: 4 })
-      await renderScreen()
-
-      await act(async () => {
-        getLastControlsProps().onCycleGestureTarget() // pattern -> mirror
-      })
-      const panGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        // Straight out along the positive x-axis from center is always wedge 0 — mirrorLines > 0
-        // here means onStart needs a real touch point to hit-test against (see the identical comment
-        // on the gestureTarget mode drag test above).
-        panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
-        panGesture.__handlers.update?.({ translationX: width * 0.2, translationY: 0 })
-      })
-      expect(getLastSpiralProps().mirrorAnchorX.value).toBeCloseTo(0.2, 5)
-
-      const mirrorScreenX = width / 2 + 0.2 * width
-      const mirrorScreenY = height / 2
-      await act(async () => {
-        singleTap().__handlers.end?.({ x: mirrorScreenX, y: mirrorScreenY }, true)
-      })
-
-      expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
-      expect(getLastSpiralProps().epicenterX.value).toBe(0)
-      expect(setForegroundColors).not.toHaveBeenCalled()
-    })
-
-    it('while paused, a recentering tap on the mirror anchor also resets mirror rotation', async () => {
-      const { width, height } = Dimensions.get('window')
-      mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 2 })
-      await renderScreen()
-
-      await act(async () => {
-        getLastControlsProps().onCycleGestureTarget() // pattern -> mirror
-      })
-      const panGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
-        panGesture.__handlers.update?.({ translationX: width * 0.2, translationY: 0 })
-      })
-
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-
-      const mirrorScreenX = width / 2 + 0.2 * width
-      const mirrorScreenY = height / 2
-      await act(async () => {
-        singleTap().__handlers.end?.({ x: mirrorScreenX, y: mirrorScreenY }, true)
-      })
-
-      // Doesn't establish a nonzero mirrorRotation beforehand — the mocked animation starts at 0 and
-      // only advances via real frame ticks, which this harness doesn't drive here (see the "rotation
-      // reset" describe block's own tests for the same constraint). What this pins down is that the
-      // reset path is actually wired through from a frozen mirror-anchor tap at all.
-      expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
-      expect(getLastSpiralProps().mirrorRotation.value).toBe(0)
-    })
-  })
-
   describe('rotation', () => {
     it("sets rotationSpeed from the rotate gesture's release velocity on end", async () => {
       await renderScreen()
@@ -1385,8 +1299,8 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.end?.({ velocity: 10 })
       })
 
-      // ROTATION_VELOCITY_TO_SPEED_SCALE is 0.3, so 10 * 0.3 = 3, within [MIN_ROTATION_SPEED, MAX_ROTATION_SPEED].
-      expect(setRotationSpeed).toHaveBeenCalledWith(3)
+      // ROTATION_VELOCITY_TO_SPEED_SCALE is 0.8, so 10 * 0.8 = 8, within [MIN_ROTATION_SPEED, MAX_ROTATION_SPEED].
+      expect(setRotationSpeed).toHaveBeenCalledWith(8)
     })
 
     it('carries the sign of the release velocity through to rotationSpeed — twisting the other way reverses it', async () => {
@@ -1398,7 +1312,7 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.end?.({ velocity: -10 })
       })
 
-      expect(setRotationSpeed).toHaveBeenCalledWith(-3)
+      expect(setRotationSpeed).toHaveBeenCalledWith(-8)
     })
 
     it('clamps the velocity-derived rotationSpeed to MAX_ROTATION_SPEED', async () => {
@@ -1410,7 +1324,7 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.end?.({ velocity: 1000 })
       })
 
-      expect(setRotationSpeed).toHaveBeenCalledWith(5)
+      expect(setRotationSpeed).toHaveBeenCalledWith(10)
     })
 
     it('clamps the velocity-derived rotationSpeed to MIN_ROTATION_SPEED', async () => {
@@ -1422,7 +1336,7 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.end?.({ velocity: -1000 })
       })
 
-      expect(setRotationSpeed).toHaveBeenCalledWith(-5)
+      expect(setRotationSpeed).toHaveBeenCalledWith(-10)
     })
 
     // Regression: rotationSpeed used to only apply to Rings/Star/Polygon when a separate "Rotate"
@@ -1481,41 +1395,169 @@ describe('SwirlScreen gestures', () => {
     })
   })
 
-  describe('rotation reset', () => {
-    it('registers reset functions ControlGroupSheetContent can reach through useRotationReset', async () => {
+  describe('reset', () => {
+    it('registers reset functions ControlGroupTopSheetContent can reach through useSwirlReset', async () => {
       await renderScreen()
 
-      const { resetMirrorRotation, resetRotation } = getRegisteredResets()
-      expect(typeof resetRotation).toBe('function')
-      expect(typeof resetMirrorRotation).toBe('function')
+      const { resetMirror, resetPattern } = getRegisteredResets()
+      expect(typeof resetPattern).toBe('function')
+      expect(typeof resetMirror).toBe('function')
     })
 
-    it('snaps the pattern rotation angle back to 0, undoing an in-progress twist', async () => {
-      await renderScreen()
+    // Deliberate behavior change: reset used to always snap rotation back to 0 regardless of whether
+    // the pattern was actively spinning — now it leaves an active spin running untouched, and only
+    // squares things up once rotation has actually stopped (frozen, or rotationSpeed exactly 0). See
+    // the two tests below for each half.
+    it("leaves the pattern's rotation angle exactly as it is while it's actively rotating, undoing nothing", async () => {
+      await renderScreen() // default settings: rotationSpeed 1, not frozen — actively rotating
       const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
 
       await act(async () => {
         rotationGesture.__handlers.start?.()
         rotationGesture.__handlers.update?.({ rotation: Math.PI / 2 })
       })
+      const beforeReset = getLastSpiralProps().rotation.value
+      expect(beforeReset).not.toBe(0)
+      ;(cancelAnimation as jest.Mock).mockClear()
+
+      await act(async () => {
+        getRegisteredResets().resetPattern()
+      })
+
+      expect(getLastSpiralProps().rotation.value).toBe(beforeReset)
+      expect(cancelAnimation).not.toHaveBeenCalled()
+    })
+
+    it("snaps the pattern's rotation angle to the nearest multiple of 360 once it's stopped, not a literal 0", async () => {
+      mockSettings({ rotationSpeed: 0 }) // stopped
+      await renderScreen()
+      const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
+
+      // A 250° twist: 250 is nearer to 360 (110 away) than to 0 (250 away) —
+      // nearestMultipleOf360(250) = Math.round(250 / 360) * 360 = 360.
+      await act(async () => {
+        rotationGesture.__handlers.start?.()
+        rotationGesture.__handlers.update?.({ rotation: (250 * Math.PI) / 180 })
+      })
+      expect(getLastSpiralProps().rotation.value).toBeCloseTo(250, 5)
+
+      await act(async () => {
+        getRegisteredResets().resetPattern()
+      })
+
+      expect(getLastSpiralProps().rotation.value).toBeCloseTo(360, 5)
+    })
+
+    it('resetPattern also recentres the epicentre back to the middle', async () => {
+      const { width } = Dimensions.get('window')
+      await renderScreen()
+
+      const panGesture = gestureTestUtils.getLastGesture('Pan')
+      await act(async () => {
+        panGesture.__handlers.start?.()
+        panGesture.__handlers.update?.({ translationX: width * 0.3, translationY: 0 })
+      })
+      expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.3, 5)
+
+      await act(async () => {
+        getRegisteredResets().resetPattern()
+      })
+
+      expect(getLastSpiralProps().epicenterX.value).toBe(0)
+    })
+
+    // The crux of the "just say Reset" redesign — one press covers both halves at once, rather than
+    // needing a separate rotation-only button plus a since-removed tap-to-recenter gesture for
+    // position (see ControlGroupTopSheetContent's own comment on why that tap got dropped).
+    it('resetPattern resets rotation and position together, in a single call', async () => {
+      const { width } = Dimensions.get('window')
+      // Stopped, so the rotation half of reset actually fires — see the tests above for why an
+      // actively-rotating pattern would otherwise leave rotation as-is.
+      mockSettings({ rotationSpeed: 0 })
+      await renderScreen()
+
+      const panGesture = gestureTestUtils.getLastGesture('Pan')
+      await act(async () => {
+        panGesture.__handlers.start?.()
+        panGesture.__handlers.update?.({ translationX: width * 0.2, translationY: 0 })
+      })
+      const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
+      await act(async () => {
+        rotationGesture.__handlers.start?.()
+        rotationGesture.__handlers.update?.({ rotation: Math.PI / 2 })
+      })
+      expect(getLastSpiralProps().epicenterX.value).not.toBe(0)
       expect(getLastSpiralProps().rotation.value).not.toBe(0)
 
       await act(async () => {
-        getRegisteredResets().resetRotation()
+        getRegisteredResets().resetPattern()
       })
 
+      expect(getLastSpiralProps().epicenterX.value).toBe(0)
       expect(getLastSpiralProps().rotation.value).toBe(0)
     })
 
-    it('snaps the mirror rotation angle back to 0 even while mirrorRotationSpeed is actively spinning it', async () => {
+    // Same deliberate change as the pattern side above: resetMirror used to snap mirrorRotation back
+    // to 0 even while mirrorRotationSpeed was actively spinning it — now it leaves an active spin
+    // running untouched, and only squares up once it's actually stopped.
+    it('leaves the mirror rotation exactly as it is while mirrorRotationSpeed is actively spinning it, undoing nothing', async () => {
       mockSettings({ mirrorRotationSpeed: 2 })
+      await renderScreen()
+      // Non-frozen + nonzero speed jumps mirrorProgress synchronously to a full lap (360°) at mount in
+      // this mock environment (withRepeat/withTiming are synchronous passthroughs — see jest.setup.ts).
+      const before = getLastSpiralProps().mirrorRotation.value
+      expect(before).toBe(360)
+      ;(cancelAnimation as jest.Mock).mockClear()
+
+      await act(async () => {
+        getRegisteredResets().resetMirror()
+      })
+
+      expect(getLastSpiralProps().mirrorRotation.value).toBe(before)
+      expect(cancelAnimation).not.toHaveBeenCalled()
+    })
+
+    it('snaps the mirror rotation to the nearer of {0, 1} full laps once mirrorRotationSpeed is stopped, not an unconditional 0', async () => {
+      mockSettings({ mirrorRotationSpeed: 2 })
+      await renderScreen()
+      expect(getLastSpiralProps().mirrorRotation.value).toBe(360) // progress already at a full lap (1)
+
+      await act(async () => {
+        getLastControlsProps().onToggleFrozen()
+      })
+
+      await act(async () => {
+        getRegisteredResets().resetMirror()
+      })
+
+      // mirrorProgress was already at 1 — the nearer of {0, 1} to itself is 1, so it stays at a full
+      // lap (360°) instead of unwinding all the way back to a literal 0 the way the old hardcoded
+      // reset did.
+      expect(getLastSpiralProps().mirrorRotation.value).toBe(360)
+    })
+
+    it('resetMirror also recentres the mirror anchor back to the middle', async () => {
+      const { width, height } = Dimensions.get('window')
+      mockSettings({ mirrorLines: 4 })
       await renderScreen()
 
       await act(async () => {
-        getRegisteredResets().resetMirrorRotation()
+        getLastControlsProps().onCycleGestureTarget() // pattern -> mirror
+      })
+      const panGesture = gestureTestUtils.getLastGesture('Pan')
+      await act(async () => {
+        // A real touch point, since mirrorLines > 0 here means onStart needs one to hit-test against
+        // (see the identical comment on the gestureTarget mode drag tests elsewhere in this file).
+        panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+        panGesture.__handlers.update?.({ translationX: width * 0.2, translationY: 0 })
+      })
+      expect(getLastSpiralProps().mirrorAnchorX.value).toBeCloseTo(0.2, 5)
+
+      await act(async () => {
+        getRegisteredResets().resetMirror()
       })
 
-      expect(getLastSpiralProps().mirrorRotation.value).toBe(0)
+      expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
     })
   })
 
@@ -1529,8 +1571,7 @@ describe('SwirlScreen gestures', () => {
       mockedUseAudioReactive.mockReturnValue({ bass: { value: 0.5 } as any, mid: 0, treble: 0, loudness: 0 })
       await renderScreen()
 
-      // mapAudioBand(0.5, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH) = 1 + 0.5 * (30 - 1) = 15.5.
-      expect(getLastSpiralProps().strokeWidth.value).toBeCloseTo(15.5, 5)
+      expect(getLastSpiralProps().strokeWidth.value).toBeCloseTo(MIN_STROKE_WIDTH + 0.5 * (MAX_STROKE_WIDTH - MIN_STROKE_WIDTH), 5)
     })
 
     it('leaves stroke width on the slider value while audio-reactive mode is off, even with a live bass reading', async () => {
@@ -1563,6 +1604,80 @@ describe('SwirlScreen gestures', () => {
       await renderScreen()
 
       expect(cancelAnimation).not.toHaveBeenCalled()
+    })
+
+    // flipDirections (the two-finger long press — see the gesture describe block above) only negates
+    // settings.rotationSpeed/zoomSpeed, which effectiveRotationSpeed's audio-reactive branch ignores
+    // entirely (it's mapped straight from treble instead) — so without audioRotationReversed, flipping
+    // would have no visible effect at all while the mic is on. treble 1 maps to MAX_ROTATION_SPEED (10)
+    // and quantizes cleanly back to itself (stepSize = 10/12, 10/stepSize = 12 exactly), so
+    // effectiveRotationSpeed starts at +10 — the mount-time startBaseRotation() jump (delta = +360)
+    // lands baseRotation at +360.
+    it('a two-finger long press also reverses audio-reactive rotation direction, not just the sliders', async () => {
+      mockSettings({ audioReactiveEnabled: true })
+      mockedUseAudioReactive.mockReturnValue({ bass: { value: 0 } as any, mid: 0, treble: 1, loudness: 0 })
+      await renderScreen()
+
+      const afterMount = getLastSpiralProps().rotation.value
+      expect(afterMount).toBe(360)
+
+      await act(async () => {
+        twoFingerLongPress().__handlers.start?.()
+      })
+      // audioRotationReversed is now true — effectiveRotationSpeed flips to -10, restarting the rotation
+      // effect with delta = -360 added on top of wherever baseRotation already was.
+      const afterFirstFlip = getLastSpiralProps().rotation.value
+      expect(afterFirstFlip - afterMount).toBe(-360)
+
+      await act(async () => {
+        twoFingerLongPress().__handlers.start?.()
+      })
+      // Flipping again toggles audioRotationReversed back to false — positive direction resumes.
+      const afterSecondFlip = getLastSpiralProps().rotation.value
+      expect(afterSecondFlip - afterFirstFlip).toBe(360)
+    })
+
+    it('persists the reversed audio-reactive direction across the mic turning off and back on', async () => {
+      mockSettings({ audioReactiveEnabled: true })
+      mockedUseAudioReactive.mockReturnValue({ bass: { value: 0 } as any, mid: 0, treble: 1, loudness: 0 })
+      const { rerender } = await renderScreen()
+
+      await act(async () => {
+        twoFingerLongPress().__handlers.start?.()
+      })
+      // audioRotationReversed is now true.
+
+      mockSettings({ audioReactiveEnabled: false }) // mic off
+      await act(async () => {
+        rerender(<SwirlScreen />)
+      })
+      const midCheckpoint = getLastSpiralProps().rotation.value
+
+      mockSettings({ audioReactiveEnabled: true }) // mic back on
+      await act(async () => {
+        rerender(<SwirlScreen />)
+      })
+
+      // If audioRotationReversed had reset to false while the mic was off, effectiveRotationSpeed would
+      // go back to +5 here (delta +360). Since it's still true, it stays reversed (delta -360).
+      expect(getLastSpiralProps().rotation.value - midCheckpoint).toBe(-360)
+    })
+
+    it('carries the flip through to effectiveMirrorRotationSpeed automatically, with no separate wiring', async () => {
+      mockSettings({ audioReactiveEnabled: true })
+      mockedUseAudioReactive.mockReturnValue({ bass: { value: 0 } as any, mid: 0, treble: 1, loudness: 0 })
+      await renderScreen()
+
+      // effectiveRotationSpeed starts at +5, so effectiveMirrorRotationSpeed = -effectiveRotationSpeed = -5.
+      expect(getLastSpiralProps().mirrorRotation.value).toBe(-360)
+
+      await act(async () => {
+        twoFingerLongPress().__handlers.start?.()
+      })
+
+      // audioRotationReversed flips effectiveRotationSpeed to -5, so effectiveMirrorRotationSpeed becomes
+      // +5 automatically — it's derived, not independently toggled.
+      expect(getLastSpiralProps().mirrorRotation.value).toBe(360)
     })
   })
 
@@ -1709,8 +1824,8 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.end?.({ velocity: 10 })
       })
 
-      // ROTATION_VELOCITY_TO_SPEED_SCALE is 0.3, so 10 * 0.3 = 3.
-      expect(setMirrorRotationSpeed).toHaveBeenCalledWith(3)
+      // ROTATION_VELOCITY_TO_SPEED_SCALE is 0.8, so 10 * 0.8 = 8.
+      expect(setMirrorRotationSpeed).toHaveBeenCalledWith(8)
       expect(setRotationSpeed).not.toHaveBeenCalled()
       // No live 1:1 tracking for the mirror (see index.tsx's own comment on why) — the pattern's own
       // rotation value should sit exactly where it already was, unmoved by the twist's onUpdate.
@@ -1728,11 +1843,40 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.end?.({ velocity: 10 })
       })
 
-      expect(setRotationSpeed).toHaveBeenCalledWith(3)
-      expect(setMirrorRotationSpeed).toHaveBeenCalledWith(3)
+      expect(setRotationSpeed).toHaveBeenCalledWith(8)
+      expect(setMirrorRotationSpeed).toHaveBeenCalledWith(8)
     })
 
-    it("in 'mirror' mode, a pinch changes the mirror line count instead of zoomSpeed", async () => {
+    it("in 'mirror' mode, a two-finger long press flips mirrorRotationSpeed instead of rotationSpeed/zoomSpeed", async () => {
+      mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 2 })
+      await renderScreen()
+      await cycleGestureTarget(1)
+
+      await act(async () => {
+        twoFingerLongPress().__handlers.start?.()
+      })
+
+      expect(setMirrorRotationSpeed).toHaveBeenCalledWith(-2)
+      expect(setRotationSpeed).not.toHaveBeenCalled()
+      expect(setZoomSpeed).not.toHaveBeenCalled()
+    })
+
+    it("in 'both' mode, a two-finger long press flips rotationSpeed, zoomSpeed, and mirrorRotationSpeed together", async () => {
+      mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 2 })
+      await renderScreen()
+      await cycleGestureTarget(2)
+
+      await act(async () => {
+        twoFingerLongPress().__handlers.start?.()
+      })
+
+      // rotationSpeed/zoomSpeed default to 1 in the mocked settings, so flipping negates each.
+      expect(setRotationSpeed).toHaveBeenCalledWith(-1)
+      expect(setZoomSpeed).toHaveBeenCalledWith(-1)
+      expect(setMirrorRotationSpeed).toHaveBeenCalledWith(-2)
+    })
+
+    it("in 'mirror' mode, a pinch live-tracks mirrorGap instead of zoomSpeed, then commits on release", async () => {
       mockSettings({ mirrorLines: 4 })
       await renderScreen()
       await cycleGestureTarget(1)
@@ -1740,16 +1884,22 @@ describe('SwirlScreen gestures', () => {
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
       await act(async () => {
         pinchGesture.__handlers.start?.()
-        // MIRROR_LINES_PER_PINCH_SCALE is 0.15, so (1.15 - 1) / 0.15 rounds to a 1-line step up
-        // from the mocked mirrorLines: 4.
+        // PINCH_SCALE_TO_MIRROR_GAP_SCALE is 0.6, so (1.15 - 1) * 0.6 = 0.09 above the mocked mirrorGap: 0.
+        pinchGesture.__handlers.update?.({ scale: 1.15 })
+      })
+      // Live-tracked mid-gesture, before release — the mirror-gap counterpart to a twist's manualOffset.
+      expect(getLastSpiralProps().mirrorGap.value).toBeCloseTo(0.09, 5)
+
+      await act(async () => {
         pinchGesture.__handlers.end?.({ scale: 1.15, velocity: 10 })
       })
-
-      expect(setMirrorLines).toHaveBeenCalledWith(5)
+      // Float-imprecise (0.6 * 0.15 isn't exact in binary), so toBeCloseTo rather than toBe/toHaveBeenCalledWith.
+      const [committedGap] = setMirrorGap.mock.calls[setMirrorGap.mock.calls.length - 1]
+      expect(committedGap).toBeCloseTo(0.09, 5)
       expect(setZoomSpeed).not.toHaveBeenCalled()
     })
 
-    it("in 'both' mode, a pinch changes both zoomSpeed and the mirror line count from the same release", async () => {
+    it("in 'both' mode, a pinch changes both zoomSpeed and mirrorGap from the same release", async () => {
       mockSettings({ mirrorLines: 4 })
       await renderScreen()
       await cycleGestureTarget(2)
@@ -1760,12 +1910,67 @@ describe('SwirlScreen gestures', () => {
         pinchGesture.__handlers.end?.({ scale: 1.15, velocity: 10 })
       })
 
-      // ZOOM_VELOCITY_TO_SPEED_SCALE is 0.005, so 10 * 0.005 = 0.05.
-      expect(setZoomSpeed).toHaveBeenCalledWith(0.05)
-      expect(setMirrorLines).toHaveBeenCalledWith(5)
+      // ZOOM_VELOCITY_TO_SPEED_SCALE is 0.6, so 10 * 0.6 = 6.
+      expect(setZoomSpeed).toHaveBeenCalledWith(6)
+      // PINCH_SCALE_TO_MIRROR_GAP_SCALE is 0.6, so (1.15 - 1) * 0.6 = 0.09 (toBeCloseTo — see the
+      // 'mirror' mode test above for why this isn't an exact toHaveBeenCalledWith).
+      const [committedGap] = setMirrorGap.mock.calls[setMirrorGap.mock.calls.length - 1]
+      expect(committedGap).toBeCloseTo(0.09, 5)
     })
 
-    it('clamps a mirror-targeted pinch to MIN/MAX_MIRROR_LINES rather than an out-of-range count', async () => {
+    it("in 'pattern' mode (the default), a pinch live-tracks the ripple pulse phase before any release", async () => {
+      await renderScreen()
+
+      const initialPulse = getLastSpiralProps().pulse.value
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // PINCH_SCALE_TO_PULSE_OFFSET_SCALE is 0.5, reversed is false (zoomSpeed defaults to +1), so
+        // (1.2 - 1) * 0.5 = 0.1 added directly to the mocked pulse phase.
+        pinchGesture.__handlers.update?.({ scale: 1.2 })
+      })
+
+      expect(getLastSpiralProps().pulse.value - initialPulse).toBeCloseTo(0.1, 5)
+    })
+
+    it("in 'pattern' mode, a pinch's live pulse offset runs the opposite way while zoomSpeed is negative", async () => {
+      mockSettings({ zoomSpeed: -1 })
+      await renderScreen()
+
+      const initialPulse = getLastSpiralProps().pulse.value
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // reversed is true here, so the same spread flips sign: (1.2 - 1) * 0.5 * -1 = -0.1 — spreading
+        // fingers still reads as "grow" visually (see index.tsx's own comment on why), not a raw sign flip.
+        pinchGesture.__handlers.update?.({ scale: 1.2 })
+      })
+
+      expect(getLastSpiralProps().pulse.value - initialPulse).toBeCloseTo(-0.1, 5)
+    })
+
+    it("in 'pattern' mode, releasing a pinch folds the live pulse offset back in rather than discarding it", async () => {
+      await renderScreen()
+
+      const initialPulse = getLastSpiralProps().pulse.value
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        pinchGesture.__handlers.update?.({ scale: 1.2 })
+        pinchGesture.__handlers.end?.({ scale: 1.2, velocity: 0 })
+      })
+
+      // Folded into the base pulse clock and wrapped into [0, 1) — not reset to 0 (which would jump
+      // the ripples back to their start-of-lap position) and not left unwrapped (which would confuse
+      // useLoopingProgress's own "ride out the remaining fraction of this lap" duration math).
+      const expectedFold = (((initialPulse + 0.1) % 1) + 1) % 1
+      expect(getLastSpiralProps().pulse.value).toBeCloseTo(expectedFold, 5)
+    })
+
+    it('clamps a mirror-targeted pinch to MAX_MIRROR_GAP rather than an out-of-range gap, live and on release', async () => {
       mockSettings({ mirrorLines: 4 })
       await renderScreen()
       await cycleGestureTarget(1)
@@ -1773,15 +1978,40 @@ describe('SwirlScreen gestures', () => {
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
       await act(async () => {
         pinchGesture.__handlers.start?.()
-        pinchGesture.__handlers.end?.({ scale: 3, velocity: 0 })
+        // (3 - 1) * 0.6 = 1.2, well past MAX_MIRROR_GAP — the live value should already be clamped
+        // mid-gesture, not just once release commits it.
+        pinchGesture.__handlers.update?.({ scale: 3 })
       })
-      expect(setMirrorLines).toHaveBeenLastCalledWith(MAX_MIRROR_LINES)
+      expect(getLastSpiralProps().mirrorGap.value).toBe(MAX_MIRROR_GAP)
 
       await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 3, velocity: 0 })
+      })
+      expect(setMirrorGap).toHaveBeenLastCalledWith(MAX_MIRROR_GAP)
+    })
+
+    it('clamps a mirror-targeted pinch to MIN_MIRROR_GAP (0) rather than a negative gap, live and on release', async () => {
+      // A fresh render (rather than continuing from the MAX_MIRROR_GAP test above) so this pinch
+      // starts from the mocked mirrorGap: 0 — successive pinches are meant to stack from wherever the
+      // live gap already sits (the same "no reset between gestures" convention as rotation's
+      // manualOffset/baseRotation), so chaining onto an already-clamped-to-0.9 gesture here would
+      // start this one from 0.9 instead of 0 and never actually reach the low clamp.
+      mockSettings({ mirrorLines: 4 })
+      await renderScreen()
+      await cycleGestureTarget(1)
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
         pinchGesture.__handlers.start?.()
+        // (0.1 - 1) * 0.6 = -0.54, below MIN_MIRROR_GAP (0).
+        pinchGesture.__handlers.update?.({ scale: 0.1 })
+      })
+      expect(getLastSpiralProps().mirrorGap.value).toBe(0)
+
+      await act(async () => {
         pinchGesture.__handlers.end?.({ scale: 0.1, velocity: 0 })
       })
-      expect(setMirrorLines).toHaveBeenLastCalledWith(0)
+      expect(setMirrorGap).toHaveBeenLastCalledWith(0)
     })
 
     it("resetSwirl (the pause FAB's long-press) recentres both points regardless of the active mode", async () => {
@@ -1803,6 +2033,250 @@ describe('SwirlScreen gestures', () => {
 
       expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
       expect(getLastSpiralProps().epicenterX.value).toBe(0)
+    })
+
+    describe('one-finger long press recenter', () => {
+      it("recenters only the mirror anchor when gestureTarget is 'mirror', leaving the pattern epicentre untouched", async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 4 })
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          // A real touch point, since mirrorLines > 0 here means onStart needs one to hit-test against.
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ translationX: width * 0.2, translationY: 0 })
+        })
+        const epicenterBefore = getLastSpiralProps().epicenterX.value
+        expect(epicenterBefore).not.toBe(0)
+
+        await cycleGestureTarget(1) // pattern -> mirror
+        // index.tsx rebuilds panGesture fresh on every render, so a mode switch needs a fresh reference
+        // — the same reasoning as the "resetSwirl" test above.
+        const mirrorPanGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          // A real touch point, since mirrorLines > 0 here means onStart needs one to hit-test against.
+          mirrorPanGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          mirrorPanGesture.__handlers.update?.({ translationX: width * 0.3, translationY: 0 })
+        })
+        expect(getLastSpiralProps().mirrorAnchorX.value).toBeCloseTo(0.3, 5)
+
+        await act(async () => {
+          singleLongPress().__handlers.start?.()
+        })
+
+        expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
+        expect(getLastSpiralProps().epicenterX.value).toBe(epicenterBefore)
+      })
+
+      it("recenters both the pattern epicentre and the mirror anchor when gestureTarget is 'both'", async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 4 })
+        await renderScreen()
+        await cycleGestureTarget(2) // pattern -> mirror -> both
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ translationX: width * 0.2, translationY: height * 0.1 })
+        })
+        expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.2, 5)
+        expect(getLastSpiralProps().mirrorAnchorX.value).toBeCloseTo(0.2, 5)
+
+        await act(async () => {
+          singleLongPress().__handlers.start?.()
+        })
+
+        expect(getLastSpiralProps().epicenterX.value).toBe(0)
+        expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
+      })
+    })
+  })
+
+  describe('back/forward look history', () => {
+    // The 14 SwirlSettings fields captureLook/restoreLook read and write in index.tsx — every setter
+    // randomize's own rerollUnits can touch. Named here so the "none of these fired" checks below stay
+    // exhaustive without repeating the list in every test.
+    const lookSetters = [setBackgroundColors, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setPattern, setPolygonSides, setStrokeWidth, setTightness]
+
+    // Same audio-reactive pool reduction as randomize (see rerollUnits' own comment in index.tsx) —
+    // forward/back share the exact same table, so a batch tweak while mic mode is on should never
+    // touch a setting that's currently being driven live by an audio band regardless of which of the
+    // (now smaller) pool's units actually got picked.
+    it('excludes audio-driven look units from the tweak pool while audio-reactive mode is on', async () => {
+      mockSettings({ audioReactiveEnabled: true })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onGoForwardBatch()
+      })
+
+      expect(setMirrorGap).not.toHaveBeenCalled()
+      expect(setTightness).not.toHaveBeenCalled()
+      expect(setStrokeWidth).not.toHaveBeenCalled()
+      expect(setCropRadius).not.toHaveBeenCalled()
+      expect(setHoleRadius).not.toHaveBeenCalled()
+    })
+
+    it('starts with backDisabled true, and flips to false after a single forward tweak', async () => {
+      await renderScreen()
+      expect(getLastControlsProps().backDisabled).toBe(true)
+
+      await act(async () => {
+        getLastControlsProps().onGoForward()
+      })
+
+      expect(getLastControlsProps().backDisabled).toBe(false)
+    })
+
+    it('a single onGoForward() rerolls exactly one look unit', async () => {
+      await renderScreen()
+
+      // rerollUnits' own order is [colors, pattern+sides, dashStyle, mirrorLines, mirrorGap,
+      // mirrorAlternateColors, tightness, strokeWidth, cropRadius, cropShaped, holeRadius,
+      // holeShaped] — with Math.random pinned to 0.3, pickRandomDistinct's Math.floor(0.3 * 12) = 3
+      // lands on mirrorLines, the cleanest single-setter unit to assert against (unlike colors/
+      // pattern, which move two setters together as one unit).
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.3)
+      await act(async () => {
+        getLastControlsProps().onGoForward()
+      })
+      randomSpy.mockRestore()
+
+      expect(setMirrorLines).toHaveBeenCalledTimes(1)
+      for (const setter of lookSetters) {
+        if (setter === setMirrorLines) continue
+        expect(setter).not.toHaveBeenCalled()
+      }
+    })
+
+    it('a long-press (onGoForwardBatch) rerolls exactly TWEAK_BATCH_COUNT (4) distinct look units in one batch', async () => {
+      await renderScreen()
+
+      // Same fixed 0.3 draw as the single-tweak test above — pickRandomDistinct's successive
+      // Math.floor(0.3 * poolSize) draws against the shrinking pool land on mirrorLines, mirrorGap,
+      // mirrorAlternateColors, then dashStyle, in that order.
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.3)
+      await act(async () => {
+        getLastControlsProps().onGoForwardBatch()
+      })
+      randomSpy.mockRestore()
+
+      const touched = [setMirrorLines, setMirrorGap, setMirrorAlternateColors, setDashStyle]
+      for (const setter of touched) {
+        expect(setter).toHaveBeenCalledTimes(1)
+      }
+      for (const setter of lookSetters) {
+        if (touched.includes(setter)) continue
+        expect(setter).not.toHaveBeenCalled()
+      }
+    })
+
+    it('onGoForward() then onGoBack() round-trips every look setter back to its original value', async () => {
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onGoForward()
+      })
+      await act(async () => {
+        getLastControlsProps().onGoBack()
+      })
+
+      expect(setBackgroundColors).toHaveBeenLastCalledWith(defaultMockSettings.backgroundColors)
+      expect(setCropRadius).toHaveBeenLastCalledWith(defaultMockSettings.cropRadius)
+      expect(setCropShaped).toHaveBeenLastCalledWith(defaultMockSettings.cropShaped)
+      expect(setDashStyle).toHaveBeenLastCalledWith(defaultMockSettings.dashStyle)
+      expect(setForegroundColors).toHaveBeenLastCalledWith(defaultMockSettings.foregroundColors)
+      expect(setHoleRadius).toHaveBeenLastCalledWith(defaultMockSettings.holeRadius)
+      expect(setHoleShaped).toHaveBeenLastCalledWith(defaultMockSettings.holeShaped)
+      expect(setMirrorAlternateColors).toHaveBeenLastCalledWith(defaultMockSettings.mirrorAlternateColors)
+      expect(setMirrorGap).toHaveBeenLastCalledWith(defaultMockSettings.mirrorGap)
+      expect(setMirrorLines).toHaveBeenLastCalledWith(defaultMockSettings.mirrorLines)
+      expect(setPattern).toHaveBeenLastCalledWith(defaultMockSettings.pattern)
+      expect(setPolygonSides).toHaveBeenLastCalledWith(defaultMockSettings.polygonSides)
+      expect(setStrokeWidth).toHaveBeenLastCalledWith(defaultMockSettings.strokeWidth)
+      expect(setTightness).toHaveBeenLastCalledWith(defaultMockSettings.tightness)
+
+      expect(getLastControlsProps().backDisabled).toBe(true)
+    })
+
+    // Mirrors the existing "leaves speed, physics feel, fixed spacing, and behavioral/interface
+    // toggles untouched" randomize test above — back/forward share the exact same scoped Look type, so
+    // the same fields are out of reach for the exact same reason (see Look's own comment in index.tsx).
+    it('never touches rotationSpeed, zoomSpeed, mirrorRotationSpeed, or fixedSpacing', async () => {
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onGoForward()
+      })
+      await act(async () => {
+        getLastControlsProps().onGoBack()
+      })
+
+      expect(setRotationSpeed).not.toHaveBeenCalled()
+      expect(setZoomSpeed).not.toHaveBeenCalled()
+      expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
+      expect(setFixedSpacing).not.toHaveBeenCalled()
+    })
+
+    it('onGoBack() on an empty history is a no-op', async () => {
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onGoBack()
+      })
+
+      for (const setter of lookSetters) {
+        expect(setter).not.toHaveBeenCalled()
+      }
+      expect(getLastControlsProps().backDisabled).toBe(true)
+    })
+
+    // randomize (dice tap or shake alike) pushes onto the exact same stack forward does, via
+    // pushHistoryAndReroll in index.tsx — a full "go crazy" reroll is just as undoable as a single
+    // tweak, not a separate un-undoable leap.
+    it('a shake-triggered randomize also pushes a history entry, flipping backDisabled to false', async () => {
+      await renderScreen()
+      const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
+      const randomize = shakeCall[1] as () => void
+
+      expect(getLastControlsProps().backDisabled).toBe(true)
+
+      await act(async () => {
+        randomize()
+      })
+
+      expect(getLastControlsProps().backDisabled).toBe(false)
+    })
+
+    it('randomize() then onGoBack() round-trips every look setter back to its original value', async () => {
+      await renderScreen()
+      const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
+      const randomize = shakeCall[1] as () => void
+
+      await act(async () => {
+        randomize()
+      })
+      await act(async () => {
+        getLastControlsProps().onGoBack()
+      })
+
+      expect(setBackgroundColors).toHaveBeenLastCalledWith(defaultMockSettings.backgroundColors)
+      expect(setCropRadius).toHaveBeenLastCalledWith(defaultMockSettings.cropRadius)
+      expect(setCropShaped).toHaveBeenLastCalledWith(defaultMockSettings.cropShaped)
+      expect(setDashStyle).toHaveBeenLastCalledWith(defaultMockSettings.dashStyle)
+      expect(setForegroundColors).toHaveBeenLastCalledWith(defaultMockSettings.foregroundColors)
+      expect(setHoleRadius).toHaveBeenLastCalledWith(defaultMockSettings.holeRadius)
+      expect(setHoleShaped).toHaveBeenLastCalledWith(defaultMockSettings.holeShaped)
+      expect(setMirrorAlternateColors).toHaveBeenLastCalledWith(defaultMockSettings.mirrorAlternateColors)
+      expect(setMirrorGap).toHaveBeenLastCalledWith(defaultMockSettings.mirrorGap)
+      expect(setMirrorLines).toHaveBeenLastCalledWith(defaultMockSettings.mirrorLines)
+      expect(setPattern).toHaveBeenLastCalledWith(defaultMockSettings.pattern)
+      expect(setPolygonSides).toHaveBeenLastCalledWith(defaultMockSettings.polygonSides)
+      expect(setStrokeWidth).toHaveBeenLastCalledWith(defaultMockSettings.strokeWidth)
+      expect(setTightness).toHaveBeenLastCalledWith(defaultMockSettings.tightness)
+
+      expect(getLastControlsProps().backDisabled).toBe(true)
     })
   })
 })

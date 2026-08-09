@@ -1,14 +1,13 @@
-import { useThemeSettings } from '@rific/auto-paper'
-import { useVibration } from '@rific/haptic-press'
+import { defaultThemeSettings, useThemeSettings } from '@rific/auto-paper'
 import React from 'react'
-import { ScrollView, StyleSheet, View } from 'react-native'
+import { StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { PATTERN_LABELS, PATTERN_ORDER } from '@/constants/patterns'
 import { TOP_SHEET_HEADER_CLEARANCE, TOP_SHEET_RIGHT_CLEARANCE } from '@/constants/sheetLayout'
 import { DASH_STYLE_LABELS, DASH_STYLE_ORDER } from '@/constants/strokeDash'
 import { useControlGroups } from '@/hooks/controlGroups'
-import { useRotationReset } from '@/hooks/rotationReset'
+import { useSwirlReset } from '@/hooks/swirlReset'
 import { useSwapColors } from '@/hooks/useSwapColors'
 import { DEFAULT_BACKGROUND_COLORS, DEFAULT_FOREGROUND_COLORS, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
@@ -38,15 +37,13 @@ const DASH_STYLE_OPTIONS = DASH_STYLE_ORDER.map((dashStyle) => ({
 // half. Split into two independently-anchored sheets (this one top, sliders bottom) that open and
 // close together — see controlGroups.tsx — rather than one combined sheet, so the canvas stays
 // visible through the middle of the screen while either is open instead of one big block covering
-// most of it. 'fade' has no buttons at all (see below), so its own top sheet renders empty — that's
-// expected, not a bug: not every group has something that belongs in this half.
+// most of it.
 export function ControlGroupTopSheetContent() {
   const insets = useSafeAreaInsets()
   const { activeGroup } = useControlGroups()
-  const { settings, setBackgroundColors, setDashStyle, setFixedSpacing, setForegroundColors, setMirrorAlternateColors, setPattern, setShakeEnabled, setShowLabels, setShowMirrorLines, setTiltEnabled } = useSwirlSettings()
+  const { settings, resetSettings, setBackgroundColors, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setHoleShaped, setMirrorAlternateColors, setPattern, setShakeEnabled, setShowLabels, setTiltEnabled } = useSwirlSettings()
   const { swapColors } = useSwapColors()
-  const { resetMirrorRotation, resetRotation } = useRotationReset()
-  const { notification, selection } = useVibration()
+  const { resetMirror, resetPattern } = useSwirlReset()
   // App-wide look rather than a per-swirl setting, so it lives in @rific/auto-paper's own
   // ThemeSettingsContext instead of useSwirlSettings — see _layout.tsx's MonochromeThemeBridge for
   // how `appearance` feeds back into the forced black/white accent.
@@ -59,24 +56,15 @@ export function ControlGroupTopSheetContent() {
   // Hooks, not JSX components — see usePreviewOptionFabs for why (FabRow's smart dividers need every
   // FAB as a real flat sibling). Called unconditionally regardless of which group is active, same as
   // any other hook.
-  const patternFabs = usePreviewOptionFabs(PATTERN_OPTIONS, settings.pattern, (value) => {
-    selection()
-    setPattern(value)
-  })
-  const dashStyleFabs = usePreviewOptionFabs(DASH_STYLE_OPTIONS, settings.dashStyle, (value) => {
-    selection()
-    setDashStyle(value)
-  })
+  const patternFabs = usePreviewOptionFabs(PATTERN_OPTIONS, settings.pattern, setPattern)
+  const dashStyleFabs = usePreviewOptionFabs(DASH_STYLE_OPTIONS, settings.dashStyle, setDashStyle)
   const foregroundColorFabs = useColorListFabs('Foreground', settings.foregroundColors, setForegroundColors)
   const backgroundColorFabs = useColorListFabs('Background', settings.backgroundColors, setBackgroundColors)
-  const appearanceFabs = useAppearanceIconFabs(themeSettings.appearance, (value) => {
-    selection()
-    setThemeSettings({ appearance: value })
-  })
+  const appearanceFabs = useAppearanceIconFabs(themeSettings.appearance, (value) => setThemeSettings({ appearance: value }))
 
   return (
     <View style={{ paddingTop: insets.top + TOP_SHEET_HEADER_CLEARANCE, paddingRight: TOP_SHEET_RIGHT_CLEARANCE }}>
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <View style={styles.body}>
         {group === 'mirror' && (
           <>
             {/* Left enabled even at 0 mirror lines (where neither has anything to act on yet) rather
@@ -85,49 +73,33 @@ export function ControlGroupTopSheetContent() {
             encounter with this sheet. Toggling them ahead of time just pre-arms the setting for
             whenever mirror lines does go above 0. */}
             <FabRow>
-              <SettingToggleFab
-                icon='checkerboard'
-                label='Alternate colors'
-                value={settings.mirrorAlternateColors}
-                onValueChange={(value) => {
-                  selection()
-                  setMirrorAlternateColors(value)
-                }}
-              />
-              {/* Off by default — a debug/reference aid, not part of the art. See Spiral.tsx's
-              mirrorLineD. */}
-              <SettingToggleFab
-                icon='ray-start-end'
-                label='Mirror line'
-                value={settings.showMirrorLines}
-                onValueChange={(value) => {
-                  selection()
-                  setShowMirrorLines(value)
-                }}
-              />
-              {/* Snaps the mirror rotation angle back to 0 — meant for pairing with the bottom
-              sheet's own Mirror rotation slider: turn that to 0 first, then press this to square the
-              wedges back up. */}
-              <ActionFab
-                icon='backup-restore'
-                label='Reset rotation'
-                onPress={() => {
-                  notification()
-                  resetMirrorRotation()
-                }}
-              />
+              <SettingToggleFab icon='checkerboard' label='Alternate colors' value={settings.mirrorAlternateColors} onValueChange={setMirrorAlternateColors} />
+              {/* Squares the wedges' rotation back to 0 AND snaps the mirror anchor back to center —
+              see index.tsx's resetMirror. Used to be rotation-only, paired with a tap on the anchor
+              itself to recentre it, but that tap had no fixed visual marker to aim at once the
+              pattern was mirrored (there's nothing to see there, just wherever you last dragged it
+              to) — this button is now the only, findable way to reach either half. Short, icon-
+              disambiguated label (not "Reset mirror") matching the Colors group's own Reset/Swap
+              pair below and Pattern's own reset button (see the 'pattern' branch below) — both just
+              say "Reset", disambiguated only by whichever sheet happens to be open. */}
+              <ActionFab icon='backup-restore' label='Reset' onPress={resetMirror} />
             </FabRow>
           </>
         )}
 
         {group === 'colors' && (
           <>
-            {/* Matches every other group: one continuous wrapping row, Reset/Swap then each color
-            list's own group label, swatches, and add button, separated by the same FabDivider every
-            other group uses between logically distinct clusters — rather than this being the one
-            section with its own bespoke title-plus-icon-button header and separate non-wrapping rows
-            per list. */}
+            {/* Matches every other group: one continuous wrapping row, each color list's own group
+            label, swatches, and add button, then Swap/Reset last — separated by the same FabDivider
+            every other group uses between logically distinct clusters — rather than this being the
+            one section with its own bespoke title-plus-icon-button header and separate non-wrapping
+            rows per list. */}
             <FabRow>
+              {foregroundColorFabs.fabs}
+              <FabDivider />
+              {backgroundColorFabs.fabs}
+              <FabDivider />
+              <ActionFab icon='swap-horizontal' label='Swap' onPress={swapColors} />
               <ActionFab
                 icon='backup-restore'
                 // Short, single-word labels here (not "Reset colors"/"Swap colors" — the icon alone
@@ -138,64 +110,60 @@ export function ControlGroupTopSheetContent() {
                 // even though the underlying FabRow gap is the same 12pt everywhere.
                 label='Reset'
                 onPress={() => {
-                  notification()
                   setForegroundColors(DEFAULT_FOREGROUND_COLORS)
                   setBackgroundColors(DEFAULT_BACKGROUND_COLORS)
                 }}
               />
-              <ActionFab
-                icon='swap-horizontal'
-                label='Swap'
-                onPress={() => {
-                  selection()
-                  swapColors()
-                }}
-              />
-              <FabDivider />
-              {foregroundColorFabs.fabs}
-              <FabDivider />
-              {backgroundColorFabs.fabs}
             </FabRow>
             {foregroundColorFabs.dialog}
             {backgroundColorFabs.dialog}
           </>
         )}
 
-        {group === 'line' && (
+        {group === 'pattern' && (
           <FabRow>
             {patternFabs}
             <FabDivider />
-            {dashStyleFabs}
+            {/* Crop/Hole live here rather than in Line: now that either can trace the active
+            pattern's own outline (see Spiral.tsx's shapedClipPoints), they're as much a "what shape
+            is this" decision as Sides/Points/Petals below is, not just a stroke-rendering knob.
+            Left enabled for every pattern, including Spiral/Starburst/Rings — those have no closed
+            boundary of their own and always clip to a plain circle regardless — but pre-arming the
+            toggle here means it's already set the way the user wants the moment they switch to
+            Polygon/Star/Flower, same "toggleable ahead of having anything to act on" reasoning as
+            Alternate colors above. Distinct icons even though the two toggles are
+            otherwise identical in shape (a plain outline for the outer Crop, a bounded/contained
+            outline for the inner Hole) — matching this app's own one-icon-per-control convention
+            rather than reusing Sides' own vector-polygon glyph, which reads as "how many points",
+            not "trace the shape". */}
+            <SettingToggleFab icon='shape-outline' label='Crop shape' value={settings.cropShaped} onValueChange={setCropShaped} />
+            <SettingToggleFab icon='contain' label='Hole shape' value={settings.holeShaped} onValueChange={setHoleShaped} />
             <FabDivider />
-            {/* Off by default: dragging the epicentre toward an edge grows the pattern's own
-            radius (so it still reaches the farthest corner — see Spiral.tsx), and every
-            ring/turn/ray is spaced as a fraction of that radius, so they spread out right along
-            with it. This pins that spacing to what it looks like at a centered epicentre instead. */}
-            <SettingToggleFab
-              icon='ruler'
-              label='Fixed spacing'
-              value={settings.fixedSpacing}
-              onValueChange={(value) => {
-                selection()
-                setFixedSpacing(value)
-              }}
-            />
+            {/* Squares the pattern's rotation back to 0 AND snaps the epicentre back to center —
+            see index.tsx's resetPattern. No effect on zoom, which has no orientation of its own to
+            reset. Used to be rotation-only, paired with a tap on the epicentre itself to recentre
+            it, but that tap had no fixed visual marker to aim at once the pattern was mirrored —
+            this button is now the only, findable way to reach either half. Short, icon-disambiguated
+            label matching Mirror's own reset button (see the 'mirror' branch above) and the Colors
+            group's Reset/Swap pair below — all three just say "Reset", disambiguated only by
+            whichever sheet happens to be open. */}
+            <ActionFab icon='backup-restore' label='Reset' onPress={resetPattern} />
           </FabRow>
         )}
 
-        {group === 'speed' && (
+        {group === 'line' && (
           <FabRow>
-            {/* Snaps the pattern's rotation angle back to 0 — pairs with the bottom sheet's own
-            Rotation speed slider: turn that to 0 first, then press this to square the pattern back
-            up. No effect on zoom, which has no orientation of its own to reset. */}
-            <ActionFab
-              icon='backup-restore'
-              label='Reset rotation'
-              onPress={() => {
-                notification()
-                resetRotation()
-              }}
-            />
+            {dashStyleFabs}
+            <FabDivider />
+            {/* Fixed spacing lives here rather than in Pattern: it's paired with Tightness (see the
+            bottom sheet), and together they're about how densely the rendered strokes are packed,
+            not which shape is showing — Crop/Hole shape moved the other way for the same reasoning
+            (see the 'pattern' branch above). Off by default: dragging the epicentre toward an edge
+            grows the pattern's own radius (so it still reaches the farthest corner — see
+            Spiral.tsx), and every ring/turn/ray is spaced as a fraction of that radius, so they
+            spread out right along with it. This pins that spacing to what it looks like at a
+            centered epicentre instead. */}
+            <SettingToggleFab icon='ruler' label='Fixed spacing' value={settings.fixedSpacing} onValueChange={setFixedSpacing} />
           </FabRow>
         )}
 
@@ -203,48 +171,35 @@ export function ControlGroupTopSheetContent() {
           <FabRow>
             {appearanceFabs}
             <FabDivider />
-            <SettingToggleFab
-              icon='blur'
-              label='Blur'
-              value={themeSettings.blur}
-              onValueChange={(value) => {
-                selection()
-                setThemeSettings({ blur: value })
-              }}
-            />
+            <SettingToggleFab icon='blur' label='Blur' value={themeSettings.blur} onValueChange={(value) => setThemeSettings({ blur: value })} />
             {/* Governs every FAB and SettingSlider on screen — see LabeledFab/SettingSlider — not
             just this sheet's own controls. */}
-            <SettingToggleFab
-              icon='label'
-              label='Labels'
-              value={settings.showLabels}
-              onValueChange={(value) => {
-                selection()
-                setShowLabels(value)
-              }}
-            />
+            <SettingToggleFab icon='label' label='Labels' value={settings.showLabels} onValueChange={setShowLabels} />
             <FabDivider />
-            <SettingToggleFab
-              icon='vibrate'
-              label='Shake to randomize'
-              value={settings.shakeEnabled}
-              onValueChange={(value) => {
-                selection()
-                setShakeEnabled(value)
-              }}
-            />
-            <SettingToggleFab
-              icon='axis-arrow'
-              label='Tilt to warp'
-              value={settings.tiltEnabled}
-              onValueChange={(value) => {
-                selection()
-                setTiltEnabled(value)
+            <SettingToggleFab icon='vibrate' label='Shake to randomize' value={settings.shakeEnabled} onValueChange={setShakeEnabled} />
+            <SettingToggleFab icon='axis-arrow' label='Tilt to warp' value={settings.tiltEnabled} onValueChange={setTiltEnabled} />
+            <FabDivider />
+            {/* The one button in this group that isn't its own preference — every slider and toggle
+            across all five groups, plus appearance/blur (themeSettings, a separate persisted store
+            from useSwirlSettings — see @rific/auto-paper's ThemeProvider) and the pattern/mirror
+            rotation+position the per-group Reset buttons above already square back up (resetPattern/
+            resetMirror), in one tap. 'Reset' alone (matching Mirror/Pattern/Colors' own buttons) would
+            read as scoped to whichever sheet happens to be open, same as those three — 'Reset all'
+            says plainly that this one isn't. The mic toggle is the one exception — see
+            resetSettings' own comment for why it survives this. */}
+            <ActionFab
+              icon='backup-restore'
+              label='Reset all'
+              onPress={() => {
+                resetSettings()
+                setThemeSettings(defaultThemeSettings)
+                resetPattern()
+                resetMirror()
               }}
             />
           </FabRow>
         )}
-      </ScrollView>
+      </View>
     </View>
   )
 }

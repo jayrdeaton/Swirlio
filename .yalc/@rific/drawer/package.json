@@ -1,0 +1,81 @@
+{
+  "name": "@rific/drawer",
+  "version": "0.2.0",
+  "description": "Left/right sliding drawer with edge-swipe gestures for React Native: spring-animated, theme-aware, one factory call per drawer instance",
+  "keywords": [
+    "react-native",
+    "expo",
+    "drawer",
+    "navigation",
+    "gesture",
+    "swipe",
+    "edge-swipe",
+    "react-native-gesture-handler",
+    "react-native-reanimated",
+    "react-native-paper"
+  ],
+  "homepage": "https://github.com/jayrdeaton/react-native-drawer#readme",
+  "bugs": {
+    "url": "https://github.com/jayrdeaton/react-native-drawer/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jayrdeaton/react-native-drawer.git"
+  },
+  "license": "MIT",
+  "author": "Jay Deaton",
+  "sideEffects": false,
+  "type": "commonjs",
+  "exports": {
+    ".": {
+      "react-native": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "react-native": "src/index.ts",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "!src/__tests__",
+    "!src/__mocks__"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "build:watch": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "fix": "eslint --fix",
+    "lint": "eslint",
+    "prepublishOnly": "npm run build",
+    "release": "git push --follow-tags",
+    "release:major": "npm version major && git push --follow-tags",
+    "release:minor": "npm version minor && git push --follow-tags",
+    "release:patch": "npm version patch && git push --follow-tags",
+    "test": "jest",
+    "test:watch": "jest --watchAll",
+    "typecheck": "tsc --noEmit",
+    "preversion": "npm run lint && npm test && npm run build"
+  },
+  "peerDependencies": {
+    "@rific/auto-paper": ">=0.7.0",
+    "@rific/haptic-press": ">=0.4.0",
+    "react": ">=19.0.0",
+    "react-native": ">=0.83.0",
+    "react-native-gesture-handler": ">=2.20.0 <3.0.0",
+    "react-native-paper": ">=5.0.0",
+    "react-native-reanimated": ">=4.0.0",
+    "react-native-worklets": "0.10.x"
+  },
+  "peerDependenciesMeta": {
+    "@rific/auto-paper": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "yalcSig": "14cba23598d22bbc12d0eca4d475b5f0"
+}

@@ -14,21 +14,24 @@ type TestApi = {
   setBackgroundColors: (colors: string[]) => void
   setBackgroundCycleSpeed: (speed: number) => void
   setBounceFriction: (friction: number) => void
+  setCropRadius: (cropRadius: number) => void
+  setCropShaped: (shaped: boolean) => void
   setDashStyle: (dashStyle: DashStyle) => void
-  setFadeRadius: (fadeRadius: number) => void
-  setFadeSoftness: (fadeSoftness: number) => void
   setFixedSpacing: (enabled: boolean) => void
   setForegroundColors: (colors: string[]) => void
   setForegroundCycleSpeed: (speed: number) => void
   setGravity: (gravity: number) => void
+  setHoleRadius: (holeRadius: number) => void
+  setHoleShaped: (shaped: boolean) => void
   setMirrorAlternateColors: (enabled: boolean) => void
+  setMirrorGap: (gap: number) => void
   setMirrorLines: (lines: number) => void
   setMirrorRotationSpeed: (speed: number) => void
   setPolygonSides: (sides: number) => void
   setRotationSpeed: (speed: number) => void
-  setShowMirrorLines: (enabled: boolean) => void
   setStrokeWidth: (strokeWidth: number) => void
   setZoomSpeed: (speed: number) => void
+  resetSettings: () => void
 }
 
 function requireApi(value: TestApi | null): TestApi {
@@ -39,11 +42,11 @@ function requireApi(value: TestApi | null): TestApi {
 }
 
 function Probe({ onUpdate }: { onUpdate: (api: TestApi) => void }) {
-  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setDashStyle, setFadeRadius, setFadeSoftness, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setMirrorAlternateColors, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShowMirrorLines, setStrokeWidth, setZoomSpeed } = useSwirlSettings()
+  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setZoomSpeed, resetSettings } = useSwirlSettings()
 
   useEffect(() => {
-    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setDashStyle, setFadeRadius, setFadeSoftness, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setMirrorAlternateColors, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShowMirrorLines, setStrokeWidth, setZoomSpeed })
-  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setDashStyle, setFadeRadius, setFadeSoftness, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setMirrorAlternateColors, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShowMirrorLines, setStrokeWidth, setZoomSpeed, settings])
+    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setZoomSpeed, resetSettings })
+  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setZoomSpeed, resetSettings, settings])
 
   return <Text testID='stroke'>{String(settings.strokeWidth)}</Text>
 }
@@ -187,108 +190,152 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.dashStyle).toBe('dashes')
   })
 
-  it('defaults fadeRadius to 1 (the full radius) and lets it be changed', async () => {
+  it('defaults cropRadius to 1 (the full radius) and lets it be changed', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
-    expect(getApi().settings.fadeRadius).toBe(1)
+    expect(getApi().settings.cropRadius).toBe(1)
 
     await act(async () => {
-      getApi().setFadeRadius(0.3)
+      getApi().setCropRadius(0.3)
     })
 
-    await waitFor(() => expect(getApi().settings.fadeRadius).toBe(0.3))
+    await waitFor(() => expect(getApi().settings.cropRadius).toBe(0.3))
   })
 
-  it('hydrates a persisted fadeRadius value', async () => {
-    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeRadius: 0.25 }))
+  it('hydrates a persisted cropRadius value', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ cropRadius: 0.25 }))
 
     const { getApi } = await renderProbe()
 
-    expect(getApi().settings.fadeRadius).toBe(0.25)
+    expect(getApi().settings.cropRadius).toBe(0.25)
   })
 
-  it('clamps fadeRadius setter and hydration values to their valid range', async () => {
-    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeRadius: 5 }))
+  it('clamps cropRadius setter and hydration values to their valid range', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ cropRadius: 5 }))
     const { getApi: getHydratedApi } = await renderProbe()
-    expect(getHydratedApi().settings.fadeRadius).toBe(1)
+    expect(getHydratedApi().settings.cropRadius).toBe(1)
 
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
     await act(async () => {
-      getApi().setFadeRadius(-1)
+      getApi().setCropRadius(-1)
     })
-    await waitFor(() => expect(getApi().settings.fadeRadius).toBe(0.05))
+    await waitFor(() => expect(getApi().settings.cropRadius).toBe(0.05))
 
     await act(async () => {
-      getApi().setFadeRadius(999)
+      getApi().setCropRadius(999)
     })
-    await waitFor(() => expect(getApi().settings.fadeRadius).toBe(1))
+    await waitFor(() => expect(getApi().settings.cropRadius).toBe(1))
   })
 
-  it('defaults fadeSoftness to 1 (a fully gradual fade) and lets it be changed', async () => {
-    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
-    const { getApi } = await renderProbe()
-
-    expect(getApi().settings.fadeSoftness).toBe(1)
-
-    await act(async () => {
-      getApi().setFadeSoftness(0.3)
-    })
-
-    await waitFor(() => expect(getApi().settings.fadeSoftness).toBe(0.3))
-  })
-
-  it('hydrates a persisted fadeSoftness value', async () => {
-    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeSoftness: 0.25 }))
+  // cropRadius's old name, from when this was a soft gradient fade rather than a hard clip (see the
+  // field's comment in useSwirlSettings.tsx) — a pure key rename, so a returning user's already-dialed
+  // -in value should carry over exactly, not just fall back to the default.
+  it('hydrates a persisted value under the old fadeRadius key', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeRadius: 0.4 }))
 
     const { getApi } = await renderProbe()
 
-    expect(getApi().settings.fadeSoftness).toBe(0.25)
+    expect(getApi().settings.cropRadius).toBe(0.4)
   })
 
-  it('clamps fadeSoftness setter and hydration values to their valid range', async () => {
-    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeSoftness: 5 }))
-    const { getApi: getHydratedApi } = await renderProbe()
-    expect(getHydratedApi().settings.fadeSoftness).toBe(1)
-
-    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
-    const { getApi } = await renderProbe()
-
-    await act(async () => {
-      getApi().setFadeSoftness(-1)
-    })
-    await waitFor(() => expect(getApi().settings.fadeSoftness).toBe(0))
-
-    await act(async () => {
-      getApi().setFadeSoftness(999)
-    })
-    await waitFor(() => expect(getApi().settings.fadeSoftness).toBe(1))
-  })
-
-  // Reverse migration for a since-reverted attempt to collapse these two sliders into one
-  // fadeEnabled boolean (see the field's comment in useSwirlSettings.tsx) — only relevant for anyone
-  // who happened to have that version open long enough to persist it.
-  it('migrates a legacy fadeEnabled boolean back to the equivalent fadeRadius/fadeSoftness values', async () => {
+  // Reverse migration for a since-reverted attempt to collapse fadeRadius (now cropRadius) into a
+  // single fadeEnabled boolean (see the field's comment in useSwirlSettings.tsx) — only relevant for
+  // anyone who happened to have that version open long enough to persist it.
+  it('migrates a legacy fadeEnabled boolean back to the equivalent cropRadius value', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeEnabled: true }))
     const { getApi: getOnApi } = await renderProbe()
-    expect(getOnApi().settings.fadeRadius).toBe(0.15)
-    expect(getOnApi().settings.fadeSoftness).toBe(1)
+    expect(getOnApi().settings.cropRadius).toBe(0.15)
 
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeEnabled: false }))
     const { getApi: getOffApi } = await renderProbe()
-    expect(getOffApi().settings.fadeRadius).toBe(1)
-    expect(getOffApi().settings.fadeSoftness).toBe(0)
+    expect(getOffApi().settings.cropRadius).toBe(1)
   })
 
-  it('prefers persisted fadeRadius/fadeSoftness over a legacy fadeEnabled boolean when both are present', async () => {
-    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeEnabled: true, fadeRadius: 0.6, fadeSoftness: 0.4 }))
+  it('prefers a persisted cropRadius over the old fadeRadius key or a legacy fadeEnabled boolean', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeEnabled: true, fadeRadius: 0.5, cropRadius: 0.6 }))
 
     const { getApi } = await renderProbe()
 
-    expect(getApi().settings.fadeRadius).toBe(0.6)
-    expect(getApi().settings.fadeSoftness).toBe(0.4)
+    expect(getApi().settings.cropRadius).toBe(0.6)
+  })
+
+  it('prefers the old fadeRadius key over a legacy fadeEnabled boolean when both are present', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeEnabled: true, fadeRadius: 0.5 }))
+
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.cropRadius).toBe(0.5)
+  })
+
+  it('defaults holeRadius to 0 (no hole) and lets it be changed', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.holeRadius).toBe(0)
+
+    await act(async () => {
+      getApi().setHoleRadius(0.4)
+    })
+
+    await waitFor(() => expect(getApi().settings.holeRadius).toBe(0.4))
+  })
+
+  it('hydrates a persisted holeRadius value', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ holeRadius: 0.6 }))
+
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.holeRadius).toBe(0.6)
+  })
+
+  it('clamps holeRadius setter and hydration values to their valid range', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ holeRadius: 5 }))
+    const { getApi: getHydratedApi } = await renderProbe()
+    expect(getHydratedApi().settings.holeRadius).toBe(1)
+
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setHoleRadius(-1)
+    })
+    await waitFor(() => expect(getApi().settings.holeRadius).toBe(0))
+
+    await act(async () => {
+      getApi().setHoleRadius(999)
+    })
+    await waitFor(() => expect(getApi().settings.holeRadius).toBe(1))
+  })
+
+  it('defaults cropShaped and holeShaped to on, and lets each be changed independently', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.cropShaped).toBe(true)
+    expect(getApi().settings.holeShaped).toBe(true)
+
+    await act(async () => {
+      getApi().setCropShaped(false)
+    })
+    await waitFor(() => expect(getApi().settings.cropShaped).toBe(false))
+    expect(getApi().settings.holeShaped).toBe(true)
+
+    await act(async () => {
+      getApi().setHoleShaped(false)
+    })
+    await waitFor(() => expect(getApi().settings.holeShaped).toBe(false))
+  })
+
+  it('hydrates persisted cropShaped and holeShaped values', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ cropShaped: false, holeShaped: false }))
+
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.cropShaped).toBe(false)
+    expect(getApi().settings.holeShaped).toBe(false)
   })
 
   it('defaults fixedSpacing to off, and lets it be changed', async () => {
@@ -397,24 +444,36 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.mirrorAlternateColors).toBe(true)
   })
 
-  it('defaults showMirrorLines to off, and lets it be changed', async () => {
+  it('defaults mirrorGap to 0, and lets it be changed', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
-    expect(getApi().settings.showMirrorLines).toBe(false)
+    expect(getApi().settings.mirrorGap).toBe(0)
 
     await act(async () => {
-      getApi().setShowMirrorLines(true)
+      getApi().setMirrorGap(0.4)
     })
 
-    await waitFor(() => expect(getApi().settings.showMirrorLines).toBe(true))
+    await waitFor(() => expect(getApi().settings.mirrorGap).toBe(0.4))
   })
 
-  it('hydrates a persisted showMirrorLines value', async () => {
-    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ showMirrorLines: true }))
+  it('clamps mirrorGap setter and hydration values to their valid range', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ mirrorGap: 999 }))
+    const { getApi: getHydratedApi } = await renderProbe()
+    expect(getHydratedApi().settings.mirrorGap).toBe(0.9)
+
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
-    expect(getApi().settings.showMirrorLines).toBe(true)
+    await act(async () => {
+      getApi().setMirrorGap(-999)
+    })
+    await waitFor(() => expect(getApi().settings.mirrorGap).toBe(0))
+
+    await act(async () => {
+      getApi().setMirrorGap(999)
+    })
+    await waitFor(() => expect(getApi().settings.mirrorGap).toBe(0.9))
   })
 
   // Off by default is the important part here, unlike most other toggles on this screen — this is
@@ -520,7 +579,7 @@ describe('useSwirlSettings', () => {
   it('clamps mirrorRotationSpeed setter and hydration values to their valid range', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ mirrorRotationSpeed: 999 }))
     const { getApi: getHydratedApi } = await renderProbe()
-    expect(getHydratedApi().settings.mirrorRotationSpeed).toBe(5)
+    expect(getHydratedApi().settings.mirrorRotationSpeed).toBe(10)
 
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
@@ -528,12 +587,12 @@ describe('useSwirlSettings', () => {
     await act(async () => {
       getApi().setMirrorRotationSpeed(-999)
     })
-    await waitFor(() => expect(getApi().settings.mirrorRotationSpeed).toBe(-5))
+    await waitFor(() => expect(getApi().settings.mirrorRotationSpeed).toBe(-10))
 
     await act(async () => {
       getApi().setMirrorRotationSpeed(999)
     })
-    await waitFor(() => expect(getApi().settings.mirrorRotationSpeed).toBe(5))
+    await waitFor(() => expect(getApi().settings.mirrorRotationSpeed).toBe(10))
   })
 
   it('hydrates persisted polygonSides and rotationSpeed values', async () => {
@@ -551,7 +610,7 @@ describe('useSwirlSettings', () => {
     const { getApi } = await renderProbe()
 
     expect(getApi().settings.polygonSides).toBe(4)
-    expect(getApi().settings.rotationSpeed).toBe(5)
+    expect(getApi().settings.rotationSpeed).toBe(10)
   })
 
   it('lets rotationSpeed and the polygon side count be changed', async () => {
@@ -606,19 +665,19 @@ describe('useSwirlSettings', () => {
     })
 
     await waitFor(() => {
-      expect(getApi().settings.rotationSpeed).toBe(5)
+      expect(getApi().settings.rotationSpeed).toBe(10)
       expect(getApi().settings.polygonSides).toBe(8)
     })
 
     await act(async () => {
-      // rotationSpeed is bipolar (-5..5) — -4 is a valid value now, not something to clamp, so this
+      // rotationSpeed is bipolar (-10..10) — -4 is a valid value now, not something to clamp, so this
       // checks the actual floor at -999 instead.
       getApi().setRotationSpeed(-999)
       getApi().setPolygonSides(1)
     })
 
     await waitFor(() => {
-      expect(getApi().settings.rotationSpeed).toBe(-5)
+      expect(getApi().settings.rotationSpeed).toBe(-10)
       expect(getApi().settings.polygonSides).toBe(3)
     })
   })
@@ -686,7 +745,7 @@ describe('useSwirlSettings', () => {
     })
 
     await waitFor(() => {
-      expect(getApi().settings.zoomSpeed).toBe(5)
+      expect(getApi().settings.zoomSpeed).toBe(10)
       expect(getApi().settings.strokeWidth).toBe(1)
       expect(getApi().settings.foregroundCycleSpeed).toBe(5)
       expect(getApi().settings.backgroundCycleSpeed).toBe(0.1)
@@ -741,5 +800,55 @@ describe('useSwirlSettings', () => {
     await waitFor(() => {
       expect(AsyncStorage.setItem).toHaveBeenCalledWith('swirlio.settings.v1', expect.stringContaining('"strokeWidth":7'))
     })
+  })
+
+  // The Settings group's "Reset all" button (see ControlGroupTopSheetContent) — a flat replacement
+  // covering every field at once, not a loop over the individual setters, so it can't drift out of
+  // sync with whichever fields those setters happen to guard (e.g. the empty-list refusal on colors).
+  it('resetSettings restores every field to its default, overwriting both hand-made changes and hydrated values', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ strokeWidth: 20, pattern: 'rings', foregroundColors: ['#111111', '#222222'] }))
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.strokeWidth).toBe(20)
+    expect(getApi().settings.pattern).toBe('rings')
+
+    await act(async () => {
+      getApi().setZoomSpeed(4)
+      getApi().setMirrorLines(3)
+    })
+    await waitFor(() => expect(getApi().settings.zoomSpeed).toBe(4))
+
+    await act(async () => {
+      getApi().resetSettings()
+    })
+
+    await waitFor(() => {
+      expect(getApi().settings.strokeWidth).toBe(6)
+      expect(getApi().settings.pattern).toBe('spiral')
+      expect(getApi().settings.foregroundColors).toEqual(['#FFFFFF'])
+      expect(getApi().settings.zoomSpeed).toBe(1)
+      expect(getApi().settings.mirrorLines).toBe(0)
+    })
+  })
+
+  // The one field resetSettings deliberately leaves alone — see its own comment in
+  // useSwirlSettings.tsx. A live "is the mic actually feeding this right now" state, not a look/
+  // tuning preference like everything else Reset all touches, so it shouldn't get silently cut off
+  // out from under someone mid-session.
+  it('resetSettings leaves audioReactiveEnabled exactly as it was, on or off', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setAudioReactiveEnabled(true)
+    })
+    await waitFor(() => expect(getApi().settings.audioReactiveEnabled).toBe(true))
+
+    await act(async () => {
+      getApi().resetSettings()
+    })
+
+    await waitFor(() => expect(getApi().settings.strokeWidth).toBe(6))
+    expect(getApi().settings.audioReactiveEnabled).toBe(true)
   })
 })

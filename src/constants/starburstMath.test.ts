@@ -1,4 +1,4 @@
-import { buildStarburstPath, starburstRayCount } from '@/constants/starburstMath'
+import { buildStarburstPath, starburstRayCount, starburstRayTips } from '@/constants/starburstMath'
 
 describe('starburstRayCount', () => {
   it('scales linearly with tightness, matching the base count at 1x', () => {
@@ -39,5 +39,40 @@ describe('buildStarburstPath', () => {
     expect(buildStarburstPath(0, 100)).toBe('')
     expect(buildStarburstPath(6, 0)).toBe('')
     expect(buildStarburstPath(6, Number.NaN)).toBe('')
+  })
+})
+
+describe('starburstRayTips', () => {
+  // Same geometry as buildStarburstPath (see its own tests above), just the ray tips alone instead of
+  // a full SVG string — StarburstPattern pairs each tip with an explicit moveTo(0,0) via Skia's
+  // PathBuilder, the same shared origin buildStarburstPath's own repeated M0,0 draws.
+  it('returns one tip per ray', () => {
+    expect(starburstRayTips(6, 100).length).toBe(6)
+  })
+
+  it('spaces ray tips evenly around the full circle', () => {
+    const tips = starburstRayTips(4, 100)
+    const expected = [
+      [100, 0],
+      [0, 100],
+      [-100, 0],
+      [0, -100]
+    ]
+    tips.forEach(({ x, y }, i) => {
+      expect(x).toBeCloseTo(expected[i][0])
+      expect(y).toBeCloseTo(expected[i][1])
+    })
+  })
+
+  it('scales ray length with radius', () => {
+    const tips = starburstRayTips(1, 250)
+    expect(tips[0].x).toBeCloseTo(250)
+    expect(tips[0].y).toBeCloseTo(0)
+  })
+
+  it('renders nothing for degenerate input rather than a malformed path', () => {
+    expect(starburstRayTips(0, 100)).toEqual([])
+    expect(starburstRayTips(6, 0)).toEqual([])
+    expect(starburstRayTips(6, Number.NaN)).toEqual([])
   })
 })

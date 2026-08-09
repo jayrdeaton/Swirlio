@@ -222,7 +222,7 @@ describe('SettingSlider', () => {
     expect(lefts).toEqual([0, 1, 2, 3, 4, 5, 6].map((index) => `${(index / 6) * 100}%`))
   })
 
-  // Bounce friction/gravity (0..5 step 0.1) want landmark ticks at every whole number without giving
+  // Friction/gravity (0..5 step 0.1) want landmark ticks at every whole number without giving
   // up fine-grained dragging in between — one tick per 0.1 step would be 51 ticks, the tick-soup case
   // showTicks' own default-off exists to avoid. tickStep lets the ticks land on a coarser interval
   // than the actual drag/snap step.

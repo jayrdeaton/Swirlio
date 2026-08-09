@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { FrameCallback, SharedValue, useFrameCallback, useSharedValue, withSpring } from 'react-native-reanimated'
+import { useEffect } from 'react'
+import { runOnJS, SharedValue, useFrameCallback, useSharedValue, withSpring } from 'react-native-reanimated'
 
 // Shared by every draggable point on screen (the pattern's own epicentre, and the mirror's wedge
 // anchor — see useEpicenter.ts) so dragging either one feels identical: same drag boundary, same
@@ -11,6 +11,10 @@ export const SNAP_DISTANCE = 0.05
 export const SNAP_VELOCITY = 0.25
 const SPRING = { damping: 18, stiffness: 140 }
 const BOUNCE_STOP_SPEED = 0.02
+// Floor between onBounce haptics — a slow-friction/high-gravity bounce can still cross the boundary
+// several times a second as it settles, and firing a haptic on every single one of those reads as a
+// buzz rather than a series of distinct impacts.
+const BOUNCE_HAPTIC_MIN_INTERVAL = 0.06
 // How much of the way toward the boundary-rescaled target position defaultClamp moves per update,
 // once past MAX_OFFSET — see its own comment for why this needs to be a fraction, not the full jump.
 const BOUNDARY_EASE = 0.2
@@ -49,29 +53,34 @@ export const defaultClamp: DragClamp = (nextX, nextY, currentX, currentY) => {
 // grabbed's own real screen edges (see useEpicenter.ts's patternBounceBoundary), not this fixed
 // ±MAX_OFFSET box. Reflects both axes independently and flips whichever velocity component crossed —
 // a real "bounced off a wall" bounce, not an inelastic stop.
-export type BounceBoundary = (nextX: number, nextY: number, velocityX: number, velocityY: number) => { x: number; y: number; velocityX: number; velocityY: number }
+export type BounceBoundary = (nextX: number, nextY: number, velocityX: number, velocityY: number) => { x: number; y: number; velocityX: number; velocityY: number; bounced: boolean }
 
 export const defaultBounceBoundary: BounceBoundary = (nextX, nextY, velocityX, velocityY) => {
   'worklet'
+  let bounced = false
   let x = nextX
   let vx = velocityX
   if (x > MAX_OFFSET) {
     x = MAX_OFFSET - (x - MAX_OFFSET)
     vx = -vx
+    bounced = true
   } else if (x < -MAX_OFFSET) {
     x = -MAX_OFFSET - (x + MAX_OFFSET)
     vx = -vx
+    bounced = true
   }
   let y = nextY
   let vy = velocityY
   if (y > MAX_OFFSET) {
     y = MAX_OFFSET - (y - MAX_OFFSET)
     vy = -vy
+    bounced = true
   } else if (y < -MAX_OFFSET) {
     y = -MAX_OFFSET - (y + MAX_OFFSET)
     vy = -vy
+    bounced = true
   }
-  return { x, y, velocityX: vx, velocityY: vy }
+  return { x, y, velocityX: vx, velocityY: vy, bounced }
 }
 
 export type DragPointPhysics = {
@@ -96,7 +105,7 @@ export type DragPointPhysics = {
 // mirror's wedge anchor) can get the exact same feel without duplicating the frame-callback math.
 // clamp/bounceBoundary both default to the plain circular boundary — the mirror anchor uses exactly
 // that, unchanged; only the pattern epicentre passes its own wedge-aware ones (see useEpicenter.ts).
-export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity: SharedValue<number>, frozen: boolean, clamp: DragClamp = defaultClamp, bounceBoundary: BounceBoundary = defaultBounceBoundary): DragPointPhysics {
+export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity: SharedValue<number>, frozen: boolean, onBounce?: () => void, clamp: DragClamp = defaultClamp, bounceBoundary: BounceBoundary = defaultBounceBoundary): DragPointPhysics {
   const x = useSharedValue(0)
   const y = useSharedValue(0)
   const startX = useSharedValue(0)
@@ -105,13 +114,26 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
   // decayed by bounceFriction and reflected off bounceBoundary every frame while active.
   const bounceVelocityX = useSharedValue(0)
   const bounceVelocityY = useSharedValue(0)
+  // Seconds since the last onBounce haptic fired — see BOUNCE_HAPTIC_MIN_INTERVAL. Starts already past
+  // the floor so the very first bounce of a fling isn't swallowed.
+  const timeSinceBounceHaptic = useSharedValue(BOUNCE_HAPTIC_MIN_INTERVAL)
 
-  // Relayed through a ref rather than the frame callback referencing its own `const` directly — see
-  // useEpicenter.ts's original version of this same comment: at the point the closure below is
-  // created, the useFrameCallback(...) call that will produce `bounceFrame` hasn't returned yet.
-  const bounceFrameRef = useRef<FrameCallback | null>(null)
+  // Whether the bounce is actually doing anything right now — a plain SharedValue instead of the
+  // frame callback's own native setActive(true/false), which used to be how this was gated. Toggling
+  // the callback's OWN active state meant beginDrag/startBounce/recenter (worklets, running on the UI
+  // thread) had to call back into `bounceFrame.setActive` — a plain JS-thread closure captured by
+  // reference, not a worklet — which is exactly the "synchronously call a Remote Function" case
+  // react-native-worklets throws on; scheduleOnRN worked around the throw, but capturing that mutable
+  // object into a worklet at all is what was producing a stream of "modify key already passed to a
+  // worklet" warnings every time useFrameCallback's own internals touched it afterward (registering,
+  // re-registering, flipping isActive). None of that exists now: the callback below just stays
+  // registered permanently (autostart true) and no-ops on any frame this flag is false, so nothing
+  // ever mutates a shared object across the thread boundary — every read/write here is a plain
+  // SharedValue, which is what they're actually for.
+  const bounceActive = useSharedValue(false)
 
-  const bounceFrame = useFrameCallback((frameInfo) => {
+  useFrameCallback((frameInfo) => {
+    if (!bounceActive.value) return
     const deltaMs = frameInfo.timeSincePreviousFrame
     if (deltaMs === null) return
     const deltaSeconds = deltaMs / 1000
@@ -131,17 +153,20 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
     bounceVelocityX.value = bounded.velocityX
     bounceVelocityY.value = bounded.velocityY
 
+    timeSinceBounceHaptic.value += deltaSeconds
+    if (bounded.bounced && onBounce && timeSinceBounceHaptic.value >= BOUNCE_HAPTIC_MIN_INTERVAL) {
+      timeSinceBounceHaptic.value = 0
+      runOnJS(onBounce)()
+    }
+
     // With gravity active, velocity crosses zero momentarily at the top of every swing — including
     // ones still well away from center — so the speed check alone isn't enough to call it settled.
     const slowEnough = Math.hypot(bounceVelocityX.value, bounceVelocityY.value) < BOUNCE_STOP_SPEED
     const centeredEnough = gravity.value <= 0 || Math.hypot(x.value, y.value) < SNAP_DISTANCE
     if (slowEnough && centeredEnough) {
-      bounceFrameRef.current?.setActive(false)
+      bounceActive.value = false
     }
-  }, false)
-  useEffect(() => {
-    bounceFrameRef.current = bounceFrame
-  }, [bounceFrame])
+  }, true)
 
   // Freezing stops this point dead in its tracks rather than just pausing the pattern around it —
   // see index.tsx's own frozen effects for rotation/zoom/color-cycling, which this now matches.
@@ -149,13 +174,14 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
   // there was still enough of it left to be worth resuming.
   useEffect(() => {
     if (frozen) {
-      bounceFrame.setActive(false)
+      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+      bounceActive.value = false
       return
     }
     if (Math.hypot(bounceVelocityX.value, bounceVelocityY.value) >= BOUNCE_STOP_SPEED) {
-      bounceFrame.setActive(true)
+      bounceActive.value = true
     }
-  }, [frozen, bounceFrame, bounceVelocityX, bounceVelocityY])
+  }, [frozen, bounceActive, bounceVelocityX, bounceVelocityY])
 
   // react-hooks/immutability flags every SharedValue write below once this hook has more than one
   // gesture-affecting closure in play (beginDrag/updateDrag/startBounce/recenter, plus the bounce
@@ -165,7 +191,8 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
   // useEpicenter.ts) with no runOnJS hop, the same way wedgeClipPath and friends already are.
   const beginDrag = () => {
     'worklet'
-    bounceFrame.setActive(false)
+    // eslint-disable-next-line react-hooks/immutability
+    bounceActive.value = false
 
     startX.value = x.value
     startY.value = y.value
@@ -188,12 +215,14 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
     bounceVelocityX.value = velocityX
     // eslint-disable-next-line react-hooks/immutability
     bounceVelocityY.value = velocityY
-    bounceFrame.setActive(true)
+    // eslint-disable-next-line react-hooks/immutability
+    bounceActive.value = true
   }
 
   const recenter = () => {
     'worklet'
-    bounceFrame.setActive(false)
+    // eslint-disable-next-line react-hooks/immutability
+    bounceActive.value = false
     // eslint-disable-next-line react-hooks/immutability
     x.value = withSpring(0, SPRING)
     // eslint-disable-next-line react-hooks/immutability

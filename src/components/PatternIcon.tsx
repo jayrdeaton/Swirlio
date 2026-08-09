@@ -4,7 +4,7 @@ import { Circle, G, Path, Svg } from 'react-native-svg'
 import { buildFlowerPath } from '@/constants/flowerMath'
 import { PatternType } from '@/constants/patterns'
 import { buildPolygonPath } from '@/constants/polygonMath'
-import { buildSpiralArmPath, spiralSampleCount } from '@/constants/spiralMath'
+import { buildSpiralArmPath, buildSpiralArmPoints, spiralSampleCount } from '@/constants/spiralMath'
 import { buildStarburstPath } from '@/constants/starburstMath'
 import { buildStarPath } from '@/constants/starMath'
 
@@ -23,6 +23,33 @@ const BURST_RAY_COUNT = 10
 const POLYGON_SIDES = 6
 const STAR_POINTS = 5
 const FLOWER_PETALS = 5
+
+// The spiral preview's three arms have exact 3-fold rotational symmetry about the origin, so their
+// combined centroid does sit at (0,0) — but a 3-fold-symmetric shape's axis-aligned *bounding box*
+// isn't centered on its centroid (the same reason an equilateral triangle's bounding box isn't square
+// around its own center: extremes at 120° apart don't cancel out on both axes the way an even-fold
+// shape's would). At icon size that reads as a visibly off-center glyph, more so than any of the other
+// patterns here — rings/polygon land back on (0,0) exactly, star/flower drift only vertically — even
+// though the underlying math is already perfectly balanced. Computed once from the same sample points
+// buildSpiralArmPath draws (not measured via SVG layout, which isn't available cross-platform), then
+// applied as a corrective translate so the rendered icon's visual bounding box, not just its centroid,
+// lands on center.
+const SPIRAL_ICON_OFFSET = (() => {
+  const sampleCount = spiralSampleCount(SPIRAL_TURNS, PREVIEW_RADIUS)
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  for (let arm = 0; arm < SPIRAL_ARM_COUNT; arm++) {
+    for (const { x, y } of buildSpiralArmPoints(SPIRAL_TURNS, PREVIEW_RADIUS, sampleCount, (arm * 2 * Math.PI) / SPIRAL_ARM_COUNT)) {
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
+    }
+  }
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+})()
 
 type PatternIconProps = {
   pattern: PatternType
@@ -46,13 +73,13 @@ function PatternIconShape({ pattern, color }: { pattern: PatternType; color: str
     case 'spiral': {
       const d = buildSpiralArmPath(SPIRAL_TURNS, PREVIEW_RADIUS, spiralSampleCount(SPIRAL_TURNS, PREVIEW_RADIUS))
       return (
-        <>
+        <G transform={`translate(${-SPIRAL_ICON_OFFSET.x}, ${-SPIRAL_ICON_OFFSET.y})`}>
           {Array.from({ length: SPIRAL_ARM_COUNT }, (_, i) => (
             <G key={i} rotation={(360 / SPIRAL_ARM_COUNT) * i}>
               <Path d={d} stroke={color} fill='none' strokeWidth={PREVIEW_STROKE_WIDTH} strokeLinecap='round' />
             </G>
           ))}
-        </>
+        </G>
       )
     }
     case 'rings':

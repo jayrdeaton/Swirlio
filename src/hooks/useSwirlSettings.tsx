@@ -1,19 +1,32 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as SplashScreen from 'expo-splash-screen'
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { Platform } from 'react-native'
 
 import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
 import { PATTERN_ORDER, PatternType } from '@/constants/patterns'
 import { DASH_STYLE_ORDER, DashStyle } from '@/constants/strokeDash'
+
+import { loadSkiaWeb } from './loadSkiaWeb'
 
 export type SwirlSettings = {
   audioReactiveEnabled: boolean
   backgroundColors: string[]
   backgroundCycleSpeed: number
   bounceFriction: number
+  // The distance from the center (as a fraction of the pattern's own radius) at which it's
+  // hard-clipped away — 1 reaches the true corner, smaller values crop further in. See Spiral.tsx's
+  // fadeCircleAnimatedProps for the render-side math.
+  cropRadius: number
+  // Whether the crop clip traces the active pattern's own outline (polygon/star/flower's closed
+  // vertex list) instead of a plain circle — see Spiral.tsx's cropClip for the render-side math.
+  // True by default: a circle is still one tap away, and it's the more interesting look for the
+  // patterns that actually have a shape to trace. Left editable regardless of pattern (see
+  // ControlGroupTopSheetContent) rather than disabled for Spiral/Starburst/Rings, which have no
+  // closed boundary and always render a plain circle no matter what this is set to — so it's ready to
+  // go the moment the pattern is switched to one that does.
+  cropShaped: boolean
   dashStyle: DashStyle
-  fadeRadius: number
-  fadeSoftness: number
   // When true, every pattern's ring/turn/ray spacing is calibrated to a fixed reference radius (the
   // window's own half-diagonal, from a centered epicentre) instead of the live one, which grows as
   // the epicentre is dragged toward a corner — see rippleMath's MAX_RADIUS_TO_REFERENCE_RATIO and
@@ -28,7 +41,22 @@ export type SwirlSettings = {
   // the edges forever, or until friction alone kills the velocity), turning it up gives the whole
   // thing a "gravity well" it eventually settles back into the middle of.
   gravity: number
+  // A second, inner cutoff carved out of the crop circle — a fraction *of* cropRadius (not of the
+  // pattern's own radius), so the hole can never reach or exceed the crop no matter how it's dragged:
+  // 0 is no hole at all (the default), 1 hollows out the entire crop circle, leaving nothing visible
+  // (the same "fully clipped away" case cropRadius itself hits at 0). See Spiral.tsx's cropClip for
+  // the render-side math.
+  holeRadius: number
+  // Same idea as cropShaped, applied to the hole instead of the outer crop — independent of it, so a
+  // shaped outer crop can still have a plain circular hole punched out of it (or vice versa). See
+  // Spiral.tsx's cropClip.
+  holeShaped: boolean
   mirrorAlternateColors: boolean
+  // How much of each wedge's own angle opens up as empty canvas between it and its neighbors — 0 (the
+  // default) is the original edge-to-edge kaleidoscope, no gap at all. A fraction of the wedge's own
+  // angle (see kaleidoscope.ts's wedgeClipPath), not a fixed degree amount, so the same setting reads
+  // the same regardless of mirrorLines. No effect at mirrorLines 0 (nothing to trace).
+  mirrorGap: number
   mirrorLines: number
   // A global spin applied to the whole assembled kaleidoscope (every wedge, as one rigid unit) around
   // the epicentre — independent of rotationSpeed, which only spins the pattern content drawn inside
@@ -42,10 +70,6 @@ export type SwirlSettings = {
   // Compact by default (icon-only FABs, no slider labels) — turning this on trades that density for
   // legibility: bigger FAB captions and slider labels, see SettingSlider/LabeledFab.
   showLabels: boolean
-  // A thin reference overlay tracing the actual mirror lines the kaleidoscope reflects around — off by
-  // default since it's a debug/reference aid, not part of the art itself. No effect at mirrorLines 0
-  // (nothing to trace). See Spiral.tsx's mirrorLinePath.
-  showMirrorLines: boolean
   strokeWidth: number
   tightness: number
   tiltEnabled: boolean
@@ -58,14 +82,17 @@ type SwirlSettingsContextValue = {
   setBackgroundColors: (colors: string[]) => void
   setBackgroundCycleSpeed: (speed: number) => void
   setBounceFriction: (friction: number) => void
+  setCropRadius: (cropRadius: number) => void
+  setCropShaped: (shaped: boolean) => void
   setDashStyle: (dashStyle: DashStyle) => void
-  setFadeRadius: (fadeRadius: number) => void
-  setFadeSoftness: (fadeSoftness: number) => void
   setFixedSpacing: (enabled: boolean) => void
   setForegroundColors: (colors: string[]) => void
   setForegroundCycleSpeed: (speed: number) => void
   setGravity: (gravity: number) => void
+  setHoleRadius: (holeRadius: number) => void
+  setHoleShaped: (shaped: boolean) => void
   setMirrorAlternateColors: (enabled: boolean) => void
+  setMirrorGap: (gap: number) => void
   setMirrorLines: (lines: number) => void
   setMirrorRotationSpeed: (speed: number) => void
   setPattern: (pattern: PatternType) => void
@@ -73,11 +100,11 @@ type SwirlSettingsContextValue = {
   setRotationSpeed: (speed: number) => void
   setShakeEnabled: (enabled: boolean) => void
   setShowLabels: (enabled: boolean) => void
-  setShowMirrorLines: (enabled: boolean) => void
   setStrokeWidth: (strokeWidth: number) => void
   setTightness: (tightness: number) => void
   setTiltEnabled: (enabled: boolean) => void
   setZoomSpeed: (speed: number) => void
+  resetSettings: () => void
 }
 
 const SETTINGS_STORAGE_KEY = 'swirlio.settings.v1'
@@ -86,32 +113,39 @@ const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
 // Bipolar, unlike the other speed-ish settings on this screen: negative is reverse, 0 is stopped,
 // positive is forward. There's no separate boolean for direction anymore — it lives entirely in the
 // sign of these two values, so rotation and zoom can each run their own direction independently.
-export const MIN_ZOOM_SPEED = -5
-export const MAX_ZOOM_SPEED = 5
+export const MIN_ZOOM_SPEED = -10
+export const MAX_ZOOM_SPEED = 10
 export const MIN_CYCLE_SPEED = 0.1
 export const MAX_CYCLE_SPEED = 5
 export const MIN_STROKE_WIDTH = 1
-export const MAX_STROKE_WIDTH = 30
+export const MAX_STROKE_WIDTH = 36
 export const MIN_TIGHTNESS = 0.4
 export const MAX_TIGHTNESS = 2.5
-export const MIN_ROTATION_SPEED = -5
-export const MAX_ROTATION_SPEED = 5
-export const MIN_MIRROR_ROTATION_SPEED = -5
-export const MAX_MIRROR_ROTATION_SPEED = 5
+export const MIN_ROTATION_SPEED = -10
+export const MAX_ROTATION_SPEED = 10
+export const MIN_MIRROR_ROTATION_SPEED = -10
+export const MAX_MIRROR_ROTATION_SPEED = 10
+// A fraction of each wedge's own angle (see kaleidoscope.ts's wedgeClipPath), not a fixed degree
+// amount — 0 is no gap at all, the original edge-to-edge kaleidoscope. Stops short of 1 rather than
+// reaching it: at gapFraction 1 the inset from each of a wedge's two edges would meet exactly in the
+// middle and collapse it to nothing, so this leaves every wedge a visible sliver even at the slider's
+// far end.
+export const MIN_MIRROR_GAP = 0
+export const MAX_MIRROR_GAP = 0.9
 export const MIN_POLYGON_SIDES = 3
 export const MAX_POLYGON_SIDES = 8
-// The distance from the center (as a fraction of the full visible radius) at which the shape has
-// completely faded away — 1 reaches the true corner. Floored just above 0 rather than allowing it,
-// since a fadeRadius of exactly 0 has nothing left to show at all — not a useful "small" setting, just
-// a blank canvas. There's no separate boolean for turning fading off; that's fadeRadius = 1 with
-// fadeSoftness = 0 (see below).
-export const MIN_FADE_RADIUS = 0.05
-export const MAX_FADE_RADIUS = 1
-// How wide the fade's transition band is, leading up to fadeRadius — 0 is a hard edge right at
-// fadeRadius, 1 spreads the ramp across the entire visible radius. Clamped to fadeRadius at the point
-// of use (Spiral.tsx) rather than here, so the two sliders don't have to fight over each other's range.
-export const MIN_FADE_SOFTNESS = 0
-export const MAX_FADE_SOFTNESS = 1
+// The distance from the center (as a fraction of the full visible radius) at which the pattern is
+// hard-clipped away — 1 reaches the true corner. Floored just above 0 rather than allowing it, since
+// a cropRadius of exactly 0 has nothing left to show at all — not a useful "small" setting, just a
+// blank canvas. There's no separate boolean for turning the crop off; that's cropRadius = 1.
+export const MIN_CROP_RADIUS = 0.05
+export const MAX_CROP_RADIUS = 1
+// A fraction of cropRadius, not of the pattern's own radius — see the field's own comment above for
+// why that keeps the hole from ever needing to be clamped against the crop separately. 0 and 1 are
+// both meaningful ends (no hole; the whole crop circle hollowed out), so unlike MIN_CROP_RADIUS there's
+// no need to floor this above 0.
+export const MIN_HOLE_RADIUS = 0
+export const MAX_HOLE_RADIUS = 1
 // A per-second exponential decay rate applied to the epicentre's bounce velocity (see useEpicenter's
 // frame callback) — velocity(t) = velocity0 * e^(-friction * t), not a plain 0-1 "amount". 0 is a
 // perfectly elastic, never-settling bounce (left in as a deliberate toy extreme, not a bug); 5 kills
@@ -159,10 +193,14 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       cycleSeedColor?: unknown
       cycleSpeed?: unknown
       dashed?: unknown
-      // Briefly persisted during a since-reverted attempt to collapse fadeRadius/fadeSoftness into
-      // one boolean — kept as a migration target so anyone who had that version open for even a
-      // moment doesn't lose their fade settings on the next load.
+      // Briefly persisted during a since-reverted attempt to collapse fadeRadius (now cropRadius) into
+      // a single boolean — kept as a migration target so anyone who had that version open for even a
+      // moment doesn't lose their crop setting on the next load.
       fadeEnabled?: unknown
+      // cropRadius's old name, from when this was a soft gradient fade rather than a hard clip — the
+      // stored number means exactly the same thing under either name (same range, same "how far in
+      // does it cut off" semantics), so this is a pure key rename, not a value migration.
+      fadeRadius?: unknown
       mirrorClipped?: unknown
       mirrorLeftRight?: unknown
       mirrorTopBottom?: unknown
@@ -181,10 +219,9 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
     // mirrorClipped has no equivalent at all anymore (every kaleidoscope wedge is always clipped).
     const legacyMirrorLines = typeof persisted.mirrorLeftRight === 'boolean' || typeof persisted.mirrorTopBottom === 'boolean' ? (persisted.mirrorLeftRight ? 1 : 0) + (persisted.mirrorTopBottom ? 1 : 0) : null
     // Reverse migration for the brief fadeEnabled boolean attempt (see the field comment above) —
-    // maps back to the same fixed radius/softness that boolean's "on" state used to render as, only
-    // relevant for anyone who happened to have that version open.
-    const legacyFadeRadius = typeof persisted.fadeEnabled === 'boolean' ? (persisted.fadeEnabled ? 0.15 : 1) : null
-    const legacyFadeSoftness = typeof persisted.fadeEnabled === 'boolean' ? (persisted.fadeEnabled ? 1 : 0) : null
+    // maps back to the same fixed radius that boolean's "on" state used to render as, only relevant
+    // for anyone who happened to have that version open.
+    const legacyCropRadiusFromFadeEnabled = typeof persisted.fadeEnabled === 'boolean' ? (persisted.fadeEnabled ? 0.15 : 1) : null
 
     return {
       ...defaultSettings,
@@ -194,6 +231,7 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.backgroundCycleSpeed === 'number' ? { backgroundCycleSpeed: clamp(persisted.backgroundCycleSpeed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : legacyCycleSpeed != null ? { backgroundCycleSpeed: legacyCycleSpeed } : null),
       ...(typeof persisted.bounceFriction === 'number' ? { bounceFriction: clamp(persisted.bounceFriction, MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION) } : null),
       ...(typeof persisted.gravity === 'number' ? { gravity: clamp(persisted.gravity, MIN_GRAVITY, MAX_GRAVITY) } : null),
+      ...(typeof persisted.holeRadius === 'number' ? { holeRadius: clamp(persisted.holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : null),
       // Checked against PATTERN_ORDER itself rather than an enumerated list of literals: this is
       // what makes retiring a pattern safe later, not just adding one. Whatever's persisted — a
       // pattern that was removed after shipping, a typo, garbage from a future version — either
@@ -205,11 +243,13 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       // enumerated list, so a retired style falls through to the default instead of needing its own
       // migration. legacyDashStyle only kicks in when the new field isn't present at all.
       ...(typeof persisted.dashStyle === 'string' && DASH_STYLE_ORDER.includes(persisted.dashStyle) ? { dashStyle: persisted.dashStyle } : legacyDashStyle ? { dashStyle: legacyDashStyle } : null),
-      ...(typeof persisted.fadeRadius === 'number' ? { fadeRadius: clamp(persisted.fadeRadius, MIN_FADE_RADIUS, MAX_FADE_RADIUS) } : legacyFadeRadius != null ? { fadeRadius: legacyFadeRadius } : null),
-      ...(typeof persisted.fadeSoftness === 'number' ? { fadeSoftness: clamp(persisted.fadeSoftness, MIN_FADE_SOFTNESS, MAX_FADE_SOFTNESS) } : legacyFadeSoftness != null ? { fadeSoftness: legacyFadeSoftness } : null),
+      ...(typeof persisted.cropRadius === 'number' ? { cropRadius: clamp(persisted.cropRadius, MIN_CROP_RADIUS, MAX_CROP_RADIUS) } : typeof persisted.fadeRadius === 'number' ? { cropRadius: clamp(persisted.fadeRadius, MIN_CROP_RADIUS, MAX_CROP_RADIUS) } : legacyCropRadiusFromFadeEnabled != null ? { cropRadius: legacyCropRadiusFromFadeEnabled } : null),
+      ...(typeof persisted.cropShaped === 'boolean' ? { cropShaped: persisted.cropShaped } : null),
+      ...(typeof persisted.holeShaped === 'boolean' ? { holeShaped: persisted.holeShaped } : null),
       ...(typeof persisted.fixedSpacing === 'boolean' ? { fixedSpacing: persisted.fixedSpacing } : null),
       ...(typeof persisted.audioReactiveEnabled === 'boolean' ? { audioReactiveEnabled: persisted.audioReactiveEnabled } : null),
       ...(typeof persisted.mirrorAlternateColors === 'boolean' ? { mirrorAlternateColors: persisted.mirrorAlternateColors } : null),
+      ...(typeof persisted.mirrorGap === 'number' ? { mirrorGap: clamp(persisted.mirrorGap, MIN_MIRROR_GAP, MAX_MIRROR_GAP) } : null),
       ...(typeof persisted.mirrorLines === 'number' ? { mirrorLines: clampInt(persisted.mirrorLines, MIN_MIRROR_LINES, MAX_MIRROR_LINES) } : legacyMirrorLines != null ? { mirrorLines: legacyMirrorLines } : null),
       ...(typeof persisted.mirrorRotationSpeed === 'number' ? { mirrorRotationSpeed: clamp(persisted.mirrorRotationSpeed, MIN_MIRROR_ROTATION_SPEED, MAX_MIRROR_ROTATION_SPEED) } : null),
       ...(typeof persisted.polygonSides === 'number' ? { polygonSides: clampInt(persisted.polygonSides, MIN_POLYGON_SIDES, MAX_POLYGON_SIDES) } : null),
@@ -219,7 +259,6 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.rotationSpeed === 'number' ? { rotationSpeed: clamp(persisted.rotationSpeed, MIN_ROTATION_SPEED, MAX_ROTATION_SPEED) } : null),
       ...(typeof persisted.shakeEnabled === 'boolean' ? { shakeEnabled: persisted.shakeEnabled } : null),
       ...(typeof persisted.showLabels === 'boolean' ? { showLabels: persisted.showLabels } : null),
-      ...(typeof persisted.showMirrorLines === 'boolean' ? { showMirrorLines: persisted.showMirrorLines } : null),
       ...(typeof persisted.strokeWidth === 'number' ? { strokeWidth: clamp(persisted.strokeWidth, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH) } : null),
       ...(typeof persisted.tightness === 'number' ? { tightness: clamp(persisted.tightness, MIN_TIGHTNESS, MAX_TIGHTNESS) } : null),
       ...(typeof persisted.tiltEnabled === 'boolean' ? { tiltEnabled: persisted.tiltEnabled } : null),
@@ -242,14 +281,17 @@ const defaultSettings: SwirlSettings = {
   backgroundColors: DEFAULT_BACKGROUND_COLORS,
   backgroundCycleSpeed: 1,
   bounceFriction: 1,
+  cropRadius: 1,
+  cropShaped: true,
   dashStyle: 'solid',
-  fadeRadius: 1,
-  fadeSoftness: 1,
   fixedSpacing: false,
   foregroundColors: DEFAULT_FOREGROUND_COLORS,
   foregroundCycleSpeed: 1,
   gravity: 0,
+  holeRadius: 0,
+  holeShaped: true,
   mirrorAlternateColors: false,
+  mirrorGap: 0,
   mirrorLines: 0,
   mirrorRotationSpeed: 0,
   pattern: 'spiral',
@@ -257,7 +299,6 @@ const defaultSettings: SwirlSettings = {
   rotationSpeed: 1,
   shakeEnabled: true,
   showLabels: false,
-  showMirrorLines: false,
   strokeWidth: 6,
   tightness: 1,
   tiltEnabled: true,
@@ -271,6 +312,11 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
   // Gates the first paint: without this, the app briefly renders defaultSettings, then snaps to
   // whatever was saved once AsyncStorage resolves — a visible "the art suddenly changed" flash.
   const [hydrated, setHydrated] = useState(false)
+  // Skia's web target renders through CanvasKit, a WASM build of Skia fetched at runtime — Spiral
+  // can't draw a single frame until that load resolves, so this gates the first paint the same way
+  // `hydrated` already does. Starts true everywhere except web, where there's nothing to wait on.
+  const [skiaReady, setSkiaReady] = useState(Platform.OS !== 'web')
+  const ready = hydrated && skiaReady
 
   useEffect(() => {
     let isMounted = true
@@ -295,6 +341,16 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
     }
   }, [])
 
+  useEffect(() => {
+    let isMounted = true
+    loadSkiaWeb().then(() => {
+      if (isMounted) setSkiaReady(true)
+    })
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
   // Debounced: a slider drag or a pinch changes settings dozens of times per second, and writing
   // every intermediate value serialized the whole object and hit storage on each frame — enough JS
   // thread contention to make the sliders themselves stutter. Only the value you settle on is saved.
@@ -311,8 +367,8 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
   }, [hydrated, settings])
 
   useEffect(() => {
-    if (hydrated) SplashScreen.hideAsync()
-  }, [hydrated])
+    if (ready) SplashScreen.hideAsync()
+  }, [ready])
 
   const value = useMemo<SwirlSettingsContextValue>(
     () => ({
@@ -322,14 +378,17 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setBackgroundColors: (colors) => setSettings((prev) => (colors.length > 0 ? { ...prev, backgroundColors: colors } : prev)),
       setBackgroundCycleSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, backgroundCycleSpeed: clamp(speed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : prev)),
       setBounceFriction: (friction) => setSettings((prev) => (Number.isFinite(friction) ? { ...prev, bounceFriction: clamp(friction, MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION) } : prev)),
+      setCropRadius: (cropRadius) => setSettings((prev) => (Number.isFinite(cropRadius) ? { ...prev, cropRadius: clamp(cropRadius, MIN_CROP_RADIUS, MAX_CROP_RADIUS) } : prev)),
+      setCropShaped: (shaped) => setSettings((prev) => ({ ...prev, cropShaped: shaped })),
       setDashStyle: (dashStyle) => setSettings((prev) => ({ ...prev, dashStyle })),
-      setFadeRadius: (fadeRadius) => setSettings((prev) => (Number.isFinite(fadeRadius) ? { ...prev, fadeRadius: clamp(fadeRadius, MIN_FADE_RADIUS, MAX_FADE_RADIUS) } : prev)),
-      setFadeSoftness: (fadeSoftness) => setSettings((prev) => (Number.isFinite(fadeSoftness) ? { ...prev, fadeSoftness: clamp(fadeSoftness, MIN_FADE_SOFTNESS, MAX_FADE_SOFTNESS) } : prev)),
       setFixedSpacing: (enabled) => setSettings((prev) => ({ ...prev, fixedSpacing: enabled })),
       setForegroundColors: (colors) => setSettings((prev) => (colors.length > 0 ? { ...prev, foregroundColors: colors } : prev)),
       setForegroundCycleSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, foregroundCycleSpeed: clamp(speed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : prev)),
       setGravity: (gravity) => setSettings((prev) => (Number.isFinite(gravity) ? { ...prev, gravity: clamp(gravity, MIN_GRAVITY, MAX_GRAVITY) } : prev)),
+      setHoleRadius: (holeRadius) => setSettings((prev) => (Number.isFinite(holeRadius) ? { ...prev, holeRadius: clamp(holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : prev)),
+      setHoleShaped: (shaped) => setSettings((prev) => ({ ...prev, holeShaped: shaped })),
       setMirrorAlternateColors: (enabled) => setSettings((prev) => ({ ...prev, mirrorAlternateColors: enabled })),
+      setMirrorGap: (gap) => setSettings((prev) => (Number.isFinite(gap) ? { ...prev, mirrorGap: clamp(gap, MIN_MIRROR_GAP, MAX_MIRROR_GAP) } : prev)),
       setMirrorLines: (lines) => setSettings((prev) => (Number.isFinite(lines) ? { ...prev, mirrorLines: clampInt(lines, MIN_MIRROR_LINES, MAX_MIRROR_LINES) } : prev)),
       setMirrorRotationSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, mirrorRotationSpeed: clamp(speed, MIN_MIRROR_ROTATION_SPEED, MAX_MIRROR_ROTATION_SPEED) } : prev)),
       setPattern: (pattern) => setSettings((prev) => ({ ...prev, pattern })),
@@ -337,16 +396,24 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setRotationSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, rotationSpeed: clamp(speed, MIN_ROTATION_SPEED, MAX_ROTATION_SPEED) } : prev)),
       setShakeEnabled: (enabled) => setSettings((prev) => ({ ...prev, shakeEnabled: enabled })),
       setShowLabels: (enabled) => setSettings((prev) => ({ ...prev, showLabels: enabled })),
-      setShowMirrorLines: (enabled) => setSettings((prev) => ({ ...prev, showMirrorLines: enabled })),
       setStrokeWidth: (strokeWidth) => setSettings((prev) => (Number.isFinite(strokeWidth) ? { ...prev, strokeWidth: clamp(strokeWidth, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH) } : prev)),
       setTightness: (tightness) => setSettings((prev) => (Number.isFinite(tightness) ? { ...prev, tightness: clamp(tightness, MIN_TIGHTNESS, MAX_TIGHTNESS) } : prev)),
       setTiltEnabled: (enabled) => setSettings((prev) => ({ ...prev, tiltEnabled: enabled })),
-      setZoomSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, zoomSpeed: clamp(speed, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED) } : prev))
+      setZoomSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, zoomSpeed: clamp(speed, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED) } : prev)),
+      // A flat, one-shot replacement rather than looping every individual setter — there's no
+      // per-field validation to run since defaultSettings is already known-valid, and going through
+      // each setter would also mean this drifts out of sync the moment a new field's setter gains its
+      // own extra branching (e.g. the empty-list guards on colors) that a plain reset should ignore
+      // anyway. audioReactiveEnabled is carried over from whatever it already was, not reset to the
+      // default's false — it's a live "is the mic actually feeding this" state tied to a mic the user
+      // just granted/plugged in for the session, not a look/tuning preference like everything else
+      // this button touches, so a flat reset shouldn't silently cut it off mid-use.
+      resetSettings: () => setSettings((prev) => ({ ...defaultSettings, audioReactiveEnabled: prev.audioReactiveEnabled }))
     }),
     [settings]
   )
 
-  if (!hydrated) return null
+  if (!ready) return null
 
   return <SwirlSettingsContext.Provider value={value}>{children}</SwirlSettingsContext.Provider>
 }

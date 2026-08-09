@@ -1,3 +1,5 @@
+import type { SkPoint } from '@shopify/react-native-skia'
+
 // Sampled points per petal — enough for each petal's curve to read as smooth rather than faceted,
 // without the point count itself scaling with the live stroke animation's own cost.
 const FLOWER_SAMPLES_PER_PETAL = 24
@@ -38,4 +40,27 @@ export function buildFlowerPath(petals: number, radius: number): string {
     d += i === 0 ? `M${x.toFixed(2)},${y.toFixed(2)}` : `L${x.toFixed(2)},${y.toFixed(2)}`
   }
   return `${d}Z`
+}
+
+// Same geometry as buildFlowerPath, as raw points rather than an SVG string — FlowerPattern feeds
+// this straight into Skia's PathBuilder.addPoly(points, true) (see its own comment) instead of
+// building a string every frame only to have Skia immediately re-parse it back into the same points.
+// petals * FLOWER_SAMPLES_PER_PETAL points, not + 1: addPoly's own `close` flag draws the final
+// closing edge, so there's no need for buildFlowerPath's repeated closing point here. buildFlowerPath
+// itself stays exactly as it was for PatternIcon's static preview icons, which render through
+// react-native-svg and genuinely need a string `d`, not a Skia path.
+export function buildFlowerPoints(petals: number, radius: number): SkPoint[] {
+  'worklet'
+  if (!Number.isFinite(petals) || petals < 2 || !Number.isFinite(radius) || radius <= 0) return []
+
+  const sampleCount = petals * FLOWER_SAMPLES_PER_PETAL
+  const pts: SkPoint[] = new Array(sampleCount)
+  for (let i = 0; i < sampleCount; i++) {
+    const phase = (i / sampleCount) * Math.PI * 2
+    const angle = phase - Math.PI / 2
+    const lobe = Math.abs(Math.cos((petals * phase) / 2))
+    const r = radius * (FLOWER_INNER_RATIO + (1 - FLOWER_INNER_RATIO) * lobe)
+    pts[i] = { x: r * Math.cos(angle), y: r * Math.sin(angle) }
+  }
+  return pts
 }

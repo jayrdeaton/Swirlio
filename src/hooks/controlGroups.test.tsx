@@ -25,7 +25,7 @@ jest.mock('@rific/drawer', () => ({
   createDrawer: () => {
     let isTop: boolean | null = null
     return {
-      DrawerProvider: ({ children }: { children: React.ReactNode }) => children,
+      DrawerInstanceProvider: ({ children }: { children: React.ReactNode }) => children,
       useDrawer: () => {
         if (isTop === null) isTop = mockCreatedCount++ === 0
         return isTop ? mockTopState : mockBottomState
@@ -45,10 +45,10 @@ describe('useOpenControlGroup', () => {
     const { result } = await renderHook(() => ({ groups: useControlGroups(), openGroup: useOpenControlGroup() }), { wrapper: ControlGroupProvider })
 
     await act(async () => {
-      result.current.openGroup('speed')
+      result.current.openGroup('pattern')
     })
 
-    expect(result.current.groups.activeGroup).toBe('speed')
+    expect(result.current.groups.activeGroup).toBe('pattern')
     // Two createDrawer() instances back the group sheet (top + bottom — see controlGroups.tsx), both
     // routed through the same mocked open() here, so each fires once per half.
     expect(mockGroupSheetOpen).toHaveBeenCalledTimes(2)

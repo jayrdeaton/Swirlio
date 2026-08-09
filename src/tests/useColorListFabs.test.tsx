@@ -9,7 +9,22 @@ jest.mock('react-native-paper', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
   return {
-    // Renders its label through a real RN Text (unlike the mocked Text below), so tests can assert
+    Icon: () => null,
+    IconButton: ({ onPress, testID }: any) => <RN.Pressable testID={testID} onPress={onPress} />,
+    // The label isn't under test here; only the props reaching the dots/swatches are.
+    Text: () => null,
+    useTheme: () => ({ colors: { error: '#b3261e', onSurfaceVariant: '#49454f', outlineVariant: '#cac4d0', primary: '#000000' } })
+  }
+})
+
+// FAB/Button/TouchableOpacity now come from @rific/haptic-press rather than react-native-paper/
+// react-native (see useColorListFabs.tsx/LabeledFab.tsx/ActionFab.tsx) — mocked the same shallow way
+// as the react-native-paper mock above, still without pulling in the real haptic-wiring chain.
+jest.mock('@rific/haptic-press', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const RN = require('react-native')
+  return {
+    // Renders its label through a real RN Text (unlike the mocked Text above), so tests can assert
     // on the visible "Remove" text rather than only on the testID.
     Button: ({ onPress, testID, children }: any) => (
       <RN.Pressable testID={testID} onPress={onPress}>
@@ -20,11 +35,11 @@ jest.mock('react-native-paper', () => {
     // backgroundColor set to the swatch's own hex) render down to this FAB, so it needs to forward the
     // testID that's the actual thing under test here.
     FAB: ({ onPress, disabled, testID, style }: any) => <RN.Pressable testID={testID} onPress={onPress} disabled={disabled} style={style} />,
-    Icon: () => null,
-    IconButton: ({ onPress, testID }: any) => <RN.Pressable testID={testID} onPress={onPress} />,
-    // The label isn't under test here; only the props reaching the dots/swatches are.
-    Text: () => null,
-    useTheme: () => ({ colors: { error: '#b3261e', onSurfaceVariant: '#49454f', outlineVariant: '#cac4d0', primary: '#000000' } })
+    TouchableOpacity: ({ onPress, testID, style, children }: any) => (
+      <RN.Pressable testID={testID} onPress={onPress} style={style}>
+        {children}
+      </RN.Pressable>
+    )
   }
 })
 
@@ -44,6 +59,13 @@ jest.mock('@rific/auto-paper', () => {
   MockDialog.Content = MockDialogContent
   return {
     Dialog: MockDialog,
+    // useToggleFabAppearance (LabeledFab, real/not mocked here) reads this unconditionally — rules
+    // of hooks — even though every LabeledFab actually rendered in this suite is either a swatch
+    // (colorOverride, which never mounts a blur backdrop at all) or an always-active ActionFab
+    // ("Reset"/"Add"), so BlurView itself is never actually rendered here; stubbed only so the
+    // import doesn't resolve to undefined.
+    useBlur: () => true,
+    BlurView: ({ children }: any) => children ?? null,
     // colorSwatches.ts spreads this in behind Black/White — a couple of representative entries are
     // enough for the swatch grid to render without depending on the library's full palette.
     defaultColors: [
@@ -52,20 +74,20 @@ jest.mock('@rific/auto-paper', () => {
     ],
     // Real luminance check rather than a stub: the "selected ring contrasts with its own fill" test
     // needs black and white to actually resolve to different contrast colours.
-    isDarkColor: (hex: string) => {
-      const value = hex.replace('#', '')
-      const r = parseInt(value.substring(0, 2), 16)
-      const g = parseInt(value.substring(2, 4), 16)
-      const b = parseInt(value.substring(4, 6), 16)
-      return (r * 299 + g * 587 + b * 114) / 1000 < 128
-    }
+    isDarkColor: mockIsDarkColor,
+    // Mirrors the real package's own getContrastColor, which is just isDarkColor gating between the
+    // two extremes — kept in terms of the mock above instead of duplicating the luminance math again.
+    getContrastColor: (hex: string) => (mockIsDarkColor(hex) ? '#ffffff' : '#000000')
   }
 })
 
-const mockSelection = jest.fn()
-jest.mock('@rific/haptic-press', () => ({
-  useVibration: () => ({ selection: mockSelection })
-}))
+function mockIsDarkColor(hex: string): boolean {
+  const value = hex.replace('#', '')
+  const r = parseInt(value.substring(0, 2), 16)
+  const g = parseInt(value.substring(2, 4), 16)
+  const b = parseInt(value.substring(4, 6), 16)
+  return (r * 299 + g * 587 + b * 114) / 1000 < 128
+}
 
 function flattenStyle(style: unknown): Record<string, unknown> {
   return Array.isArray(style) ? Object.assign({}, ...style) : (style as Record<string, unknown>)
@@ -120,7 +142,6 @@ describe('useColorListFabs', () => {
     })
 
     expect(onChange).toHaveBeenCalledWith(['#000000', '#FFFFFF'])
-    expect(mockSelection).toHaveBeenCalled()
   })
 
   it('replaces only the tapped slot when picked from a dot, leaving the others alone', async () => {

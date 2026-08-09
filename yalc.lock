@@ -1,0 +1,20 @@
+{
+  "version": "v1",
+  "packages": {
+    "@rific/drawer": {
+      "signature": "14cba23598d22bbc12d0eca4d475b5f0",
+      "file": true,
+      "replaced": "^0.2.0"
+    },
+    "@rific/auto-paper": {
+      "signature": "9c2da9204b699c40e2c94950369e27a7",
+      "file": true,
+      "replaced": "^0.8.0"
+    },
+    "@rific/haptic-press": {
+      "signature": "7be0055b6862cdbc7a7d7c23cd36cd62",
+      "file": true,
+      "replaced": "^0.5.0"
+    }
+  }
+}

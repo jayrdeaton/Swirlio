@@ -3,38 +3,67 @@ import { Platform } from 'react-native'
 import { AudioContext, AudioManager, AudioRecorder } from 'react-native-audio-api'
 import { useSharedValue } from 'react-native-reanimated'
 
-// Higher resolution than the library's own "see your sound" example (512) — frequencyBinCount is
-// half of this, and averaging across more bins smooths out single-sample spikes in the overall
-// level reading without needing a separate smoothing pass of our own.
-const FFT_SIZE = 1024
-// 0-255 is the raw byte range getByteFrequencyData returns per bin; normalizing to 0-1 here (not at
-// every call site) keeps every consumer's math independent of this library-specific detail.
-const BYTE_MAX = 255
-// Where each band's slice of the bin array ends, as a fraction of frequencyBinCount — bass is the
-// bottom 10% of bins, mid the next 30%, treble whatever's left. A plain fraction split rather than an
-// exact-Hz one (which would need reading audioContext.sampleRate and doing real Hz-to-bin math): bass
-// energy is naturally concentrated in a handful of the lowest bins regardless of sample rate, so this
-// reads as "bass/mid/treble" close enough without the extra precision actually changing how any of
-// this looks driving an animation.
-const BASS_BAND_END = 0.1
-const MID_BAND_END = 0.4
+// Samples per onAudioReady callback, at RECORDER_SAMPLE_RATE — ~93ms/reading, small enough to feel
+// responsive without crossing the JS bridge so often it becomes its own overhead.
+const RECORDER_BUFFER_LENGTH = 4096
+const RECORDER_SAMPLE_RATE = 44100
+
+// This hook used to run the recorder's audio through AudioContext -> RecorderAdapterNode ->
+// AnalyserNode and read FFT bins from getByteFrequencyData, matching the library's own visualizer
+// guide. That never actually worked for a LIVE recorder source on iOS in this library version
+// (0.13.2, the latest stable release): the analyser read permanent silence no matter how the graph
+// was wired, confirmed by comparing it against AudioRecorder's own onAudioReady callback (which DOES
+// receive real, varying PCM the whole time the analyser path reads zero) — see
+// https://github.com/software-mansion/react-native-audio-api/issues/721 for the same "recording
+// succeeds, buffers come back empty" symptom reported by someone else on iOS. Routing onAudioReady's
+// buffers into a second node (AudioBufferQueueSourceNode) connected to the same analyser didn't fix
+// it either, and introduced its own native crash (`.start()` throwing on an internal default
+// argument). Computing bass/mid/treble/loudness directly from onAudioReady's raw PCM — a data source
+// that's been reliable through every one of those attempts — sidesteps AnalyserNode entirely instead
+// of continuing to chase it.
+//
+// The band split is three simple one-pole low-pass filters (RC-style exponential moving averages)
+// run directly over the raw samples, not a real FFT — cheap enough to run in plain JS on every
+// buffer, and "cheap DSP that's obviously bass/mid/treble" is all a background visual pulse needs.
+// alpha = 1 - exp(-2*pi*fc/sampleRate) is the standard one-pole coefficient for a given cutoff.
+function onePoleAlpha(cutoffHz: number): number {
+  return 1 - Math.exp((-2 * Math.PI * cutoffHz) / RECORDER_SAMPLE_RATE)
+}
+const BASS_ALPHA = onePoleAlpha(250)
+const TREBLE_ALPHA = onePoleAlpha(2000)
+
+// RMS amplitude (0..1 scale, since PCM samples are -1..1) doesn't itself read as "how loud does this
+// feel" — normal speech into a phone mic barely nudges it (see the raw onAudioReady maxAbsSample
+// readings this was calibrated against: ~0.01-0.03, not anywhere near 1). Converting to dB and
+// normalizing across a plausible quiet-to-loud range is the same shape of correction
+// getByteFrequencyData's own minDecibels/maxDecibels used to apply for free. Untestable in this
+// environment (no way to feed real mic input here) — a first-pass calibration meant to be retuned by
+// ear on a real device, the same as ROTATION_VELOCITY_TO_SPEED_SCALE and friends in index.tsx.
+const MIN_DB = -60
+const MAX_DB = -10
+function rmsToUnit(rms: number): number {
+  if (rms <= 0) return 0
+  const db = 20 * Math.log10(rms)
+  return Math.min(1, Math.max(0, (db - MIN_DB) / (MAX_DB - MIN_DB)))
+}
+
 // mid/treble/loudness feed values that RESTART an in-flight animation on every change (see
 // index.tsx's effectiveRotationSpeed/effectiveZoomSpeed/effectiveCycleSpeed and useLoopingProgress's
-// own "changing speed restarts the animation" comment) — updating those from every single analyser
-// frame (~60/sec) would tear down and rebuild that animation just as often, reading as jitter instead
+// own "changing speed restarts the animation" comment) — updating those on every single onAudioReady
+// buffer (~11/sec) would tear down and rebuild that animation just as often, reading as jitter instead
 // of motion. Throttling how often they're allowed to change keeps the restarts infrequent enough to
 // read as smooth while still tracking the music. bass skips this entirely (see below) since it drives
-// stroke width through a plain per-frame SharedValue read, not a restarted animation — there's
-// nothing there to protect from updating every frame.
+// stroke width through a plain SharedValue read, not a restarted animation — there's nothing there to
+// protect from updating on every buffer.
 const BAND_STATE_THROTTLE_MS = 150
 
-// Live microphone band energy, each 0 (silence) to 1 (loudest the analyser's dB range captures):
-// `bass` as a Reanimated SharedValue (read every frame, no throttling — see stroke width's own live
-// derived value in index.tsx), `mid`/`treble`/`loudness` as plain, throttled React state (see
-// BAND_STATE_THROTTLE_MS above for why those three specifically need throttling and bass doesn't).
-// Mic capture only starts once `enabled` is true — permission is requested at that point too, not on
-// mount, so nothing touches the microphone (or prompts for it) unless the audio-reactive setting is
-// actually turned on.
+// Live microphone band energy, each 0 (silence) to 1 (loudest rmsToUnit's dB range captures): `bass`
+// as a Reanimated SharedValue (updated on every onAudioReady buffer, no throttling — see stroke
+// width's own live derived value in index.tsx), `mid`/`treble`/`loudness` as plain, throttled React
+// state (see BAND_STATE_THROTTLE_MS above for why those three specifically need throttling and bass
+// doesn't). Mic capture only starts once `enabled` is true — permission is requested at that point
+// too, not on mount, so nothing touches the microphone (or prompts for it) unless the audio-reactive
+// setting is actually turned on.
 export function useAudioReactive(enabled: boolean) {
   const bass = useSharedValue(0)
   const [mid, setMid] = useState(0)
@@ -51,7 +80,6 @@ export function useAudioReactive(enabled: boolean) {
     let cancelled = false
     let audioContext: AudioContext | null = null
     let recorder: AudioRecorder | null = null
-    let frameId: number | null = null
 
     async function start() {
       // react-native-audio-api's web target has no microphone-capable node at all (no
@@ -64,55 +92,75 @@ export function useAudioReactive(enabled: boolean) {
         const status = await AudioManager.requestRecordingPermissions()
         if (cancelled || status !== 'Granted') return
 
-        audioContext = new AudioContext()
-        const analyser = audioContext.createAnalyser()
-        analyser.fftSize = FFT_SIZE
-
-        const recorderAdapter = audioContext.createRecorderAdapter()
-        recorderAdapter.connect(analyser)
-
-        recorder = new AudioRecorder()
-        recorder.connect(recorderAdapter)
-        await recorder.start()
+        // iOS's default audio session category is playback-only — recording permission alone
+        // doesn't route mic input anywhere. Without switching to 'playAndRecord' and activating the
+        // session, AudioRecorder.start() resolves fine but nothing actually captures, so this looks
+        // identical to a working-but-silent room instead of a broken feature. Android has no such
+        // category concept (SessionOptions is all ios*-prefixed), so this is a no-op there.
+        AudioManager.setAudioSessionOptions({ iosCategory: 'playAndRecord', iosMode: 'default' })
+        await AudioManager.setAudioSessionActivity(true)
         if (cancelled) return
 
-        const frequencyData = new Uint8Array(analyser.frequencyBinCount)
-        const bassBandEnd = Math.floor(frequencyData.length * BASS_BAND_END)
-        const midBandEnd = Math.floor(frequencyData.length * MID_BAND_END)
+        // AudioContext/RecorderAdapterNode are still created and connected here even though nothing
+        // downstream reads from them anymore (see the module comment above for why the analyser graph
+        // that used to justify them was abandoned) — onAudioReady has only ever been exercised WITH
+        // this pairing in place, never without it, so removing it now would be an untested guess about
+        // whether the native recorder needs it to activate at all. Cheap to leave in; risky to cut.
+        audioContext = new AudioContext()
+        const recorderAdapter = audioContext.createRecorderAdapter()
+        recorder = new AudioRecorder()
+        recorder.connect(recorderAdapter)
 
-        // Plain requestAnimationFrame on the JS thread, matching the library's own visualizer guide —
-        // getByteFrequencyData isn't a worklet-safe call, so this can't run inside a Reanimated
-        // useFrameCallback the way the epicenter's bounce physics does. Writing a SharedValue from the
-        // JS thread is still fine; every worklet reading `bass` downstream just sees the update.
-        const tick = () => {
-          analyser.getByteFrequencyData(frequencyData)
+        if (audioContext.state === 'suspended') await audioContext.resume()
+        if (cancelled) return
 
-          let bassSum = 0
-          for (let i = 0; i < bassBandEnd; i++) bassSum += frequencyData[i]
-          let midSum = 0
-          for (let i = bassBandEnd; i < midBandEnd; i++) midSum += frequencyData[i]
-          let trebleSum = 0
-          for (let i = midBandEnd; i < frequencyData.length; i++) trebleSum += frequencyData[i]
+        // Streaming filter state — persists across buffers (that's what makes these real one-pole
+        // filters rather than resetting to a fresh guess every ~93ms), reset implicitly every time
+        // mic capture (re)starts since this closure is recreated then.
+        let bassLowpass = 0
+        let trebleLowpass = 0
 
-          bass.value = bassBandEnd > 0 ? bassSum / bassBandEnd / BYTE_MAX : 0
+        recorder.onAudioReady({ sampleRate: RECORDER_SAMPLE_RATE, bufferLength: RECORDER_BUFFER_LENGTH, channelCount: 1 }, (event) => {
+          const channelData = event.buffer.getChannelData(0)
+
+          let bassSumSquares = 0
+          let midSumSquares = 0
+          let trebleSumSquares = 0
+          let overallSumSquares = 0
+          for (let i = 0; i < channelData.length; i++) {
+            const sample = channelData[i]
+            bassLowpass += BASS_ALPHA * (sample - bassLowpass)
+            trebleLowpass += TREBLE_ALPHA * (sample - trebleLowpass)
+            const bassSample = bassLowpass
+            // Energy between the two cutoffs: what the wider (2kHz) low-pass keeps that the
+            // narrower (250Hz) one already accounted for.
+            const midSample = trebleLowpass - bassLowpass
+            const trebleSample = sample - trebleLowpass
+            bassSumSquares += bassSample * bassSample
+            midSumSquares += midSample * midSample
+            trebleSumSquares += trebleSample * trebleSample
+            overallSumSquares += sample * sample
+          }
+
+          bass.value = rmsToUnit(Math.sqrt(bassSumSquares / channelData.length))
 
           const now = Date.now()
           if (now - lastBandStateUpdate.current >= BAND_STATE_THROTTLE_MS) {
             lastBandStateUpdate.current = now
-            const midBandCount = midBandEnd - bassBandEnd
-            const trebleBandCount = frequencyData.length - midBandEnd
-            setMid(midBandCount > 0 ? midSum / midBandCount / BYTE_MAX : 0)
-            setTreble(trebleBandCount > 0 ? trebleSum / trebleBandCount / BYTE_MAX : 0)
-            setLoudness((bassSum + midSum + trebleSum) / frequencyData.length / BYTE_MAX)
+            const nextMid = rmsToUnit(Math.sqrt(midSumSquares / channelData.length))
+            const nextTreble = rmsToUnit(Math.sqrt(trebleSumSquares / channelData.length))
+            const nextLoudness = rmsToUnit(Math.sqrt(overallSumSquares / channelData.length))
+            setMid(nextMid)
+            setTreble(nextTreble)
+            setLoudness(nextLoudness)
           }
+        })
 
-          frameId = requestAnimationFrame(tick)
-        }
-        tick()
+        await recorder.start()
       } catch {
         // Defense in depth for any other unexpected native failure (permission plumbing, a device
-        // with no microphone, etc.) — the feature just silently no-ops rather than crashing the
-        // whole render tree over what's a nice-to-have visual flourish.
+        // with no microphone, etc.) — the feature just silently no-ops rather than crashing the whole
+        // render tree over what's a nice-to-have visual flourish.
       }
     }
 
@@ -120,9 +168,9 @@ export function useAudioReactive(enabled: boolean) {
 
     return () => {
       cancelled = true
-      if (frameId !== null) cancelAnimationFrame(frameId)
       recorder?.stop()
       audioContext?.close()
+      AudioManager.setAudioSessionActivity(false)
       bass.value = 0
       setMid(0)
       setTreble(0)

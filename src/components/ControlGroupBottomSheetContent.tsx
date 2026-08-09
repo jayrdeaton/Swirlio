@@ -1,13 +1,13 @@
 import React from 'react'
-import { ScrollView, StyleSheet, View } from 'react-native'
+import { StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { copyCountForMirrorLines, MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
-import { hasPolygonSides, isZoomlessPattern, PatternType } from '@/constants/patterns'
+import { PatternType } from '@/constants/patterns'
 import { POLYGON_SIDE_NAMES } from '@/constants/polygonMath'
 import { BOTTOM_SHEET_FOOTER_CLEARANCE } from '@/constants/sheetLayout'
 import { useControlGroups } from '@/hooks/controlGroups'
-import { MAX_BOUNCE_FRICTION, MAX_CYCLE_SPEED, MAX_FADE_RADIUS, MAX_FADE_SOFTNESS, MAX_GRAVITY, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CYCLE_SPEED, MIN_FADE_RADIUS, MIN_FADE_SOFTNESS, MIN_GRAVITY, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { SettingSlider } from './SettingSlider'
 
@@ -16,49 +16,46 @@ const CYCLE_SPEED_SLIDER_STEP = 0.1
 // only a handful of steps from anywhere on the track, with a visible tick landmarking it, rather
 // than one increment among 100 tightly-packed ones. See SPEED_SLIDER_TICK_STEP below for the
 // (coarser still) landmark ticks drawn on top of these steps.
-const ROTATION_SPEED_SLIDER_STEP = 0.5
-const ZOOM_SPEED_SLIDER_STEP = 0.5
+const ROTATION_SPEED_SLIDER_STEP = 1
+const ZOOM_SPEED_SLIDER_STEP = 1
 const STROKE_WIDTH_SLIDER_STEP = 0.5
 const TIGHTNESS_SLIDER_STEP = 0.05
-const FADE_RADIUS_SLIDER_STEP = 0.05
-const FADE_SOFTNESS_SLIDER_STEP = 0.05
+const CROP_RADIUS_SLIDER_STEP = 0.05
+const HOLE_RADIUS_SLIDER_STEP = 0.05
 const POLYGON_SIDES_SLIDER_STEP = 1
 const MIRROR_LINES_SLIDER_STEP = 1
-// Landmark ticks every 2 lines (0/2/4/.../16), not one per step — at MAX_MIRROR_LINES 16 a tick per
-// whole number would be 17 of them, exactly the tick-soup SettingSlider's own tickStep exists to
-// avoid (see PHYSICS_SLIDER_TICK_STEP above for the identical reasoning on a different slider).
-const MIRROR_LINES_TICK_STEP = 2
-const MIRROR_ROTATION_SPEED_SLIDER_STEP = 0.5
+const MIRROR_GAP_SLIDER_STEP = 0.05
+const MIRROR_ROTATION_SPEED_SLIDER_STEP = 1
 const BOUNCE_FRICTION_SLIDER_STEP = 0.1
 const GRAVITY_SLIDER_STEP = 0.1
 // Landmark ticks at every whole number (0/1/2/3/4/5), not one per 0.1 step — see SettingSlider's own
 // tickStep comment for why that distinction matters here specifically.
 const PHYSICS_SLIDER_TICK_STEP = 1
 // Same idea as PHYSICS_SLIDER_TICK_STEP, for the three ±speed sliders (Rotation/Zoom/Mirror
-// rotation) — one tick per whole number over their own -5..5 range, landmarking 0 specifically
-// (direction reverses there) rather than every 0.5 step actually snaps to.
-const SPEED_SLIDER_TICK_STEP = 1
+// rotation) — one tick per even number over their own -10..10 range, landmarking 0 specifically
+// (direction reverses there) rather than every whole-number step actually snaps to. Doubled
+// alongside MIN/MAX_ROTATION_SPEED's own doubling (see useSwirlSettings.tsx) so the track still
+// shows the same 11 landmark ticks it always has, rather than doubling to 21 and turning to tick soup.
+const SPEED_SLIDER_TICK_STEP = 2
 
-// fadeRadius itself is stored (and read by Spiral.tsx) as "where the fade finishes disappearing" —
-// 1 (MAX_FADE_RADIUS) means it finishes exactly at the pattern's own outer edge, which is what "off"
-// actually looks like, and smaller values pull that vanishing point inward, i.e. a *smaller* number
-// means *more* fade. That reads backwards on a slider: dragging left (toward the number line's own
-// low end) would make the fade effect stronger, the opposite of every other slider in this app,
-// where left means less/off and right means more. These two convert between that storage value and
-// a "how much fade" amount for the slider to actually show and drive — 0 (left) is always the true
-// off state (MAX_FADE_RADIUS) regardless of fadeSoftness, 1 (right) is the strongest fade
-// (MIN_FADE_RADIUS) — without touching fadeRadius's own stored meaning or Spiral.tsx's math at all.
-// fadeSoftness doesn't need this: 0 (left) already reads as "barely faded" (a hard, thin edge right
-// at the cutoff) and 1 (right) as "faded across the whole visible radius" — already the same
-// less-on-the-left direction as this fix gives fadeRadius, so it's left alone.
-const fadeAmountFromRadius = (radius: number) => (MAX_FADE_RADIUS - radius) / (MAX_FADE_RADIUS - MIN_FADE_RADIUS)
-const fadeRadiusFromAmount = (amount: number) => MAX_FADE_RADIUS - amount * (MAX_FADE_RADIUS - MIN_FADE_RADIUS)
-const FADE_AMOUNT_MIN = 0
-const FADE_AMOUNT_MAX = 1
+// cropRadius itself is stored (and read by Spiral.tsx) as "where the pattern is clipped away" — 1
+// (MAX_CROP_RADIUS) means it's clipped exactly at the pattern's own outer edge, which is what "off"
+// actually looks like, and smaller values pull that cutoff inward, i.e. a *smaller* number means
+// *more* crop. That reads backwards on a slider: dragging left (toward the number line's own low
+// end) would make the crop effect stronger, the opposite of every other slider in this app, where
+// left means less/off and right means more. These two convert between that storage value and a "how
+// much crop" amount for the slider to actually show and drive — 0 (left) is always the true off
+// state (MAX_CROP_RADIUS), 1 (right) is the strongest crop (MIN_CROP_RADIUS) — without touching
+// cropRadius's own stored meaning or Spiral.tsx's math at all.
+const cropAmountFromRadius = (radius: number) => (MAX_CROP_RADIUS - radius) / (MAX_CROP_RADIUS - MIN_CROP_RADIUS)
+const cropRadiusFromAmount = (amount: number) => MAX_CROP_RADIUS - amount * (MAX_CROP_RADIUS - MIN_CROP_RADIUS)
+const CROP_AMOUNT_MIN = 0
+const CROP_AMOUNT_MAX = 1
 
-// What the shared Sides/Points/Petals slider (see hasPolygonSides) is labeled per pattern — Rings,
-// Spiral, and Starburst all fall through to the default ('Sides') below since the slider is disabled
-// for them anyway.
+// What the shared Sides/Points/Petals slider is labeled per pattern — Rings, Spiral, and Starburst
+// all fall through to the default ('Sides') below since none of them give that name any special
+// meaning (the slider itself stays enabled for every pattern, so users can pre-set it before
+// switching to one where it matters).
 const SIDES_SLIDER_LABELS: Partial<Record<PatternType, string>> = {
   star: 'Points',
   flower: 'Petals'
@@ -71,7 +68,7 @@ const SIDES_SLIDER_LABELS: Partial<Record<PatternType, string>> = {
 export function ControlGroupBottomSheetContent() {
   const insets = useSafeAreaInsets()
   const { activeGroup } = useControlGroups()
-  const { settings, setBackgroundCycleSpeed, setBounceFriction, setFadeRadius, setFadeSoftness, setForegroundCycleSpeed, setGravity, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
+  const { settings, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setForegroundCycleSpeed, setGravity, setHoleRadius, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
 
   // Renders whatever the sheet was last opened to even while it's animating closed, rather than
   // going blank — same reasoning as ControlGroupProvider not resetting activeGroup on close.
@@ -79,68 +76,92 @@ export function ControlGroupBottomSheetContent() {
 
   return (
     <View style={{ paddingBottom: insets.bottom + BOTTOM_SHEET_FOOTER_CLEARANCE }}>
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <View style={styles.body}>
         {group === 'mirror' && (
           <>
             {/* A true kaleidoscope: `lines` mirror lines through the center split the circle into
             2 * lines wedges, alternating direct/reflected copies around it (0 lines is the one
             exception — just the single unmirrored copy, nothing to reflect). See
             constants/kaleidoscope.ts for the full construction. */}
-            <SettingSlider label='Mirror lines' icon='mirror' value={settings.mirrorLines} displayValue={`${settings.mirrorLines}, ${copyCountForMirrorLines(settings.mirrorLines)} ${copyCountForMirrorLines(settings.mirrorLines) === 1 ? 'copy' : 'copies'}`} minimumValue={MIN_MIRROR_LINES} maximumValue={MAX_MIRROR_LINES} step={MIRROR_LINES_SLIDER_STEP} showTicks tickStep={MIRROR_LINES_TICK_STEP} onChange={setMirrorLines} />
+            <SettingSlider label='Mirror lines' icon='mirror' value={settings.mirrorLines} displayValue={`${settings.mirrorLines}, ${copyCountForMirrorLines(settings.mirrorLines)} ${copyCountForMirrorLines(settings.mirrorLines) === 1 ? 'copy' : 'copies'}`} minimumValue={MIN_MIRROR_LINES} maximumValue={MAX_MIRROR_LINES} step={MIRROR_LINES_SLIDER_STEP} showTicks onChange={setMirrorLines} />
+            {/* Replaces what used to be a plain "Mirror line" toggle tracing a debug reference overlay
+            over the mirror axis — that overlay wasn't part of the art at all, just a thin line to show
+            where mirroring happened. This keeps the same idea (showing where each wedge's edge sits)
+            but makes it a real visual effect: pulling every wedge in from its own boundary so the same
+            axis reads as empty canvas instead of a drawn-on line. Left enabled even at 0 mirror lines
+            (same "pre-arm ahead of having anything to act on" reasoning as Mirror rotation speed below)
+            — no effect until there's a wedge for it to open a gap in. See kaleidoscope.ts's
+            wedgeClipPath for why this is a fraction of the wedge's own angle, not a fixed degree amount. */}
+            <SettingSlider label='Mirror gap' icon='ray-start-end' value={settings.mirrorGap} displayValue={`${Math.round(settings.mirrorGap * 100)}%`} minimumValue={MIN_MIRROR_GAP} maximumValue={MAX_MIRROR_GAP} step={MIRROR_GAP_SLIDER_STEP} onChange={setMirrorGap} />
             {/* Spins the whole wedge assembly as one rigid unit around the epicentre — independent of
-            Rotation speed (under the line group below), which only spins the pattern content drawn
-            inside each fixed wedge. See Spiral.tsx's outer AnimatedG. 0 is the original, still-default
-            fixed-wedge look. */}
-            <SettingSlider label='Mirror rotation' icon='rotate-orbit' value={settings.mirrorRotationSpeed} displayValue={`${settings.mirrorRotationSpeed.toFixed(2)}x`} minimumValue={MIN_MIRROR_ROTATION_SPEED} maximumValue={MAX_MIRROR_ROTATION_SPEED} step={MIRROR_ROTATION_SPEED_SLIDER_STEP} showTicks tickStep={SPEED_SLIDER_TICK_STEP} disabled={settings.audioReactiveEnabled} onChange={setMirrorRotationSpeed} />
+            Pattern's own Rotation speed, which only spins the pattern content drawn inside each fixed
+            wedge. See Spiral.tsx's outer AnimatedG. 0 is the original, still-default fixed-wedge look. */}
+            <SettingSlider label='Mirror rotation speed' icon='rotate-orbit' value={settings.mirrorRotationSpeed} displayValue={`${settings.mirrorRotationSpeed.toFixed(2)}x`} minimumValue={MIN_MIRROR_ROTATION_SPEED} maximumValue={MAX_MIRROR_ROTATION_SPEED} step={MIRROR_ROTATION_SPEED_SLIDER_STEP} showTicks tickStep={SPEED_SLIDER_TICK_STEP} disabled={settings.audioReactiveEnabled} onChange={setMirrorRotationSpeed} />
           </>
         )}
 
         {group === 'colors' && (
           <>
-            <SettingSlider label='Foreground cycle speed' icon='palette' value={settings.foregroundCycleSpeed} displayValue={`${settings.foregroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={CYCLE_SPEED_SLIDER_STEP} disabled={settings.foregroundColors.length < 2 || settings.audioReactiveEnabled} onChange={setForegroundCycleSpeed} />
-            <SettingSlider label='Background cycle speed' icon='palette-swatch' value={settings.backgroundCycleSpeed} displayValue={`${settings.backgroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={CYCLE_SPEED_SLIDER_STEP} disabled={settings.backgroundColors.length < 2 || settings.audioReactiveEnabled} onChange={setBackgroundCycleSpeed} />
+            {/* Enabled even with a single color in the list — cycling has nothing to visibly cycle
+            through yet, but pre-arming the rate means it's already dialed in the moment a second
+            color gets added, instead of a returning user having to remember to also come back and
+            set this. Matches the Mirror group's own Alternate colors toggle and Mirror gap slider,
+            left enabled ahead of having anything to act on for the same reason. */}
+            <SettingSlider label='Foreground cycle speed' icon='palette' value={settings.foregroundCycleSpeed} displayValue={`${settings.foregroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={CYCLE_SPEED_SLIDER_STEP} disabled={settings.audioReactiveEnabled} onChange={setForegroundCycleSpeed} />
+            <SettingSlider label='Background cycle speed' icon='palette-swatch' value={settings.backgroundCycleSpeed} displayValue={`${settings.backgroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={CYCLE_SPEED_SLIDER_STEP} disabled={settings.audioReactiveEnabled} onChange={setBackgroundCycleSpeed} />
           </>
         )}
 
-        {group === 'line' && (
+        {group === 'pattern' && (
           <>
             {/* Star and Flower both reuse the same underlying side-count setting as Polygon — "how
             many points"/"how many petals" is the same knob as "how many sides", just labeled (and,
             for Polygon alone, named via POLYGON_SIDE_NAMES) for whichever shape is currently
             selected. */}
-            <SettingSlider label={SIDES_SLIDER_LABELS[settings.pattern] ?? 'Sides'} icon='vector-polygon' value={settings.polygonSides} displayValue={settings.pattern === 'polygon' ? (POLYGON_SIDE_NAMES[settings.polygonSides] ?? String(settings.polygonSides)) : String(settings.polygonSides)} minimumValue={MIN_POLYGON_SIDES} maximumValue={MAX_POLYGON_SIDES} step={POLYGON_SIDES_SLIDER_STEP} disabled={!hasPolygonSides(settings.pattern)} showTicks onChange={setPolygonSides} />
-            <SettingSlider label='Stroke width' icon='format-line-weight' value={settings.strokeWidth} displayValue={settings.strokeWidth.toFixed(1)} minimumValue={MIN_STROKE_WIDTH} maximumValue={MAX_STROKE_WIDTH} step={STROKE_WIDTH_SLIDER_STEP} disabled={settings.audioReactiveEnabled} onChange={setStrokeWidth} />
-            <SettingSlider label='Tightness' icon='orbit' value={settings.tightness} displayValue={`${settings.tightness.toFixed(2)}x`} minimumValue={MIN_TIGHTNESS} maximumValue={MAX_TIGHTNESS} step={TIGHTNESS_SLIDER_STEP} onChange={setTightness} />
-          </>
-        )}
-
-        {group === 'speed' && (
-          <>
+            <SettingSlider label={SIDES_SLIDER_LABELS[settings.pattern] ?? 'Sides'} icon='vector-polygon' value={settings.polygonSides} displayValue={settings.pattern === 'polygon' ? (POLYGON_SIDE_NAMES[settings.polygonSides] ?? String(settings.polygonSides)) : String(settings.polygonSides)} minimumValue={MIN_POLYGON_SIDES} maximumValue={MAX_POLYGON_SIDES} step={POLYGON_SIDES_SLIDER_STEP} showTicks onChange={setPolygonSides} />
+            {/* Crop/Hole live here rather than in Line — see the top sheet's own 'pattern' branch
+            comment for why: now that either can trace the active pattern's own outline, they're a
+            shape decision like Sides above, not a stroke-rendering one. */}
+            <SettingSlider label='Crop' icon='crop' value={cropAmountFromRadius(settings.cropRadius)} displayValue={`${Math.round(cropAmountFromRadius(settings.cropRadius) * 100)}%`} minimumValue={CROP_AMOUNT_MIN} maximumValue={CROP_AMOUNT_MAX} step={CROP_RADIUS_SLIDER_STEP} onChange={(amount) => setCropRadius(cropRadiusFromAmount(amount))} />
+            {/* holeRadius is already stored as "how much hole" (0 off, 1 the whole crop circle) — no
+            backwards-reading amount conversion needed the way Crop above has, since left/off and
+            right/more already line up with every other slider in this app. */}
+            <SettingSlider label='Hole' icon='circle-double' value={settings.holeRadius} displayValue={`${Math.round(settings.holeRadius * 100)}%`} minimumValue={MIN_HOLE_RADIUS} maximumValue={MAX_HOLE_RADIUS} step={HOLE_RADIUS_SLIDER_STEP} onChange={setHoleRadius} />
+            {/* Folded in here rather than kept as its own group — Rotation/Zoom speed used to be
+            pulled out into a standalone 'speed' group, but Mirror and Colors each already keep their
+            own speed settings internal to their own group, so having the pattern's own speed live
+            anywhere else was the one inconsistency, not a deliberate distinction. */}
             <SettingSlider label='Rotation speed' icon='speedometer' value={settings.rotationSpeed} displayValue={`${settings.rotationSpeed.toFixed(2)}x`} minimumValue={MIN_ROTATION_SPEED} maximumValue={MAX_ROTATION_SPEED} step={ROTATION_SPEED_SLIDER_STEP} showTicks tickStep={SPEED_SLIDER_TICK_STEP} disabled={settings.audioReactiveEnabled} onChange={setRotationSpeed} />
-            <SettingSlider label='Zoom speed' icon='magnify' value={settings.zoomSpeed} displayValue={`${settings.zoomSpeed.toFixed(2)}x`} minimumValue={MIN_ZOOM_SPEED} maximumValue={MAX_ZOOM_SPEED} step={ZOOM_SPEED_SLIDER_STEP} showTicks tickStep={SPEED_SLIDER_TICK_STEP} disabled={isZoomlessPattern(settings.pattern) || settings.audioReactiveEnabled} onChange={setZoomSpeed} />
+            <SettingSlider label='Zoom speed' icon='magnify' value={settings.zoomSpeed} displayValue={`${settings.zoomSpeed.toFixed(2)}x`} minimumValue={MIN_ZOOM_SPEED} maximumValue={MAX_ZOOM_SPEED} step={ZOOM_SPEED_SLIDER_STEP} showTicks tickStep={SPEED_SLIDER_TICK_STEP} disabled={settings.audioReactiveEnabled} onChange={setZoomSpeed} />
           </>
         )}
 
-        {group === 'fade' && (
+        {group === 'line' && (
           <>
-            <SettingSlider label='Fade radius' icon='gradient-vertical' value={fadeAmountFromRadius(settings.fadeRadius)} displayValue={`${Math.round(fadeAmountFromRadius(settings.fadeRadius) * 100)}%`} minimumValue={FADE_AMOUNT_MIN} maximumValue={FADE_AMOUNT_MAX} step={FADE_RADIUS_SLIDER_STEP} onChange={(amount) => setFadeRadius(fadeRadiusFromAmount(amount))} />
-            <SettingSlider label='Fade softness' icon='blur' value={settings.fadeSoftness} displayValue={`${Math.round(settings.fadeSoftness * 100)}%`} minimumValue={MIN_FADE_SOFTNESS} maximumValue={MAX_FADE_SOFTNESS} step={FADE_SOFTNESS_SLIDER_STEP} onChange={setFadeSoftness} />
+            <SettingSlider label='Stroke width' icon='format-line-weight' value={settings.strokeWidth} displayValue={settings.strokeWidth.toFixed(1)} minimumValue={MIN_STROKE_WIDTH} maximumValue={MAX_STROKE_WIDTH} step={STROKE_WIDTH_SLIDER_STEP} disabled={settings.audioReactiveEnabled} onChange={setStrokeWidth} />
+            {/* Lives here rather than in Pattern — see the top sheet's own 'line' branch comment for
+            why: paired with Fixed spacing above, this is about how densely the rendered strokes are
+            packed, not which shape is showing. */}
+            <SettingSlider label='Tightness' icon='orbit' value={settings.tightness} displayValue={`${settings.tightness.toFixed(2)}x`} minimumValue={MIN_TIGHTNESS} maximumValue={MAX_TIGHTNESS} step={TIGHTNESS_SLIDER_STEP} onChange={setTightness} />
           </>
         )}
 
         {group === 'settings' && (
           <>
-            {/* How hard a flung epicentre's bounce off the drag boundary gets damped — see the frame
-            callback in useEpicenter.ts. 0 is a deliberate toy extreme (perfectly elastic, never
-            settles), not a value worth special-casing out of the slider's own range. */}
-            <SettingSlider label='Bounce friction' icon='basketball' value={settings.bounceFriction} displayValue={settings.bounceFriction.toFixed(1)} minimumValue={MIN_BOUNCE_FRICTION} maximumValue={MAX_BOUNCE_FRICTION} step={BOUNCE_FRICTION_SLIDER_STEP} showTicks tickStep={PHYSICS_SLIDER_TICK_STEP} onChange={setBounceFriction} />
+            {/* Damps a released epicentre's free movement overall, every frame it's active — not just
+            its bounce off the drag boundary, despite the internal bounceFriction name (see the frame
+            callback in useEpicenter.ts) — so plain 'Friction' reads truer than 'Bounce friction' ever
+            did, and matches 'Gravity' below as a plain physics term rather than an implementation
+            detail. 0 is a deliberate toy extreme (perfectly elastic, never settles), not a value worth
+            special-casing out of the slider's own range. */}
+            <SettingSlider label='Friction' icon='basketball' value={settings.bounceFriction} displayValue={settings.bounceFriction.toFixed(1)} minimumValue={MIN_BOUNCE_FRICTION} maximumValue={MAX_BOUNCE_FRICTION} step={BOUNCE_FRICTION_SLIDER_STEP} showTicks tickStep={PHYSICS_SLIDER_TICK_STEP} onChange={setBounceFriction} />
             {/* A spring-like pull back toward the center, layered on top of the bounce above rather
             than replacing it — see useEpicenter's bounceFrame. 0 is the original bounce with no pull
             at all. */}
             <SettingSlider label='Gravity' icon='magnet' value={settings.gravity} displayValue={settings.gravity.toFixed(1)} minimumValue={MIN_GRAVITY} maximumValue={MAX_GRAVITY} step={GRAVITY_SLIDER_STEP} showTicks tickStep={PHYSICS_SLIDER_TICK_STEP} onChange={setGravity} />
           </>
         )}
-      </ScrollView>
+      </View>
     </View>
   )
 }

@@ -7,6 +7,10 @@ type FabRowProps = {
   children: React.ReactNode
 }
 
+// See the "same line" comment below — generous enough to absorb Yoga's sub-pixel rounding noise,
+// nowhere close to a real line wrap's smallest possible gap (a whole FAB height plus the row gap).
+const SAME_LINE_TOLERANCE_PX = 2
+
 // Wraps whatever picker/toggle FABs a sheet groups together, so unrelated pickers wrap as one block
 // instead of each claiming its own line — see each *Content.tsx's usage. Top-aligned (not centered):
 // a labeled FAB's caption can wrap to one or two lines depending on how long its word is, and
@@ -24,7 +28,10 @@ type FabRowProps = {
 // alone at the end of one because the *next* cluster wrapped away from it, is redundant either way —
 // the line break already does the separating — and reads as a stray mark. Determined by measuring
 // every child's own top offset within the row (now meaningful again thanks to top-alignment) and
-// comparing a divider's to the items on *both* sides of it.
+// comparing a divider's to the items on *both* sides of it — within SAME_LINE_TOLERANCE_PX rather
+// than exact equality, since Yoga's fractional layout can round two items that are genuinely on the
+// same line to top offsets that differ by a device pixel or two; a real line wrap is a whole FAB
+// height (40-56px) plus the row's own 12px gap away, so a few px of slack can never mask one.
 //
 // A hidden divider's own wrapper stays mounted (rendering null inside it, not removing it) rather
 // than being dropped from the tree — dropping it would stop it from ever being measured again, so a
@@ -45,8 +52,8 @@ export function FabRow({ children }: FabRowProps) {
         // Only hides once both flanking neighbours have actually been measured — before that,
         // showing it is the safer default (a spurious divider mid-line is far less noticeable than
         // one flickering in and out as measurements trickle in).
-        const strandedFromPrev = prevTop != null && ownTop != null && prevTop !== ownTop
-        const strandedFromNext = nextTop != null && ownTop != null && nextTop !== ownTop
+        const strandedFromPrev = prevTop != null && ownTop != null && Math.abs(prevTop - ownTop) > SAME_LINE_TOLERANCE_PX
+        const strandedFromNext = nextTop != null && ownTop != null && Math.abs(nextTop - ownTop) > SAME_LINE_TOLERANCE_PX
         const hideDivider = isDivider && (strandedFromPrev || strandedFromNext)
         return (
           <View

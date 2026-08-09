@@ -4,7 +4,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Icon, Text, useTheme } from 'react-native-paper'
 import Animated, { SharedValue, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated'
 
-import { contrastColor } from '@/constants/fabTheme'
+import { contrastColor, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
 import { positionToValue, valueToProgress } from '@/constants/sliderMath'
 import { useSwirlSettings } from '@/hooks/useSwirlSettings'
 
@@ -185,8 +185,13 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
               return <SliderTick key={index} rawProgress={rawProgress} tickProgress={tickProgress} reachedColor={contrastColor(colors.primary)} unreachedColor={colors.primary} />
             })}
           {/* The icon rides on the thumb itself now rather than sitting beside the label — see
-          THUMB_HALF above for how it stays fully on-screen at either end of the track. */}
-          <Animated.View testID='setting-slider-thumb' style={[styles.thumb, { backgroundColor: colors.primary }, thumbAnimatedStyle]}>
+          THUMB_HALF above for how it stays fully on-screen at either end of the track. Bordered in
+          contrastColor(primary) for the same reason as the fill bar above — the thumb's own fill is
+          colors.primary too, so its border needs to be guaranteed different from that fill, not another
+          colors.primary that would vanish right along with it. Its own icon already uses this same
+          color, so the border now always matches what's drawn on top of it, not just what happens to
+          be legible against the icon by coincidence. */}
+          <Animated.View testID='setting-slider-thumb' style={[styles.thumb, styles.thumbBorder, { backgroundColor: colors.primary, borderColor: contrastColor(colors.primary) }, thumbAnimatedStyle]}>
             {icon ? <Icon source={icon} size={THUMB_ICON_SIZE} color={contrastColor(colors.primary)} /> : null}
           </Animated.View>
         </View>
@@ -253,6 +258,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: THUMB_SIZE
   },
+  thumbBorder: {
+    borderWidth: VISIBLE_HAIRLINE_WIDTH
+  },
   tick: {
     borderRadius: TICK_WIDTH / 2,
     height: TICK_HEIGHT,
@@ -272,6 +280,6 @@ const styles = StyleSheet.create({
     right: 0
   },
   trackOutline: {
-    borderWidth: StyleSheet.hairlineWidth
+    borderWidth: VISIBLE_HAIRLINE_WIDTH
   }
 })

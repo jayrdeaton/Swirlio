@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { Button } from '@rific/haptic-press'
 import React, { useEffect, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
-import { Button, Icon, Portal, Text, useTheme } from 'react-native-paper'
+import { Icon, Portal, Text, useTheme } from 'react-native-paper'
 import Animated, { Easing, useAnimatedStyle, withTiming } from 'react-native-reanimated'
 
 import { contrastColor } from '@/constants/fabTheme'

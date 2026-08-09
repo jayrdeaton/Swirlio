@@ -28,7 +28,12 @@ export function isZoomlessPattern(pattern: PatternType): boolean {
 }
 
 // Polygon, Star, and Flower are the three patterns built from a variable side/point/petal count —
-// the drawer's Sides/Points/Petals slider only makes sense for these three.
+// the drawer's Sides/Points/Petals slider only makes sense for these three. Also called from
+// Spiral.tsx's shapedClipPoints worklet (cropShaped/holeShaped's clip path needs to know whether the
+// active pattern has a polygon boundary to trace) — without 'worklet' here, Worklets treats this as a
+// JS-thread-only function and throws "Tried to synchronously call a Remote Function" the first time
+// the UI thread tries to call it directly, same as any other non-worklet helper reached from one.
 export function hasPolygonSides(pattern: PatternType): boolean {
+  'worklet'
   return pattern === 'polygon' || pattern === 'star' || pattern === 'flower'
 }

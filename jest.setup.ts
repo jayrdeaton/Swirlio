@@ -116,7 +116,10 @@ jest.mock('react-native-worklets', () => ({
   createSerializable: (value: unknown) => value,
   isWorkletFunction: () => false,
   runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
-  runOnUI: (fn: (...args: unknown[]) => unknown) => fn
+  runOnUI: (fn: (...args: unknown[]) => unknown) => fn,
+  // Real scheduleOnRN queues onto the RN JS thread's microtask queue — there's no separate UI thread
+  // here to hop back from, so tests just invoke it synchronously, same as the runOnJS mock above.
+  scheduleOnRN: (fn: (...args: unknown[]) => unknown, ...args: unknown[]) => fn(...args)
 }))
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -287,20 +290,40 @@ jest.mock('expo-sensors', () => ({
 // the rest of useAudioReactive.ts's setup path without also having to mock a permission denial.
 jest.mock('react-native-audio-api', () => ({
   AudioContext: jest.fn().mockImplementation(() => ({
-    createAnalyser: jest.fn(() => ({
-      fftSize: 0,
-      frequencyBinCount: 512,
-      getByteFrequencyData: jest.fn()
-    })),
     createRecorderAdapter: jest.fn(() => ({ connect: jest.fn() })),
+    // 'suspended' by default (matching a freshly-constructed real AudioContext) so the default mock
+    // actually exercises useAudioReactive's resume() call, not just its skip branch.
+    state: 'suspended',
+    resume: jest.fn().mockResolvedValue(undefined),
     close: jest.fn().mockResolvedValue(undefined)
   })),
   AudioRecorder: jest.fn().mockImplementation(() => ({
     connect: jest.fn(),
-    start: jest.fn().mockResolvedValue(undefined),
-    stop: jest.fn().mockResolvedValue(undefined)
+    // start() reports failure through this Result object, not a rejected promise (see
+    // useAudioReactive.ts's own comment on why it now checks `status`) — defaulting to 'success'
+    // here keeps every existing test exercising the working path without each one needing to know
+    // that shape; the dedicated error-status test below overrides this per-case.
+    start: jest.fn().mockResolvedValue({ status: 'success' }),
+    stop: jest.fn().mockResolvedValue(undefined),
+    onError: jest.fn(),
+    onAudioReady: jest.fn()
   })),
   AudioManager: {
-    requestRecordingPermissions: jest.fn().mockResolvedValue('Granted')
+    requestRecordingPermissions: jest.fn().mockResolvedValue('Granted'),
+    setAudioSessionOptions: jest.fn(),
+    setAudioSessionActivity: jest.fn().mockResolvedValue(undefined)
   }
 }))
+
+// expo-blur — a real native module (delegates to requireNativeViewManager), so importing it unmocked
+// throws under Jest the same way react-native-audio-api does above. Rendered as a plain View via
+// React.createElement rather than JSX — this file is .ts, not .tsx, so JSX syntax doesn't parse here.
+// Tests assert on the props it was given (e.g. testID/style), not on any pixel output Jest can't
+// produce.
+jest.mock('expo-blur', () => {
+  const RN = require('react-native')
+  const ReactLib = require('react')
+  return {
+    BlurView: ({ testID = 'blur-view', ...props }: any) => ReactLib.createElement(RN.View, { testID, ...props })
+  }
+})

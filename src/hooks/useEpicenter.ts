@@ -28,7 +28,7 @@ export type Epicenter = {
   recenterMirror: () => void
 }
 
-export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => void, mirrorLines: number, bounceFriction: SharedValue<number>, gravity: SharedValue<number>, frozen: boolean, gestureTarget: GestureTarget): Epicenter {
+export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => void, onBounce: () => void, mirrorLines: number, bounceFriction: SharedValue<number>, gravity: SharedValue<number>, frozen: boolean, gestureTarget: GestureTarget): Epicenter {
   const { height, width } = useWindowDimensions()
   const centerX = width / 2
   const centerY = height / 2
@@ -52,7 +52,7 @@ export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => voi
   // pattern's — the opposite of this file's older order — so test helpers that pick "the pattern's own
   // callback" by registration index need to look at index 1, not 0 (see
   // swirlScreen.gesture.test.tsx's own patternFrameCallback).
-  const mirror = useDragPointPhysics(bounceFriction, gravity, frozen)
+  const mirror = useDragPointPhysics(bounceFriction, gravity, frozen, onBounce)
 
   // Which wedge the current drag actually grabbed, decided once at touch-down (see onStart) — every
   // update and the release velocity both correct through this same copy's own inverse transform (see
@@ -112,19 +112,24 @@ export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => voi
     let visibleY = mirrorOriginY + visiblePosition.dy
     let visibleVelocityX = visibleVelocity.dx
     let visibleVelocityY = visibleVelocity.dy
+    let bounced = false
     if (visibleX > width) {
       visibleX = width - (visibleX - width)
       visibleVelocityX = -visibleVelocityX
+      bounced = true
     } else if (visibleX < 0) {
       visibleX = -visibleX
       visibleVelocityX = -visibleVelocityX
+      bounced = true
     }
     if (visibleY > height) {
       visibleY = height - (visibleY - height)
       visibleVelocityY = -visibleVelocityY
+      bounced = true
     } else if (visibleY < 0) {
       visibleY = -visibleY
       visibleVelocityY = -visibleVelocityY
+      bounced = true
     }
     const correctedPosition = inverseWedgeVector(visibleX - mirrorOriginX, visibleY - mirrorOriginY, dragCopyIndex.value, wedgeAngleDeg)
     const correctedVelocity = inverseWedgeVector(visibleVelocityX, visibleVelocityY, dragCopyIndex.value, wedgeAngleDeg)
@@ -132,10 +137,11 @@ export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => voi
       x: (mirrorOriginX + correctedPosition.dx - centerX) / width,
       y: (mirrorOriginY + correctedPosition.dy - centerY) / height,
       velocityX: correctedVelocity.dx / width,
-      velocityY: correctedVelocity.dy / height
+      velocityY: correctedVelocity.dy / height,
+      bounced
     }
   }
-  const pattern = useDragPointPhysics(bounceFriction, gravity, frozen, patternClamp, patternBounceBoundary)
+  const pattern = useDragPointPhysics(bounceFriction, gravity, frozen, onBounce, patternClamp, patternBounceBoundary)
 
   // Captured once per render, same as wedgeAngleDeg/copyCount above — gestureTarget is a plain mode
   // (not a SharedValue), so the gesture is simply rebuilt (fresh closures) whenever it changes, the

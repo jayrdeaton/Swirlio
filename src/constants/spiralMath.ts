@@ -1,3 +1,5 @@
+import type { SkPoint } from '@shopify/react-native-skia'
+
 // An arm is a polyline, so how smooth it looks depends on the samples each *turn* gets, not on the
 // total. A fixed budget starves them as tightness winds the arm tighter: 3.5 turns across 220
 // points is ~63 samples per turn, 8.75 turns is ~25, and the curve visibly facets into chords. The
@@ -32,4 +34,27 @@ export function buildSpiralArmPath(turns: number, radius: number, points: number
     d += i === 0 ? `M${x.toFixed(2)},${y.toFixed(2)}` : `L${x.toFixed(2)},${y.toFixed(2)}`
   }
   return d
+}
+
+// Same geometry as buildSpiralArmPath, as raw points rather than an SVG string — SpiralArms feeds
+// this straight into Skia's PathBuilder.addPoly (see its own comment) instead of building a string
+// every frame only to have Skia immediately re-parse it back into the same points. buildSpiralArmPath
+// itself stays exactly as it was for PatternIcon's static preview icons, which render through
+// react-native-svg and genuinely need a string `d`, not a Skia path.
+//
+// rotationOffset bakes each arm's own spin directly into its points (angle + rotationOffset) rather
+// than leaving it to a wrapping transform — SpiralArms merges every arm into one Path so it can be
+// shared across kaleidoscope copies (see its own comment), and a single merged Path only has one
+// transform for its whole shape, not one per arm, so each arm's rotation has to already be baked into
+// its own coordinates instead.
+export function buildSpiralArmPoints(turns: number, radius: number, points: number, rotationOffset: number = 0): SkPoint[] {
+  'worklet'
+  const pts: SkPoint[] = new Array(points + 1)
+  for (let i = 0; i <= points; i++) {
+    const t = i / points
+    const angle = t * turns * Math.PI * 2 + rotationOffset
+    const r = t * radius
+    pts[i] = { x: r * Math.cos(angle), y: r * Math.sin(angle) }
+  }
+  return pts
 }

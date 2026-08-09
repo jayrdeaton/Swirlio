@@ -1,7 +1,4 @@
 import React from 'react'
-import { useTheme } from 'react-native-paper'
-
-import { toggleFabBackgroundColor, toggleFabIconColor } from '@/constants/fabTheme'
 
 import { LabeledFab } from './LabeledFab'
 
@@ -13,9 +10,8 @@ export type PreviewOption<T extends string> = {
 
 // Replaces a SegmentedButtons row for options where a picture says it faster than a label — the
 // pattern, dash-style, and appearance pickers, where "which one of these am I about to get" is a lot
-// clearer from a small drawing of it than from the word "Starburst". Same FAB, same on/off
-// treatment (toggleFabIconColor/toggleFabBackgroundColor) as every other square icon button on
-// screen — see OnScreenControls' group triggers — rather than a bespoke card style of its own.
+// clearer from a small drawing of it than from the word "Starburst". Same on/off treatment as every
+// other toggle FAB on screen (see useToggleFabAppearance), not a bespoke card style of its own.
 //
 // A hook returning a flat array, not a component: FabRow measures each of its own direct JSX
 // children to decide which dividers to hide, via React.Children.toArray — that only sees literal
@@ -24,9 +20,5 @@ export type PreviewOption<T extends string> = {
 // of N individually-measurable ones. Spreading this hook's array directly as {usePreviewOptionFabs(...)}
 // in JSX keeps every FAB a real sibling FabRow can see.
 export function usePreviewOptionFabs<T extends string>(options: PreviewOption<T>[], value: T, onChange: (value: T) => void): React.ReactNode[] {
-  const { colors } = useTheme()
-  return options.map((option) => {
-    const selected = option.value === value
-    return <LabeledFab key={option.value} icon={option.renderIcon} label={option.label} selected={selected} color={toggleFabIconColor(colors.primary, selected)} backgroundColor={toggleFabBackgroundColor(colors.primary, selected)} onPress={() => onChange(option.value)} />
-  })
+  return options.map((option) => <LabeledFab key={option.value} icon={option.renderIcon} label={option.label} active={option.value === value} onPress={() => onChange(option.value)} />)
 }

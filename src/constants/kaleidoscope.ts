@@ -1,11 +1,14 @@
 export const MIN_MIRROR_LINES = 0
-// 6 (12 copies) was the original UI-picked ceiling, not a technical one — the wedge math itself
-// (wedgeAngleDegrees/copyCountForMirrorLines below) has no inherent upper bound, it just makes
-// narrower wedges. Raised to 16 (32 copies) to allow noticeably denser kaleidoscopes: every ripple
-// pattern's own SVG path count scales with copies × its ripple pool, so this is roughly 2.7x the
-// render cost of the old ceiling at max — still just plain stroked paths (no per-frame layout, only a
-// worklet recomputing each `d` string), so this is a "try it and see" bump, not a proven-safe one.
-export const MAX_MIRROR_LINES = 16
+// Was briefly raised to 16 (32 copies) to try a denser kaleidoscope, then reverted here: every ripple
+// pattern's own SVG path count scales with copies × its ripple pool (RingsPattern alone can pool 40+
+// rings per copy at max tightness with fixedSpacing on), so 32 copies means 1000+ individually
+// animated SVG elements each re-evaluating their own worklet every frame — fine on a Mac-hosted
+// simulator, but it visibly stalled a real device and crashed on Randomize (which can roll straight
+// into that worst case). 6 (12 copies) is the last value actually confirmed stable on-device. The
+// wedge math itself (wedgeAngleDegrees/copyCountForMirrorLines below) has no inherent ceiling — this
+// is a render-cost budget, not a technical one — so raising it again needs a real device check, not
+// just a simulator one.
+export const MAX_MIRROR_LINES = 6
 
 // A dihedral kaleidoscope's wedges always come in mirrored pairs — one direct copy and one reflected
 // copy per rotational step — so the total is always even once there's at least one mirror line. 0
@@ -25,6 +28,21 @@ export function wedgeAngleDegrees(lines: number): number {
   return lines <= 0 ? 360 : 180 / lines
 }
 
+// Fixed-decimal, never scientific notation. Every coordinate embedded in a path/transform string in
+// this file is built from sin/cos of an angle — and wedge angles land on exact multiples of 90°
+// constantly (mirrorLines of 1, 2, 4... all produce them), where floating-point cos/sin doesn't
+// return a clean 0 but a tiny non-zero remainder like -2.4492935982947064e-16. Plain `${value}`
+// template interpolation renders that in JS's own scientific notation, which neither SVG's path
+// grammar nor Reanimated's transform-string parser accepts — it crashed with "Expected ')', digit, or
+// [eE] but ',' found" the first time this shipped (in a transform matrix; the same near-zero-times-a-
+// large-radius pattern hits path coordinates too, e.g. MASK_EXTENT * cos(90°)). `.toFixed(6)` always
+// emits fixed-decimal notation instead, so this failure mode can't recur regardless of which angle or
+// which string produces it.
+function svgNumber(value: number): string {
+  'worklet'
+  return value.toFixed(6)
+}
+
 // A true circular-sector path (pie slice) — not a polygon connecting just the two far corner points.
 // That shortcut degenerates badly as the wedge angle approaches 180°: at exactly 180° the two corners
 // sit on opposite sides of the center, so the straight chord between them cuts back through the
@@ -39,7 +57,7 @@ export function wedgePath(centerX: number, centerY: number, radius: number, star
   const x2 = centerX + radius * Math.cos(endRad)
   const y2 = centerY + radius * Math.sin(endRad)
   const largeArcFlag = endAngleDeg - startAngleDeg > 180 ? 1 : 0
-  return `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`
+  return `M ${svgNumber(centerX)} ${svgNumber(centerY)} L ${svgNumber(x1)} ${svgNumber(y1)} A ${svgNumber(radius)} ${svgNumber(radius)} 0 ${largeArcFlag} 1 ${svgNumber(x2)} ${svgNumber(y2)} Z`
 }
 
 // The clip region for one wedge of a kaleidoscope with `lines` mirror lines. The wedges themselves are
@@ -48,35 +66,61 @@ export function wedgePath(centerX: number, centerY: number, radius: number, star
 // exactly cancel for mirrored copies, so they visibly stopped animating while direct copies spun at
 // double speed — see wedgeContentTransform below, which no longer takes a rotation input for the same
 // reason). Only the pattern content drawn inside each fixed wedge keeps animating.
-export function wedgeClipPath(centerX: number, centerY: number, radius: number, copyIndex: number, wedgeAngleDeg: number): string {
+//
+// `gapFraction` (0-1, see useSwirlSettings' mirrorGap field) insets both edges evenly, shrinking the
+// wedge around its own center rather than sliding it — so the mirror axis a wedge boundary traces stays
+// exactly where it was, just with empty canvas opening up symmetrically on either side of it. Expressed
+// as a fraction *of wedgeAngleDeg* rather than a fixed degree amount specifically so the same gap
+// setting reads the same regardless of mirrorLines: a fixed-degree gap would swallow most of a wide
+// 180° wedge (mirrorLines 1) while barely denting a narrow 30° one (mirrorLines 6). The total angle
+// removed between two neighboring wedges is gapFraction * wedgeAngleDeg, split half-and-half onto each
+// of their facing edges — MAX_MIRROR_GAP stops short of 1 so that split can never meet in the middle
+// and collapse a wedge to nothing.
+export function wedgeClipPath(centerX: number, centerY: number, radius: number, copyIndex: number, wedgeAngleDeg: number, gapFraction: number): string {
   'worklet'
-  const start = copyIndex * wedgeAngleDeg
-  const end = (copyIndex + 1) * wedgeAngleDeg
+  const insetDeg = (gapFraction * wedgeAngleDeg) / 2
+  const start = copyIndex * wedgeAngleDeg + insetDeg
+  const end = (copyIndex + 1) * wedgeAngleDeg - insetDeg
   return wedgePath(centerX, centerY, radius, start, end)
 }
 
-// A reference overlay tracing the actual mirror lines — not the wedge boundaries themselves (there are
-// 2 * lines of those, see copyCountForMirrorLines), but the `lines` distinct LINES through the center
-// that produce them: each wedge boundary at angle k*wedgeAngleDeg shares its line with the one exactly
-// opposite it, at k*wedgeAngleDeg + 180, so only the first half of the boundaries (k = 0..lines-1) are
-// needed to draw every line exactly once, full length through the center in both directions.
-export function mirrorLinePath(centerX: number, centerY: number, radius: number, lines: number, wedgeAngleDeg: number): string {
+// Skia's Group `matrix` prop takes a raw row-major 3x3 affine matrix — [a, c, e, b, d, f, 0, 0, 1]
+// for the standard [[a, c, e], [b, d, f], [0, 0, 1]] affine form — rather than a formatted string, so
+// every transform-building function below returns this shape directly instead of the SVG
+// `matrix(a,b,c,d,e,f)` string form the same math used to produce. No formatting/parsing round-trip
+// either, so there's nothing to guard against scientific-notation edge cases the way svgNumber
+// (still used by the path-string builders above) has to.
+export type AffineMatrix = readonly [number, number, number, number, number, number, number, number, number]
+
+// The affine matrix for rotating by angleDeg around (centerX, centerY).
+export function rotationMatrix(centerX: number, centerY: number, angleDeg: number): AffineMatrix {
   'worklet'
-  let d = ''
-  for (let k = 0; k < lines; k++) {
-    const angleRad = (k * wedgeAngleDeg * Math.PI) / 180
-    const dx = radius * Math.cos(angleRad)
-    const dy = radius * Math.sin(angleRad)
-    d += `M ${centerX - dx} ${centerY - dy} L ${centerX + dx} ${centerY + dy} `
-  }
-  return d.trim()
+  const angleRad = (angleDeg * Math.PI) / 180
+  const a = Math.cos(angleRad)
+  const b = Math.sin(angleRad)
+  const c = -Math.sin(angleRad)
+  const d = Math.cos(angleRad)
+  const e = centerX - a * centerX - c * centerY
+  const f = centerY - b * centerX - d * centerY
+  return [a, c, e, b, d, f, 0, 0, 1]
 }
 
-// The affine matrix for reflecting around a line through (centerX, centerY) at angleDeg. SVG's
-// transform attribute accepts a raw matrix(a,b,c,d,e,f) directly, which is the only way to express an
-// arbitrary-angle reflection — SVG has no reflect() primitive, only rotate/scale/translate/skew, and
-// composing those for a non-axis-aligned line is exactly what this matrix already does in one step.
-export function reflectionMatrix(centerX: number, centerY: number, angleDeg: number): string {
+// The affine matrix equivalent of SVG's plain `rotation`/`x`/`y` shorthand props on a <G> — rotate
+// about the LOCAL origin (0,0), then translate by (x, y). Unlike rotationMatrix above, this has no
+// separate pivot: x/y and the rotation pivot are the same point.
+export function translateRotateMatrix(x: number, y: number, angleDeg: number): AffineMatrix {
+  'worklet'
+  const angleRad = (angleDeg * Math.PI) / 180
+  const a = Math.cos(angleRad)
+  const b = Math.sin(angleRad)
+  return [a, -b, x, b, a, y, 0, 0, 1]
+}
+
+// The affine matrix for reflecting around a line through (centerX, centerY) at angleDeg — Skia's
+// Group `matrix` accepts an arbitrary affine matrix directly, which is the only way to express an
+// arbitrary-angle reflection (there's no reflect() primitive, only rotate/scale/translate/skew, and
+// composing those for a non-axis-aligned line is exactly what this matrix already does in one step).
+export function reflectionMatrix(centerX: number, centerY: number, angleDeg: number): AffineMatrix {
   'worklet'
   const twiceAngleRad = (2 * angleDeg * Math.PI) / 180
   const a = Math.cos(twiceAngleRad)
@@ -85,7 +129,7 @@ export function reflectionMatrix(centerX: number, centerY: number, angleDeg: num
   const d = -Math.cos(twiceAngleRad)
   const e = centerX - a * centerX - c * centerY
   const f = centerY - b * centerX - d * centerY
-  return `matrix(${a}, ${b}, ${c}, ${d}, ${e}, ${f})`
+  return [a, c, e, b, d, f, 0, 0, 1]
 }
 
 // Where one rendered copy's own content sits, in the kaleidoscope's local space, before it's further
@@ -97,11 +141,11 @@ export function reflectionMatrix(centerX: number, centerY: number, angleDeg: num
 // while direct copies spun at double rate. Simpler and correct: wedges stay put, content spins inside
 // them via its own existing rotation (see the AnimatedG in Spiral.tsx) — a mirrored copy still visibly
 // counter-rotates relative to a direct one, which is the expected, correct kaleidoscope look, not a bug.
-export function wedgeContentTransform(centerX: number, centerY: number, copyIndex: number, wedgeAngleDeg: number): string {
+export function wedgeContentTransform(centerX: number, centerY: number, copyIndex: number, wedgeAngleDeg: number): AffineMatrix {
   'worklet'
   const isMirrored = copyIndex % 2 === 1
   if (!isMirrored) {
-    return `rotate(${copyIndex * wedgeAngleDeg}, ${centerX}, ${centerY})`
+    return rotationMatrix(centerX, centerY, copyIndex * wedgeAngleDeg)
   }
   const reflectionAngleDeg = (wedgeAngleDeg * (copyIndex + 1)) / 2
   return reflectionMatrix(centerX, centerY, reflectionAngleDeg)

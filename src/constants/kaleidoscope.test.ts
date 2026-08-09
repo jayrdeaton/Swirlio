@@ -1,4 +1,4 @@
-import { copyCountForMirrorLines, inverseWedgeVector, mirrorLinePath, reflectionMatrix, wedgeAngleDegrees, wedgeClipPath, wedgeContentTransform, wedgeIndexAtPoint, wedgePath, wedgeVector } from './kaleidoscope'
+import { copyCountForMirrorLines, inverseWedgeVector, reflectionMatrix, rotationMatrix, wedgeAngleDegrees, wedgeClipPath, wedgeContentTransform, wedgeIndexAtPoint, wedgePath, wedgeVector } from './kaleidoscope'
 
 describe('copyCountForMirrorLines', () => {
   it('is 1 at 0 lines (unmirrored), and 2x lines otherwise', () => {
@@ -48,53 +48,27 @@ describe('wedgePath', () => {
 })
 
 describe('wedgeClipPath', () => {
-  it('spans [copyIndex * wedgeAngle, (copyIndex + 1) * wedgeAngle]', () => {
-    const clip = wedgeClipPath(50, 50, 1000, 2, 90)
+  it('spans [copyIndex * wedgeAngle, (copyIndex + 1) * wedgeAngle] at gapFraction 0', () => {
+    const clip = wedgeClipPath(50, 50, 1000, 2, 90, 0)
     const direct = wedgePath(50, 50, 1000, 2 * 90, 3 * 90)
     expect(clip).toBe(direct)
   })
-})
 
-// Parses "M x1 y1 L x2 y2 M x3 y3 L x4 y4 ..." into [{x1,y1,x2,y2}, ...] segments.
-function parseMirrorLineSegments(d: string) {
-  const numbers = d.match(NUMBER_PATTERN)?.map(Number) ?? []
-  const segments = []
-  for (let i = 0; i < numbers.length; i += 4) {
-    segments.push({ x1: numbers[i], y1: numbers[i + 1], x2: numbers[i + 2], y2: numbers[i + 3] })
-  }
-  return segments
-}
-
-describe('mirrorLinePath', () => {
-  it('draws nothing for 0 lines', () => {
-    expect(mirrorLinePath(50, 50, 1000, 0, 180)).toBe('')
+  it('insets both edges by half the total gap angle, shrinking the wedge around its own center', () => {
+    // wedgeAngle 90, gapFraction 0.2 -> 18 degrees removed total, 9 off each edge.
+    const clip = wedgeClipPath(50, 50, 1000, 2, 90, 0.2)
+    const expected = wedgePath(50, 50, 1000, 2 * 90 + 9, 3 * 90 - 9)
+    expect(clip).toBe(expected)
   })
 
-  it('draws exactly `lines` segments, each centered on the given point', () => {
-    const segments = parseMirrorLineSegments(mirrorLinePath(50, 50, 100, 3, 60))
-    expect(segments).toHaveLength(3)
-    for (const { x1, y1, x2, y2 } of segments) {
-      expect((x1 + x2) / 2).toBeCloseTo(50)
-      expect((y1 + y2) / 2).toBeCloseTo(50)
-      expect(Math.hypot(x2 - x1, y2 - y1)).toBeCloseTo(200)
-    }
-  })
-
-  it('lays out segment k at angle k * wedgeAngleDeg, matching the wedge boundaries it traces', () => {
-    const segments = parseMirrorLineSegments(mirrorLinePath(0, 0, 10, 4, 45))
-    segments.forEach(({ x1, y1, x2, y2 }, k) => {
-      const angleRad = (k * 45 * Math.PI) / 180
-      expect(x2).toBeCloseTo(10 * Math.cos(angleRad))
-      expect(y2).toBeCloseTo(10 * Math.sin(angleRad))
-      expect(x1).toBeCloseTo(-10 * Math.cos(angleRad))
-      expect(y1).toBeCloseTo(-10 * Math.sin(angleRad))
-    })
+  it('leaves the wedge boundary untouched at copyIndex 0 spanning [0, wedgeAngle] when gapFraction is 0', () => {
+    expect(wedgeClipPath(0, 0, 10, 0, 60, 0)).toBe(wedgePath(0, 0, 10, 0, 60))
   })
 })
 
-// Applies an SVG matrix(a,b,c,d,e,f) string to a point.
-function applyMatrix(matrix: string, x: number, y: number) {
-  const [a, b, c, d, e, f] = matrix.match(NUMBER_PATTERN)!.map(Number)
+// Applies a Skia-style row-major affine matrix ([a, c, e, b, d, f, 0, 0, 1]) to a point.
+function applyMatrix(matrix: readonly number[], x: number, y: number) {
+  const [a, c, e, b, d, f] = matrix
   return { x: a * x + c * y + e, y: b * x + d * y + f }
 }
 
@@ -136,14 +110,14 @@ describe('reflectionMatrix', () => {
 
 describe('wedgeContentTransform', () => {
   it('rotates even (direct) copies by copyIndex * wedgeAngle', () => {
-    expect(wedgeContentTransform(50, 50, 0, 90)).toBe('rotate(0, 50, 50)')
-    expect(wedgeContentTransform(50, 50, 2, 90)).toBe('rotate(180, 50, 50)')
+    expect(wedgeContentTransform(50, 50, 0, 90)).toEqual(rotationMatrix(50, 50, 0))
+    expect(wedgeContentTransform(50, 50, 2, 90)).toEqual(rotationMatrix(50, 50, 180))
   })
 
   it('reflects odd (mirrored) copies at half the wedge-boundary angle they land on', () => {
     // copyIndex 1, wedgeAngle 90: reflection angle = 90 * (1+1)/2 = 90
     const transform = wedgeContentTransform(50, 50, 1, 90)
-    expect(transform).toBe(reflectionMatrix(50, 50, 90))
+    expect(transform).toEqual(reflectionMatrix(50, 50, 90))
   })
 
   it('is fixed — the same wedge index and angle always produce the same transform, independent of any live rotation', () => {
@@ -152,8 +126,8 @@ describe('wedgeContentTransform', () => {
     // reflected copy's contribution from the pattern's *own* independent spin exactly cancelled out
     // algebraically, freezing it while direct copies span at double rate. Wedges are fixed now.
     const wedgeAngle = 60
-    expect(wedgeContentTransform(0, 0, 1, wedgeAngle)).toBe(wedgeContentTransform(0, 0, 1, wedgeAngle))
-    expect(wedgeContentTransform(0, 0, 1, wedgeAngle)).toBe(reflectionMatrix(0, 0, wedgeAngle))
+    expect(wedgeContentTransform(0, 0, 1, wedgeAngle)).toEqual(wedgeContentTransform(0, 0, 1, wedgeAngle))
+    expect(wedgeContentTransform(0, 0, 1, wedgeAngle)).toEqual(reflectionMatrix(0, 0, wedgeAngle))
   })
 })
 
@@ -200,15 +174,7 @@ describe('inverseWedgeVector', () => {
   // resulting *delta* undoes exactly that.
   it('round-trips through the forward wedge transform for both a direct and a mirrored copy', () => {
     for (const copyIndex of [0, 2, 1, 3]) {
-      const forwardTransform = wedgeContentTransform(0, 0, copyIndex, 90)
-      const [a, b, c, d] = forwardTransform.startsWith('matrix')
-        ? forwardTransform.match(/-?\d+(\.\d+)?(e[+-]?\d+)?/gi)!.map(Number)
-        : (() => {
-            const angleRad = (copyIndex * 90 * Math.PI) / 180
-            const cos = Math.cos(angleRad)
-            const sin = Math.sin(angleRad)
-            return [cos, sin, -sin, cos]
-          })()
+      const [a, c, , b, d] = wedgeContentTransform(0, 0, copyIndex, 90)
       const forwarded = { dx: a * 10 + c * 4, dy: b * 10 + d * 4 }
       const back = inverseWedgeVector(forwarded.dx, forwarded.dy, copyIndex, 90)
       expect(back.dx).toBeCloseTo(10)
@@ -244,15 +210,7 @@ describe('wedgeVector', () => {
 
   it("matches wedgeContentTransform's own linear part — the same placement the rendering side draws that copy with", () => {
     for (const copyIndex of [0, 1, 2, 3]) {
-      const transform = wedgeContentTransform(0, 0, copyIndex, 90)
-      const [a, b, c, d] = transform.startsWith('matrix')
-        ? transform.match(/-?\d+(\.\d+)?(e[+-]?\d+)?/gi)!.map(Number)
-        : (() => {
-            const angleRad = (copyIndex * 90 * Math.PI) / 180
-            const cos = Math.cos(angleRad)
-            const sin = Math.sin(angleRad)
-            return [cos, sin, -sin, cos]
-          })()
+      const [a, c, , b, d] = wedgeContentTransform(0, 0, copyIndex, 90)
       const expected = { dx: a * 10 + c * 4, dy: b * 10 + d * 4 }
       const actual = wedgeVector(10, 4, copyIndex, 90)
       expect(actual.dx).toBeCloseTo(expected.dx)

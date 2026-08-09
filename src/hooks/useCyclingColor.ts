@@ -1,29 +1,16 @@
-import { useEffect, useState } from 'react'
-import { SharedValue } from 'react-native-reanimated'
+import { SharedValue, useDerivedValue } from 'react-native-reanimated'
 
 import { cycleColor } from '@/constants/colorBlend'
 
-const TICK_MS = 80
-
-// Reads `progress` on a plain JS interval rather than a worklet: the result feeds an ordinary React
-// prop (`stroke` / the container's `backgroundColor`, not animatedProps), so there's nothing to
-// gain from blending on the UI thread. `progress` is its own clock — foreground and background each
-// get their own instance, so they can cycle at independently adjustable rates.
-export function useCyclingColor(colors: string[], progress: SharedValue<number>): string {
-  const [cycling, setCycling] = useState(() => cycleColor(colors, progress.value))
-
-  useEffect(() => {
-    // A single-colour list isn't cycling, so it reads straight from `colors` rather than the
-    // interval — otherwise `cycling` would go stale (frozen at whatever it last was) instead of
-    // tracking a colour that changed while there was nothing to cycle through.
-    if (colors.length < 2) return
-
-    const id = setInterval(() => {
-      setCycling(cycleColor(colors, progress.value))
-    }, TICK_MS)
-
-    return () => clearInterval(id)
-  }, [colors, progress])
-
-  return colors.length > 1 ? cycling : colors[0]
+// A UI-thread-driven derived value, now that its result feeds an animated Skia `color` prop
+// (Circle/Path) directly rather than a plain, non-animated React prop the way it used to when this
+// ran on a JS-thread setInterval instead (see colorBlend.ts's 'worklet' directives for the other half
+// of that change — every function this calls into needs to actually run on the UI thread now, not
+// just this hook). `progress` is its own clock — foreground and background each get their own
+// instance, so they can cycle at independently adjustable rates. A single-colour list isn't cycling,
+// but still needs to reach the same worklet-driven color; cycleColor's own valid.length < 2 branch
+// already returns that one color unchanged rather than blending, so there's no separate case to
+// special-case here the way the old interval-gated version needed.
+export function useCyclingColor(colors: string[], progress: SharedValue<number>): SharedValue<string> {
+  return useDerivedValue(() => cycleColor(colors, progress.value))
 }

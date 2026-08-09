@@ -19,8 +19,33 @@ describe('dashArrayFor', () => {
     expect(result?.[1]).toBeGreaterThan(0)
   })
 
-  it('scales the gap with stroke width for both non-solid styles, so beads/dashes stay separated as the stroke thickens', () => {
-    for (const style of ['dots', 'dashes'] as const) {
+  it('returns a 4-element repeating pattern for dashDot, concatenating dashes and dots', () => {
+    const strokeWidth = 6
+    const result = dashArrayFor('dashDot', strokeWidth)
+    expect(result).toHaveLength(4)
+    expect(result?.slice(0, 2)).toEqual(dashArrayFor('dashes', strokeWidth))
+    expect(result?.slice(2, 4)).toEqual(dashArrayFor('dots', strokeWidth))
+  })
+
+  it('returns a 6-element repeating pattern for dashDotDot, concatenating dashes and dots twice', () => {
+    const strokeWidth = 6
+    const result = dashArrayFor('dashDotDot', strokeWidth)
+    expect(result).toHaveLength(6)
+    expect(result?.slice(0, 2)).toEqual(dashArrayFor('dashes', strokeWidth))
+    expect(result?.slice(2, 4)).toEqual(dashArrayFor('dots', strokeWidth))
+    expect(result?.slice(4, 6)).toEqual(dashArrayFor('dots', strokeWidth))
+  })
+
+  it('returns a 4-element paired-dash pattern for doubleDash, with a wider outer gap than inner gap', () => {
+    const strokeWidth = 6
+    const result = dashArrayFor('doubleDash', strokeWidth)
+    expect(result).toHaveLength(4)
+    expect(result?.[0]).toEqual(result?.[2])
+    expect(result?.[3]).toBeGreaterThan(result?.[1] as number)
+  })
+
+  it('scales the gap with stroke width for every non-solid style, so beads/dashes stay separated as the stroke thickens', () => {
+    for (const style of ['dots', 'dashes', 'dashDot', 'dashDotDot', 'doubleDash'] as const) {
       const thin = dashArrayFor(style, 2)
       const thick = dashArrayFor(style, 20)
       expect(thick![1]).toBeGreaterThan(thin![1])
@@ -41,7 +66,7 @@ describe('dashArrayFor', () => {
   })
 
   it('falls back to undefined for a non-finite or non-positive stroke width', () => {
-    for (const style of ['dots', 'dashes'] as const) {
+    for (const style of ['dots', 'dashes', 'dashDot', 'dashDotDot', 'doubleDash'] as const) {
       expect(dashArrayFor(style, 0)).toBeUndefined()
       expect(dashArrayFor(style, -5)).toBeUndefined()
       expect(dashArrayFor(style, Number.NaN)).toBeUndefined()

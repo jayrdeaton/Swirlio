@@ -1,11 +1,10 @@
-import { Dialog } from '@rific/auto-paper'
-import { useVibration } from '@rific/haptic-press'
+import { Dialog, getContrastColor } from '@rific/auto-paper'
+import { Button, TouchableOpacity } from '@rific/haptic-press'
 import React, { useState } from 'react'
-import { StyleSheet, TouchableOpacity, View } from 'react-native'
-import { Button, Icon, useTheme } from 'react-native-paper'
+import { StyleSheet, View } from 'react-native'
+import { Icon, useTheme } from 'react-native-paper'
 
 import { NEUTRAL_AND_VIVID_COLORS } from '@/constants/colorSwatches'
-import { getContrastColor } from '@/constants/contrastColor'
 
 import { ActionFab } from './ActionFab'
 import { LabeledFab } from './LabeledFab'
@@ -39,14 +38,12 @@ export type ColorListFabs = {
 // same colour independently.
 export function useColorListFabs(label: string, colors: string[], onChange: (colors: string[]) => void): ColorListFabs {
   const { colors: themeColors } = useTheme()
-  const { selection } = useVibration()
   const [dialogState, setDialogState] = useState<DialogState>(null)
 
   const editingIndex = typeof dialogState === 'number' ? dialogState : null
   const editingColor = editingIndex != null ? colors[editingIndex] : null
 
   const pickSwatch = (hex: string) => {
-    selection()
     if (dialogState === 'add') {
       onChange([...colors, hex])
     } else if (editingIndex != null) {
@@ -58,7 +55,6 @@ export function useColorListFabs(label: string, colors: string[], onChange: (col
   const removeEditing = () => {
     // Always leave at least one colour behind — an empty list has nothing to draw.
     if (editingIndex == null || colors.length <= 1) return
-    selection()
     onChange(colors.filter((_, index) => index !== editingIndex))
     setDialogState(null)
   }
@@ -70,7 +66,7 @@ export function useColorListFabs(label: string, colors: string[], onChange: (col
       // the group's own name ("Foreground"/"Background") as its caption instead of its hex — that's
       // the only label this group gets, rather than a separate non-interactive label FAB taking up a
       // slot of its own.
-      <LabeledFab key={index} testID={`color-dot-${index}`} icon={() => null} label={index === 0 ? label : hex} color='transparent' backgroundColor={hex} onPress={() => setDialogState(index)} />
+      <LabeledFab key={index} testID={`color-dot-${index}`} icon={() => null} label={index === 0 ? label : hex} colorOverride={{ backgroundColor: hex, iconColor: 'transparent' }} onPress={() => setDialogState(index)} />
     )),
     <ActionFab key='add' testID={`color-list-add-${label}`} icon='plus' label='Add color' onPress={() => setDialogState('add')} />
   ]

@@ -1,4 +1,4 @@
-import { buildStarPath } from '@/constants/starMath'
+import { buildStarPath, buildStarPoints } from '@/constants/starMath'
 
 describe('buildStarPath', () => {
   it('starts pointing straight up, alternating outer and inner vertices, closing back to start', () => {
@@ -36,5 +36,31 @@ describe('buildStarPath', () => {
     expect(buildStarPath(6, 0)).toBe('')
     expect(buildStarPath(6, Number.NaN)).toBe('')
     expect(buildStarPath(Number.NaN, 100)).toBe('')
+  })
+})
+
+describe('buildStarPoints', () => {
+  // Same geometry as buildStarPath (see its own tests above), just handed back as raw vertices
+  // instead of an SVG string, and without the repeated closing vertex — StarPattern feeds these
+  // straight into Skia's PathBuilder.addPoly(points, true), whose own `close` flag draws that edge.
+  it('returns points * 2 vertices, alternating outer and inner radius', () => {
+    const pts = buildStarPoints(5, 100)
+    expect(pts.length).toBe(10)
+    pts.forEach(({ x, y }, i) => {
+      expect(Math.hypot(x, y)).toBeCloseTo(i % 2 === 0 ? 100 : 50, 1)
+    })
+  })
+
+  it('starts pointing straight up, matching buildStarPath\'s first vertex', () => {
+    const pts = buildStarPoints(4, 100)
+    expect(pts[0].x).toBeCloseTo(0)
+    expect(pts[0].y).toBeCloseTo(-100)
+  })
+
+  it('renders nothing for degenerate input rather than a malformed path', () => {
+    expect(buildStarPoints(2, 100)).toEqual([])
+    expect(buildStarPoints(6, 0)).toEqual([])
+    expect(buildStarPoints(6, Number.NaN)).toEqual([])
+    expect(buildStarPoints(Number.NaN, 100)).toEqual([])
   })
 })

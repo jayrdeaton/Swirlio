@@ -1,4 +1,4 @@
-import { buildFlowerPath } from '@/constants/flowerMath'
+import { buildFlowerPath, buildFlowerPoints } from '@/constants/flowerMath'
 
 // Matches the private FLOWER_SAMPLES_PER_PETAL/FLOWER_INNER_RATIO in flowerMath.ts — not exported
 // (polygonMath/starMath don't export their own per-vertex constants either), so both are spelled
@@ -58,5 +58,34 @@ describe('buildFlowerPath', () => {
     expect(buildFlowerPath(6, 0)).toBe('')
     expect(buildFlowerPath(6, Number.NaN)).toBe('')
     expect(buildFlowerPath(Number.NaN, 100)).toBe('')
+  })
+})
+
+describe('buildFlowerPoints', () => {
+  // Same geometry as buildFlowerPath (see its own tests above), just handed back as raw points
+  // instead of an SVG string, and without the repeated closing point — FlowerPattern feeds these
+  // straight into Skia's PathBuilder.addPoly(points, true), whose own `close` flag draws that edge.
+  it('returns petals * samples-per-petal points', () => {
+    const pts = buildFlowerPoints(5, 50)
+    expect(pts.length).toBe(5 * SAMPLES_PER_PETAL)
+  })
+
+  it.each([3, 4, 5, 8])('traces %i petal tips at full radius and notches short of the center', (petals) => {
+    const radius = 100
+    const pts = buildFlowerPoints(petals, radius)
+
+    for (let petal = 0; petal < petals; petal++) {
+      const tipIndex = petal * SAMPLES_PER_PETAL
+      const notchIndex = tipIndex + SAMPLES_PER_PETAL / 2
+      expect(Math.hypot(pts[tipIndex].x, pts[tipIndex].y)).toBeCloseTo(radius, 1)
+      expect(Math.hypot(pts[notchIndex].x, pts[notchIndex].y)).toBeCloseTo(radius * INNER_RATIO, 1)
+    }
+  })
+
+  it('renders nothing for degenerate input rather than a malformed path', () => {
+    expect(buildFlowerPoints(1, 100)).toEqual([])
+    expect(buildFlowerPoints(6, 0)).toEqual([])
+    expect(buildFlowerPoints(6, Number.NaN)).toEqual([])
+    expect(buildFlowerPoints(Number.NaN, 100)).toEqual([])
   })
 })

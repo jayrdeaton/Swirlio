@@ -11,5 +11,6 @@
     },
     "types": ["react-native", "jest", "node"]
   },
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": [".claude/worktrees/**"]
 }

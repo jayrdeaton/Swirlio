@@ -14,14 +14,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 // OnScreenControls.tsx (12+44 for the sliders, 16+56 for the transport row's medium FAB, 16+40 for
 // the corner FABs). The left zone's full-height 64px width already happens to cover the single
 // Randomize FAB in the top-left corner too (it sits within x:[16,56]), so it doesn't need a zone of
-// its own — only the top-right trigger stack (menu + 5 group triggers, stacked vertically — see
-// OnScreenControls' triggerStack) needs a dedicated zone, tall enough to cover the whole column
-// rather than just one corner FAB's own footprint the way it used to when that row ran horizontally.
+// its own — only the top-right trigger stack (the settings cog + 4 group triggers, plus the always-
+// visible siblings-collapse toggle anchored at the top of that column — see OnScreenControls'
+// triggerStack) needs a dedicated zone, tall enough to cover the whole column rather than just one
+// corner FAB's own footprint the way it used to when that row ran horizontally.
 const EDGE_ZONE_WIDTH = 64
 const BOTTOM_ZONE_HEIGHT = 88
 const TOP_RIGHT_ZONE_WIDTH = 72
-// 6 stacked FABs (menu + 5 triggers) at 40px + a 2px hairline-border allowance each, 16px gaps
-// between them (see OnScreenControls' TRIGGER_STACK_GAP), plus the same slop the other zones get.
+// 6 stacked FABs (the settings cog + 4 triggers, plus the siblings-collapse toggle) at 40px + a 2px
+// hairline-border allowance each, 5 gaps between them (see OnScreenControls' TRIGGER_STACK_GAP), plus
+// the same slop the other zones get. Sized for the stack's fully-expanded footprint — the collapse
+// toggle's own siblings-hide state is a separate, later interaction, irrelevant to this zone, which
+// only exists while the whole overlay is hidden and reappears fully expanded.
 const TOP_RIGHT_ZONE_HEIGHT = 6 * 42 + 5 * 16 + 20
 
 type EdgeRevealZonesProps = {

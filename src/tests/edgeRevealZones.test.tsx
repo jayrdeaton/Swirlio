@@ -13,10 +13,11 @@ describe('EdgeRevealZones', () => {
     expect(screen.queryByTestId('edge-reveal-top-right')).toBeNull()
   })
 
-  // Down from five zones to four now that the trigger stack (menu + 5 group triggers) runs
-  // vertically along the right edge instead of spanning a horizontal row across the top — one
-  // dedicated top-right zone, tall enough to cover the whole stack, replaces both the old top-center
-  // zone (gone, nothing spans the top anymore) and covers the same corner the old top-right zone did.
+  // Down from five zones to four now that the trigger stack (menu + 4 group triggers + the
+  // siblings-collapse toggle) runs vertically along the right edge instead of spanning a horizontal
+  // row across the top — one dedicated top-right zone, tall enough to cover the whole stack, replaces
+  // both the old top-center zone (gone, nothing spans the top anymore) and covers the same corner the
+  // old top-right zone did.
   it('renders all four zones while active', async () => {
     const screen = await render(<EdgeRevealZones active={true} onReveal={jest.fn()} />)
 
