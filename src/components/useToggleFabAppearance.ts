@@ -1,7 +1,7 @@
 import { useBlur } from '@rific/auto-paper'
 import { useTheme } from 'react-native-paper'
 
-import { toggleFabBackgroundColor, toggleFabIconColor, TOGGLE_OFF_BLUR_TINT_OPACITY } from '@/constants/fabTheme'
+import { TOGGLE_OFF_BLUR_TINT_OPACITY, toggleFabBackgroundColor, toggleFabIconColor } from '@/constants/fabTheme'
 
 export type ToggleFabAppearance = {
   // The FAB's own solid fill while active. While inactive, this doubles as the tint color a

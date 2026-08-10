@@ -166,7 +166,7 @@ function pickRandomDistinct<T>(items: T[], count: number): T[] {
 }
 
 export default function SwirlScreen() {
-  const { settings, setAudioReactiveEnabled, setBackgroundColors, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
+  const { settings, setAudioReactiveEnabled, setBackgroundColors, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
   const { medium, notification, selection } = useVibration()
   const { gravityCenterX, gravityCenterY } = useTiltGravityCenter(MAX_OFFSET, settings.tiltEnabled)
   // isVisible (not isOpen): stays true for the full close animation too, not just until something

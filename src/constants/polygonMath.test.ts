@@ -29,7 +29,7 @@ describe('buildPolygonPoints', () => {
   // Same geometry as buildPolygonPath (see its own tests above), just handed back as raw vertices
   // instead of an SVG string, and without the repeated closing vertex — PolygonPattern feeds these
   // straight into Skia's PathBuilder.addPoly(points, true), whose own `close` flag draws that edge.
-  it('returns one vertex per side, matching buildPolygonPath\'s vertices before the closing repeat', () => {
+  it("returns one vertex per side, matching buildPolygonPath's vertices before the closing repeat", () => {
     const pts = buildPolygonPoints(4, 100)
     const expected = [
       [0, -100],

@@ -87,11 +87,13 @@ export function LabeledFab({ icon, label, active, colorOverride, disabled = fals
   // border instead of adding to it, so the Surface's true rendered box matches `diameter` exactly, on
   // both axes, same as the backdrop it needs to align with.
   const fabStyle = { backgroundColor: showBlurBackdrop ? 'transparent' : backgroundColor, borderColor: disabled ? disabledIconColor(colors.primary) : borderColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: diameter, width: diameter, boxSizing: 'border-box' as const }
+  const backdropStyle = { borderRadius, overflow: 'hidden' as const }
+  const wrapperStyle = { height: diameter, width: diameter }
 
   return (
     <View style={styles.column}>
-      <View style={{ height: diameter, width: diameter }}>
-        {showBlurBackdrop && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, { borderRadius, overflow: 'hidden' }]} />}
+      <View style={wrapperStyle}>
+        {showBlurBackdrop && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, backdropStyle]} />}
         <FAB testID={testID} size={size} icon={resolveIcon(icon)} disabled={disabled} accessibilityLabel={label} accessibilityState={{ disabled, selected: active }} color={iconColor} style={fabStyle} theme={disabledFabTheme(colors.primary)} onPress={onPress} />
       </View>
       {settings.showLabels && (

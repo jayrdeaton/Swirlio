@@ -176,6 +176,9 @@ export function OnScreenControls({ visible, frozen, audioReactiveEnabled, gestur
   // canvas, not just the floating icon.
   const fabOutlineStyle = { borderColor: solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH }
   const solidFabStyle = { backgroundColor: colors.primary, ...fabOutlineStyle }
+  const disabledBackdropStyle = { borderRadius: 3 * (roundness ?? 4), overflow: 'hidden' as const }
+  const backFabStyle = { backgroundColor: backDisabled ? 'transparent' : colors.primary, borderColor: backDisabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' as const }
+  const gestureTargetFabStyle = { backgroundColor: gestureTargetDisabled ? 'transparent' : colors.primary, borderColor: gestureTargetDisabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' as const }
   // Without an explicit box-sizing, the border above grows a FAB's own intrinsic Surface box a couple
   // pixels past its true small/medium footprint (react-native-paper's FAB Surface has no size of its
   // own — see LabeledFab's fabStyle for the full mechanism). Invisible on these solid FABs themselves
@@ -278,8 +281,8 @@ export function OnScreenControls({ visible, frozen, audioReactiveEnabled, gestur
           back to yet) reuses the exact same BlurView-backdrop pattern as the gesture-target FAB
           further down — see its own comment for the full rationale. */}
           <View style={styles.disableableSmallFabWrapper}>
-            {backDisabled && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, { borderRadius: 3 * (roundness ?? 4), overflow: 'hidden' }]} />}
-            <FAB testID='fab-skip-previous' icon={resolveIcon('skip-previous')} size='small' disabled={backDisabled} color={solidFabColor} style={{ backgroundColor: backDisabled ? 'transparent' : colors.primary, borderColor: backDisabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' }} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onGoBack} />
+            {backDisabled && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, disabledBackdropStyle]} />}
+            <FAB testID='fab-skip-previous' icon={resolveIcon('skip-previous')} size='small' disabled={backDisabled} color={solidFabColor} style={backFabStyle} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onGoBack} />
           </View>
           {/* Same on/off treatment as the mirror toggles (solid fill when on, fixed neutral scrim —
           plus a glass blur wherever the platform renders one — when off, see GlassToggleFab) — this is
@@ -317,8 +320,8 @@ export function OnScreenControls({ visible, frozen, audioReactiveEnabled, gestur
           FAB's actual icon color the moment it's disabled. Shared wrapper style (disableableSmallFabWrapper,
           not a gesture-target-specific name) since the back FAB above reuses this exact same treatment. */}
           <View style={styles.disableableSmallFabWrapper}>
-            {gestureTargetDisabled && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, { borderRadius: 3 * (roundness ?? 4), overflow: 'hidden' }]} />}
-            <FAB testID='fab-target' icon={resolveIcon(GESTURE_TARGET_ICONS[gestureTarget])} size='small' disabled={gestureTargetDisabled} color={solidFabColor} style={{ backgroundColor: gestureTargetDisabled ? 'transparent' : colors.primary, borderColor: gestureTargetDisabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' }} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onCycleGestureTarget} />
+            {gestureTargetDisabled && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, disabledBackdropStyle]} />}
+            <FAB testID='fab-target' icon={resolveIcon(GESTURE_TARGET_ICONS[gestureTarget])} size='small' disabled={gestureTargetDisabled} color={solidFabColor} style={gestureTargetFabStyle} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onCycleGestureTarget} />
           </View>
           {/* onLongPress is a bonus gesture layered on the same FAB as forward's ordinary tap-to-tweak
           (see goForward/goForwardBatch in index.tsx for the one-tweak-vs-several distinction) — same

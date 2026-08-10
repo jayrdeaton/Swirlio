@@ -51,7 +51,7 @@ describe('buildStarPoints', () => {
     })
   })
 
-  it('starts pointing straight up, matching buildStarPath\'s first vertex', () => {
+  it("starts pointing straight up, matching buildStarPath's first vertex", () => {
     const pts = buildStarPoints(4, 100)
     expect(pts[0].x).toBeCloseTo(0)
     expect(pts[0].y).toBeCloseTo(-100)

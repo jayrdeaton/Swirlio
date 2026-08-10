@@ -22,9 +22,12 @@ export const GLOBAL_NUDGE_X = -1
 export const GLOBAL_NUDGE_Y = -1
 
 export function MdIcon({ name, color, size }: MdIconProps) {
+  const containerStyle = { height: size, width: size, alignItems: 'center' as const, justifyContent: 'center' as const }
+  const iconWrapperStyle = { transform: [{ translateX: GLOBAL_NUDGE_X }, { translateY: GLOBAL_NUDGE_Y }] }
+
   return (
-    <View style={{ height: size, width: size, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ transform: [{ translateX: GLOBAL_NUDGE_X }, { translateY: GLOBAL_NUDGE_Y }] }}>
+    <View style={containerStyle}>
+      <View style={iconWrapperStyle}>
         <MaterialCommunityIcons name={name as never} color={color} size={size} />
       </View>
     </View>

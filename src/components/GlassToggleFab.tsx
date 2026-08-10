@@ -37,17 +37,19 @@ export function GlassToggleFab({ icon, active, onPress, testID }: GlassToggleFab
   // `3 * roundness` — mirrored here so the blur backdrop is clipped to the exact same rounded shape as
   // the FAB sitting on top of it, not a guessed circle.
   const borderRadius = 3 * (roundness ?? 4)
+  const backdropStyle = { borderRadius, overflow: 'hidden' as const }
+  const fabStyle = { backgroundColor: active ? backgroundColor : 'transparent', borderColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_DIAMETER, width: FAB_DIAMETER, boxSizing: 'border-box' as const }
 
   return (
     <View style={styles.wrapper}>
-      {!active && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, { borderRadius, overflow: 'hidden' }]} />}
+      {!active && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, backdropStyle]} />}
       {/* height/width/boxSizing: without an explicit box-sizing, the border this style adds grows the
       FAB Surface's own intrinsic box a couple pixels past FAB_DIAMETER — see LabeledFab's fabStyle for
       the full mechanism (same underlying react-native-paper FAB, same bug). That leaves the Surface a
       couple pixels taller than the BlurView backdrop above, both sharing the same top edge, so a
       sliver of whatever's behind both shows through at the bottom. border-box is what makes this
       explicit height/width actually include the border instead of adding to it. */}
-      <FAB testID={testID} icon={resolveIcon(icon)} size='small' color={iconColor} style={{ backgroundColor: active ? backgroundColor : 'transparent', borderColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_DIAMETER, width: FAB_DIAMETER, boxSizing: 'border-box' }} onPress={onPress} />
+      <FAB testID={testID} icon={resolveIcon(icon)} size='small' color={iconColor} style={fabStyle} onPress={onPress} />
     </View>
   )
 }
