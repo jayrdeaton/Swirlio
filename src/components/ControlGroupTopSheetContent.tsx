@@ -68,49 +68,46 @@ export function ControlGroupTopSheetContent() {
     <View style={{ paddingTop: insets.top + TOP_SHEET_HEADER_CLEARANCE, paddingRight: TOP_SHEET_RIGHT_CLEARANCE }}>
       <View style={styles.body}>
         {group === 'mirror' && (
-          <>
-            {/* Left enabled even at 0 mirror lines (where neither has anything to act on yet) rather
-            than disabled until the Mirror lines slider (see the bottom sheet) is raised — these are
-            first in the row, so a disabled-on-first-look pair would be most people's very first
-            encounter with this sheet. Toggling them ahead of time just pre-arms the setting for
-            whenever mirror lines does go above 0. */}
-            <FabRow>
-              <SettingToggleFab icon='checkerboard' label='Alternate colors' value={settings.mirrorAlternateColors} onValueChange={setMirrorAlternateColors} />
-              {/* Rerolls mirror lines/gap/alternate-colors — same rerollUnitsByGroup slice the global
-              dice FAB and shake gesture already pull 'mirror' units from (see index.tsx's
-              randomizeGroup), just scoped to this group instead of every field at once. Same icon as
-              the global dice FAB (OnScreenControls) for a consistent "this randomizes" affordance. */}
-              <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('mirror')} />
-              {/* Squares the wedges' rotation back to 0 AND snaps the mirror anchor back to center —
-              see index.tsx's resetMirror. Used to be rotation-only, paired with a tap on the anchor
-              itself to recentre it, but that tap had no fixed visual marker to aim at once the
-              pattern was mirrored (there's nothing to see there, just wherever you last dragged it
-              to) — this button is now the only, findable way to reach either half. Short, icon-
-              disambiguated label (not "Reset mirror") matching the Colors group's own Reset/Swap
-              pair below and Pattern's own reset button (see the 'pattern' branch below) — both just
-              say "Reset", disambiguated only by whichever sheet happens to be open. */}
-              <ActionFab icon='backup-restore' label='Reset' onPress={resetMirror} />
-            </FabRow>
-          </>
+          <FabRow>
+            {/* Leads every group's row now (Colors/Pattern/Line below follow the same lead-with-
+            Randomize-then-Reset order) rather than trailing after that group's own toggles/pickers:
+            styles.body's fixed left padding puts this same first slot at the same screen position
+            regardless of which group is open, and TOP_SHEET_HEADER_CLEARANCE (sheetLayout.ts) already
+            lands that first row at the closed-sheet dice FAB's own y — so rerolling whichever group
+            you're in is one tap at a spot your thumb already knows, not a different position per
+            group. Rerolls mirror lines/gap/alternate-colors — same rerollUnitsByGroup slice the
+            global dice FAB and shake gesture already pull 'mirror' units from (see index.tsx's
+            randomizeGroup), just scoped to this group instead of every field at once. Same icon as
+            the global dice FAB (OnScreenControls) for a consistent "this randomizes" affordance. */}
+            <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('mirror')} />
+            {/* Right after Randomize, not off with the toggle below — both read as one-tap,
+            whole-group actions, distinct from Alternate colors' own single-field toggle. Squares the
+            wedges' rotation back to 0 AND snaps the mirror anchor back to center — see index.tsx's
+            resetMirror. Used to be rotation-only, paired with a tap on the anchor itself to recentre
+            it, but that tap had no fixed visual marker to aim at once the pattern was mirrored
+            (there's nothing to see there, just wherever you last dragged it to) — this button is now
+            the only, findable way to reach either half. Short, icon-disambiguated label (not "Reset
+            mirror") matching the Colors group's own Reset/Swap pair below and Pattern's own reset
+            button (see the 'pattern' branch below) — all three just say "Reset", disambiguated only
+            by whichever sheet happens to be open. */}
+            <ActionFab icon='backup-restore' label='Reset' onPress={resetMirror} />
+            <FabDivider />
+            {/* Left enabled even at 0 mirror lines (where it has nothing to act on yet) rather than
+            disabled until the Mirror lines slider (see the bottom sheet) is raised — toggling it
+            ahead of time just pre-arms the setting for whenever mirror lines does go above 0. */}
+            <SettingToggleFab icon='checkerboard' label='Alternate colors' value={settings.mirrorAlternateColors} onValueChange={setMirrorAlternateColors} />
+          </FabRow>
         )}
 
         {group === 'colors' && (
           <>
-            {/* Matches every other group: one continuous wrapping row, each color list's own group
-            label, swatches, and add button, then Swap/Reset last — separated by the same FabDivider
-            every other group uses between logically distinct clusters — rather than this being the
-            one section with its own bespoke title-plus-icon-button header and separate non-wrapping
-            rows per list. */}
             <FabRow>
-              {foregroundColorFabs.fabs}
-              <FabDivider />
-              {backgroundColorFabs.fabs}
-              <FabDivider />
-              <ActionFab icon='swap-horizontal' label='Swap' onPress={swapColors} />
-              {/* Rerolls the fg/bg color pair — the same single 'colors' rerollUnitsByGroup unit the
-              global dice FAB and shake gesture already reroll (see index.tsx's randomizeGroup). Same
-              icon as the global dice FAB (OnScreenControls) for a consistent "this randomizes"
-              affordance. */}
+              {/* Leads the row — see Mirror's own comment above for why Randomize/Reset front every
+              group now. Swap joins them here rather than down with the swatches below: it's the same
+              one-tap, whole-group action as the other two, just colors-specific. Rerolls the fg/bg
+              color pair — the same single 'colors' rerollUnitsByGroup unit the global dice FAB and
+              shake gesture already reroll (see index.tsx's randomizeGroup). Same icon as the global
+              dice FAB (OnScreenControls) for a consistent "this randomizes" affordance. */}
               <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('colors')} />
               <ActionFab
                 icon='backup-restore'
@@ -126,6 +123,15 @@ export function ControlGroupTopSheetContent() {
                   setBackgroundColors(DEFAULT_BACKGROUND_COLORS)
                 }}
               />
+              <ActionFab icon='swap-horizontal' label='Swap' onPress={swapColors} />
+              <FabDivider />
+              {/* Each color list's own group label, swatches, and add button — separated from the
+              actions above and from each other by the same FabDivider every other group uses between
+              logically distinct clusters, rather than this being the one section with its own bespoke
+              title-plus-icon-button header and separate non-wrapping rows per list. */}
+              {foregroundColorFabs.fabs}
+              <FabDivider />
+              {backgroundColorFabs.fabs}
             </FabRow>
             {foregroundColorFabs.dialog}
             {backgroundColorFabs.dialog}
@@ -134,27 +140,11 @@ export function ControlGroupTopSheetContent() {
 
         {group === 'pattern' && (
           <FabRow>
-            {patternFabs}
-            <FabDivider />
-            {/* Crop/Hole live here rather than in Line: now that either can trace the active
-            pattern's own outline (see Spiral.tsx's shapedClipPoints), they're as much a "what shape
-            is this" decision as Sides/Points/Petals below is, not just a stroke-rendering knob.
-            Left enabled for every pattern, including Spiral/Starburst/Rings — those have no closed
-            boundary of their own and always clip to a plain circle regardless — but pre-arming the
-            toggle here means it's already set the way the user wants the moment they switch to
-            Polygon/Star/Flower, same "toggleable ahead of having anything to act on" reasoning as
-            Alternate colors above. Distinct icons even though the two toggles are
-            otherwise identical in shape (a plain outline for the outer Crop, a bounded/contained
-            outline for the inner Hole) — matching this app's own one-icon-per-control convention
-            rather than reusing Sides' own vector-polygon glyph, which reads as "how many points",
-            not "trace the shape". */}
-            <SettingToggleFab icon='shape-outline' label='Crop shape' value={settings.cropShaped} onValueChange={setCropShaped} />
-            <SettingToggleFab icon='contain' label='Hole shape' value={settings.holeShaped} onValueChange={setHoleShaped} />
-            <FabDivider />
-            {/* Rerolls pattern+sides, crop radius/shaped, and hole radius/shaped — the 'pattern'
-            rerollUnitsByGroup slice the global dice FAB and shake gesture already pull from (see
-            index.tsx's randomizeGroup), just scoped to this group. Same icon as the global dice FAB
-            (OnScreenControls) for a consistent "this randomizes" affordance. */}
+            {/* Leads the row — see Mirror's own comment above for why Randomize/Reset front every
+            group now. Rerolls pattern+sides, crop radius/shaped, and hole radius/shaped — the
+            'pattern' rerollUnitsByGroup slice the global dice FAB and shake gesture already pull from
+            (see index.tsx's randomizeGroup). Same icon as the global dice FAB (OnScreenControls) for
+            a consistent "this randomizes" affordance. */}
             <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('pattern')} />
             {/* Squares the pattern's rotation back to 0 AND snaps the epicentre back to center —
             see index.tsx's resetPattern. No effect on zoom, which has no orientation of its own to
@@ -162,14 +152,39 @@ export function ControlGroupTopSheetContent() {
             it, but that tap had no fixed visual marker to aim at once the pattern was mirrored —
             this button is now the only, findable way to reach either half. Short, icon-disambiguated
             label matching Mirror's own reset button (see the 'mirror' branch above) and the Colors
-            group's Reset/Swap pair below — all three just say "Reset", disambiguated only by
+            group's Reset/Swap pair above — all three just say "Reset", disambiguated only by
             whichever sheet happens to be open. */}
             <ActionFab icon='backup-restore' label='Reset' onPress={resetPattern} />
+            <FabDivider />
+            {patternFabs}
+            <FabDivider />
+            {/* Crop/Hole live here rather than in Line: now that either can trace the active
+            pattern's own outline (see Spiral.tsx's shapedClipPoints), they're as much a "what shape
+            is this" decision as Sides/Points/Petals above is, not just a stroke-rendering knob.
+            Left enabled for every pattern, including Spiral/Starburst/Rings — those have no closed
+            boundary of their own and always clip to a plain circle regardless — but pre-arming the
+            toggle here means it's already set the way the user wants the moment they switch to
+            Polygon/Star/Flower, same "toggleable ahead of having anything to act on" reasoning as
+            Alternate colors gets in Mirror above. Distinct icons even though the two toggles are
+            otherwise identical in shape (a plain outline for the outer Crop, a bounded/contained
+            outline for the inner Hole) — matching this app's own one-icon-per-control convention
+            rather than reusing Sides' own vector-polygon glyph, which reads as "how many points",
+            not "trace the shape". */}
+            <SettingToggleFab icon='shape-outline' label='Crop shape' value={settings.cropShaped} onValueChange={setCropShaped} />
+            <SettingToggleFab icon='contain' label='Hole shape' value={settings.holeShaped} onValueChange={setHoleShaped} />
           </FabRow>
         )}
 
         {group === 'line' && (
           <FabRow>
+            {/* Leads the row — see Mirror's own comment above for why Randomize fronts every group
+            now. No Reset button in this group (unlike Mirror/Colors/Pattern above), so Randomize
+            alone still lands in that same fixed first slot. Rerolls dash style, tightness, and
+            stroke width — the 'line' rerollUnitsByGroup slice the global dice FAB and shake gesture
+            already pull from (see index.tsx's randomizeGroup). Same icon as the global dice FAB
+            (OnScreenControls) for a consistent "this randomizes" affordance. */}
+            <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('line')} />
+            <FabDivider />
             {dashStyleFabs}
             <FabDivider />
             {/* Fixed spacing lives here rather than in Pattern: it's paired with Tightness (see the
@@ -181,13 +196,6 @@ export function ControlGroupTopSheetContent() {
             spread out right along with it. This pins that spacing to what it looks like at a
             centered epicentre instead. */}
             <SettingToggleFab icon='ruler' label='Fixed spacing' value={settings.fixedSpacing} onValueChange={setFixedSpacing} />
-            <FabDivider />
-            {/* Rerolls dash style, tightness, and stroke width — the 'line' rerollUnitsByGroup slice
-            the global dice FAB and shake gesture already pull from (see index.tsx's randomizeGroup).
-            No Reset button in this group today (unlike Mirror/Colors/Pattern above) — Randomize is
-            the first per-field action to land here. Same icon as the global dice FAB
-            (OnScreenControls) for a consistent "this randomizes" affordance. */}
-            <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('line')} />
           </FabRow>
         )}
 

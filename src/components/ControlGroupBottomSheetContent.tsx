@@ -12,10 +12,10 @@ import { MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX
 import { SettingSlider } from './SettingSlider'
 
 const CYCLE_SPEED_SLIDER_STEP = 0.1
-// Coarser than a plain 0.1 (was the case for all three until now) specifically so 0 — "stopped" — is
-// only a handful of steps from anywhere on the track, with a visible tick landmarking it, rather
-// than one increment among 100 tightly-packed ones. See SPEED_SLIDER_TICK_STEP below for the
-// (coarser still) landmark ticks drawn on top of these steps.
+// Coarser than a plain 0.1 (was the case for all three until now) specifically so 0 — "stopped" —
+// is only a handful of steps from anywhere on the track, with a visible tick landmarking every step
+// (see the Rotation/Zoom/Mirror rotation speed sliders below), rather than one increment among 100
+// tightly-packed ones.
 const ROTATION_SPEED_SLIDER_STEP = 1
 const ZOOM_SPEED_SLIDER_STEP = 1
 const STROKE_WIDTH_SLIDER_STEP = 0.5
@@ -31,12 +31,14 @@ const GRAVITY_SLIDER_STEP = 0.1
 // Landmark ticks at every whole number (0/1/2/3/4/5), not one per 0.1 step — see SettingSlider's own
 // tickStep comment for why that distinction matters here specifically.
 const PHYSICS_SLIDER_TICK_STEP = 1
-// Same idea as PHYSICS_SLIDER_TICK_STEP, for the three ±speed sliders (Rotation/Zoom/Mirror
-// rotation) — one tick per even number over their own -10..10 range, landmarking 0 specifically
-// (direction reverses there) rather than every whole-number step actually snaps to. Doubled
-// alongside MIN/MAX_ROTATION_SPEED's own doubling (see useSwirlSettings.tsx) so the track still
-// shows the same 11 landmark ticks it always has, rather than doubling to 21 and turning to tick soup.
-const SPEED_SLIDER_TICK_STEP = 2
+// The three ±speed sliders (Rotation/Zoom/Mirror rotation) used to landmark only every other
+// whole-number step here, the same coarser-than-step idea as PHYSICS_SLIDER_TICK_STEP above — but
+// unlike friction/gravity's 0.1 step (where matching every step would mean 51 ticks, real tick
+// soup), these only have 21 whole-number stops across their own -10..10 range, few enough that
+// landmarking every one of them reads fine. Left at one tick per step (SettingSlider's own default
+// when no tickStep is passed) so tapping anywhere on the track always lands on a drawn tick — the
+// coarser version left a step landing between two ticks indistinguishable, on screen, from a drag
+// that had "gone right where you pressed" instead of snapping to anything.
 
 // cropRadius itself is stored (and read by Spiral.tsx) as "where the pattern is clipped away" — 1
 // (MAX_CROP_RADIUS) means it's clipped exactly at the pattern's own outer edge, which is what "off"
@@ -96,7 +98,7 @@ export function ControlGroupBottomSheetContent() {
             {/* Spins the whole wedge assembly as one rigid unit around the epicentre — independent of
             Pattern's own Rotation speed, which only spins the pattern content drawn inside each fixed
             wedge. See Spiral.tsx's outer AnimatedG. 0 is the original, still-default fixed-wedge look. */}
-            <SettingSlider label='Mirror rotation speed' icon='rotate-orbit' value={settings.mirrorRotationSpeed} displayValue={`${settings.mirrorRotationSpeed.toFixed(2)}x`} minimumValue={MIN_MIRROR_ROTATION_SPEED} maximumValue={MAX_MIRROR_ROTATION_SPEED} step={MIRROR_ROTATION_SPEED_SLIDER_STEP} showTicks tickStep={SPEED_SLIDER_TICK_STEP} disabled={settings.audioReactiveEnabled} onChange={setMirrorRotationSpeed} />
+            <SettingSlider label='Mirror rotation speed' icon='rotate-orbit' value={settings.mirrorRotationSpeed} displayValue={`${settings.mirrorRotationSpeed.toFixed(2)}x`} minimumValue={MIN_MIRROR_ROTATION_SPEED} maximumValue={MAX_MIRROR_ROTATION_SPEED} step={MIRROR_ROTATION_SPEED_SLIDER_STEP} showTicks disabled={settings.audioReactiveEnabled} onChange={setMirrorRotationSpeed} />
           </>
         )}
 
@@ -131,8 +133,8 @@ export function ControlGroupBottomSheetContent() {
             pulled out into a standalone 'speed' group, but Mirror and Colors each already keep their
             own speed settings internal to their own group, so having the pattern's own speed live
             anywhere else was the one inconsistency, not a deliberate distinction. */}
-            <SettingSlider label='Rotation speed' icon='speedometer' value={settings.rotationSpeed} displayValue={`${settings.rotationSpeed.toFixed(2)}x`} minimumValue={MIN_ROTATION_SPEED} maximumValue={MAX_ROTATION_SPEED} step={ROTATION_SPEED_SLIDER_STEP} showTicks tickStep={SPEED_SLIDER_TICK_STEP} disabled={settings.audioReactiveEnabled} onChange={setRotationSpeed} />
-            <SettingSlider label='Zoom speed' icon='magnify' value={settings.zoomSpeed} displayValue={`${settings.zoomSpeed.toFixed(2)}x`} minimumValue={MIN_ZOOM_SPEED} maximumValue={MAX_ZOOM_SPEED} step={ZOOM_SPEED_SLIDER_STEP} showTicks tickStep={SPEED_SLIDER_TICK_STEP} disabled={settings.audioReactiveEnabled} onChange={setZoomSpeed} />
+            <SettingSlider label='Rotation speed' icon='speedometer' value={settings.rotationSpeed} displayValue={`${settings.rotationSpeed.toFixed(2)}x`} minimumValue={MIN_ROTATION_SPEED} maximumValue={MAX_ROTATION_SPEED} step={ROTATION_SPEED_SLIDER_STEP} showTicks disabled={settings.audioReactiveEnabled} onChange={setRotationSpeed} />
+            <SettingSlider label='Zoom speed' icon='magnify' value={settings.zoomSpeed} displayValue={`${settings.zoomSpeed.toFixed(2)}x`} minimumValue={MIN_ZOOM_SPEED} maximumValue={MAX_ZOOM_SPEED} step={ZOOM_SPEED_SLIDER_STEP} showTicks disabled={settings.audioReactiveEnabled} onChange={setZoomSpeed} />
           </>
         )}
 
