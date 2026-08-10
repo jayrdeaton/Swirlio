@@ -313,14 +313,18 @@ const defaultSettings: SwirlSettings = {
   mirrorRotationSpeed: 0,
   pattern: 'spiral',
   polygonSides: 4,
-  rotationSpeed: 1,
+  // 2, not the more obviously "normal-speed" 1 — the Rotation/Zoom speed sliders now drag/snap (and
+  // tick) in steps of 2 (see ROTATION_SPEED_SLIDER_STEP/ZOOM_SPEED_SLIDER_STEP in
+  // ControlGroupBottomSheetContent), and 1 would start the thumb sitting between two ticks on first
+  // load rather than resting on one the way every other default value on this screen does.
+  rotationSpeed: 2,
   shakeEnabled: true,
   showGravityMarker: true,
   showLabels: false,
   strokeWidth: 6,
   tightness: 1,
   tiltEnabled: true,
-  zoomSpeed: 1
+  zoomSpeed: 2
 }
 
 const SwirlSettingsContext = createContext<SwirlSettingsContextValue | null>(null)

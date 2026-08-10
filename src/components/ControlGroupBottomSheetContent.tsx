@@ -12,12 +12,16 @@ import { MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX
 import { SettingSlider } from './SettingSlider'
 
 const CYCLE_SPEED_SLIDER_STEP = 0.1
-// Coarser than a plain 0.1 (was the case for all three until now) specifically so 0 — "stopped" —
-// is only a handful of steps from anywhere on the track, with a visible tick landmarking every step
-// (see the Rotation/Zoom/Mirror rotation speed sliders below), rather than one increment among 100
-// tightly-packed ones.
-const ROTATION_SPEED_SLIDER_STEP = 1
-const ZOOM_SPEED_SLIDER_STEP = 1
+// The three ±speed sliders (Rotation/Zoom/Mirror rotation) actually drag/snap in steps of 2, not 1 —
+// deliberately coarser than a plain 0.1-per-unit granularity would give, and matching
+// SPEED_SLIDER_TICK_STEP below exactly (no separate tickStep override needed — it defaults to
+// `step`). Landing every step on a drawn tick is what fixed a real bug: with a finer step than the
+// visible ticks, tapping the track committed to whatever value the tap happened to land on, which
+// read as the slider ignoring its own tick marks. Matching them instead of narrowing the tick gap
+// keeps the tick count low enough that 0 (direction reverses there) still reads as the visual
+// center rather than getting lost among a denser field of marks.
+const ROTATION_SPEED_SLIDER_STEP = 2
+const ZOOM_SPEED_SLIDER_STEP = 2
 const STROKE_WIDTH_SLIDER_STEP = 0.5
 const TIGHTNESS_SLIDER_STEP = 0.05
 const CROP_RADIUS_SLIDER_STEP = 0.05
@@ -25,20 +29,14 @@ const HOLE_RADIUS_SLIDER_STEP = 0.05
 const POLYGON_SIDES_SLIDER_STEP = 1
 const MIRROR_LINES_SLIDER_STEP = 1
 const MIRROR_GAP_SLIDER_STEP = 0.05
-const MIRROR_ROTATION_SPEED_SLIDER_STEP = 1
+const MIRROR_ROTATION_SPEED_SLIDER_STEP = 2
 const BOUNCE_FRICTION_SLIDER_STEP = 0.1
 const GRAVITY_SLIDER_STEP = 0.1
 // Landmark ticks at every whole number (0/1/2/3/4/5), not one per 0.1 step — see SettingSlider's own
-// tickStep comment for why that distinction matters here specifically.
+// tickStep comment for why that distinction matters here specifically. Friction/gravity keep this
+// coarser-than-step landmarking (unlike the speed sliders above) because matching it to their own
+// 0.1 step would mean 51 ticks — real tick soup — not just the milder 21-vs-11 tradeoff speed had.
 const PHYSICS_SLIDER_TICK_STEP = 1
-// The three ±speed sliders (Rotation/Zoom/Mirror rotation) used to landmark only every other
-// whole-number step here, the same coarser-than-step idea as PHYSICS_SLIDER_TICK_STEP above — but
-// unlike friction/gravity's 0.1 step (where matching every step would mean 51 ticks, real tick
-// soup), these only have 21 whole-number stops across their own -10..10 range, few enough that
-// landmarking every one of them reads fine. Left at one tick per step (SettingSlider's own default
-// when no tickStep is passed) so tapping anywhere on the track always lands on a drawn tick — the
-// coarser version left a step landing between two ticks indistinguishable, on screen, from a drag
-// that had "gone right where you pressed" instead of snapping to anything.
 
 // cropRadius itself is stored (and read by Spiral.tsx) as "where the pattern is clipped away" — 1
 // (MAX_CROP_RADIUS) means it's clipped exactly at the pattern's own outer edge, which is what "off"
