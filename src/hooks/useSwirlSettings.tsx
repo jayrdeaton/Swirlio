@@ -36,10 +36,14 @@ export type SwirlSettings = {
   fixedSpacing: boolean
   foregroundColors: string[]
   foregroundCycleSpeed: number
-  // A spring-like pull back toward the center, applied alongside bounceFriction while the epicentre
-  // is bouncing free (see useEpicenter's bounceFrame) — 0 leaves it exactly as before (bounces off
-  // the edges forever, or until friction alone kills the velocity), turning it up gives the whole
-  // thing a "gravity well" it eventually settles back into the middle of.
+  // A spring-like pull toward wherever the gravity center currently sits (see
+  // useDragPointPhysics.ts's frame callback) — the true center at rest, or nudged toward whichever
+  // edge the device is tilted toward when tiltEnabled is on (see useTiltGravityCenter.ts). 0 leaves
+  // the epicentre bouncing freely with nothing pulling it anywhere (off the edges forever, or until
+  // friction alone kills the velocity); turning it up gives it a "gravity well" it rolls toward and
+  // settles into — ambiently, not just after a release, so this is also what makes tilt actually move
+  // the epicentre at all. Nonzero by default specifically so "Tilt to roll" does something the moment
+  // it's turned on, without also needing this slider raised first.
   gravity: number
   // A second, inner cutoff carved out of the crop circle — a fraction *of* cropRadius (not of the
   // pattern's own radius), so the hole can never reach or exceed the crop no matter how it's dragged:
@@ -67,6 +71,14 @@ export type SwirlSettings = {
   polygonSides: number
   rotationSpeed: number
   shakeEnabled: boolean
+  // Whether Spiral draws the gravity marker at all (see Spiral.tsx's GravityRingMarker) — even when
+  // this is on, the marker itself still only actually appears while gravity is visibly doing
+  // something (see useEpicenter.ts's gravityActive), never as a permanent overlay. A TEMPORARY knob:
+  // once gravity is promoted to its own touch-draggable gestureTarget (see the deferred work noted in
+  // useEpicenter.ts's own GestureTarget comment), showing/hiding its marker belongs with that mode
+  // the same way showMirrorMarker already follows gestureTarget, and this standalone toggle should be
+  // removed in favor of that.
+  showGravityMarker: boolean
   // Compact by default (icon-only FABs, no slider labels) — turning this on trades that density for
   // legibility: bigger FAB captions and slider labels, see SettingSlider/LabeledFab.
   showLabels: boolean
@@ -99,6 +111,7 @@ type SwirlSettingsContextValue = {
   setPolygonSides: (sides: number) => void
   setRotationSpeed: (speed: number) => void
   setShakeEnabled: (enabled: boolean) => void
+  setShowGravityMarker: (enabled: boolean) => void
   setShowLabels: (enabled: boolean) => void
   setStrokeWidth: (strokeWidth: number) => void
   setTightness: (tightness: number) => void
@@ -152,10 +165,13 @@ export const MAX_HOLE_RADIUS = 1
 // nearly all velocity within a second, reading as barely a bounce at all before it comes to rest.
 export const MIN_BOUNCE_FRICTION = 0
 export const MAX_BOUNCE_FRICTION = 5
-// A spring constant (acceleration = -gravity * displacement, both in fraction-of-window units) added
-// to the bounce frame alongside friction — 0 leaves the free-bouncing epicentre with no pull toward
-// center at all (the original, still-default behavior); 5 pulls it back firmly enough to noticeably
-// overshoot past center before friction and further pulls settle it there.
+// A spring constant (acceleration = -gravity * (position - gravityCenter), both in fraction-of-window
+// units) applied every frame gravity is active, not just alongside a release-driven bounce — see
+// useDragPointPhysics.ts's frame callback and its ambient-activation reaction. 0 leaves the epicentre
+// with no pull toward the gravity center at all (the original behavior, back when that center could
+// only ever be the true center); 5 pulls it back firmly enough to noticeably overshoot past the
+// gravity center before friction and further pulls settle it there. Nonzero by default (see
+// defaultSettings.gravity) so tilt has something to actually roll the epicentre with out of the box.
 export const MIN_GRAVITY = 0
 export const MAX_GRAVITY = 5
 
@@ -258,6 +274,7 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       // unused, the same as any other field a returning user's version predates.
       ...(typeof persisted.rotationSpeed === 'number' ? { rotationSpeed: clamp(persisted.rotationSpeed, MIN_ROTATION_SPEED, MAX_ROTATION_SPEED) } : null),
       ...(typeof persisted.shakeEnabled === 'boolean' ? { shakeEnabled: persisted.shakeEnabled } : null),
+      ...(typeof persisted.showGravityMarker === 'boolean' ? { showGravityMarker: persisted.showGravityMarker } : null),
       ...(typeof persisted.showLabels === 'boolean' ? { showLabels: persisted.showLabels } : null),
       ...(typeof persisted.strokeWidth === 'number' ? { strokeWidth: clamp(persisted.strokeWidth, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH) } : null),
       ...(typeof persisted.tightness === 'number' ? { tightness: clamp(persisted.tightness, MIN_TIGHTNESS, MAX_TIGHTNESS) } : null),
@@ -287,7 +304,7 @@ const defaultSettings: SwirlSettings = {
   fixedSpacing: false,
   foregroundColors: DEFAULT_FOREGROUND_COLORS,
   foregroundCycleSpeed: 1,
-  gravity: 0,
+  gravity: 1,
   holeRadius: 0,
   holeShaped: true,
   mirrorAlternateColors: false,
@@ -298,6 +315,7 @@ const defaultSettings: SwirlSettings = {
   polygonSides: 4,
   rotationSpeed: 1,
   shakeEnabled: true,
+  showGravityMarker: true,
   showLabels: false,
   strokeWidth: 6,
   tightness: 1,
@@ -395,6 +413,7 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setPolygonSides: (sides) => setSettings((prev) => (Number.isFinite(sides) ? { ...prev, polygonSides: clampInt(sides, MIN_POLYGON_SIDES, MAX_POLYGON_SIDES) } : prev)),
       setRotationSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, rotationSpeed: clamp(speed, MIN_ROTATION_SPEED, MAX_ROTATION_SPEED) } : prev)),
       setShakeEnabled: (enabled) => setSettings((prev) => ({ ...prev, shakeEnabled: enabled })),
+      setShowGravityMarker: (enabled) => setSettings((prev) => ({ ...prev, showGravityMarker: enabled })),
       setShowLabels: (enabled) => setSettings((prev) => ({ ...prev, showLabels: enabled })),
       setStrokeWidth: (strokeWidth) => setSettings((prev) => (Number.isFinite(strokeWidth) ? { ...prev, strokeWidth: clamp(strokeWidth, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH) } : prev)),
       setTightness: (tightness) => setSettings((prev) => (Number.isFinite(tightness) ? { ...prev, tightness: clamp(tightness, MIN_TIGHTNESS, MAX_TIGHTNESS) } : prev)),
@@ -410,12 +429,14 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       // preferences like everything else this button touches. audioReactiveEnabled is live session
       // state tied to a mic the user just granted; shakeEnabled/tiltEnabled are explicit opt-outs the
       // user made — either way, a flat reset shouldn't silently switch them back on/off underneath
-      // someone.
+      // someone. showGravityMarker joins them for the same reason, plus it's a temporary debug knob
+      // (see its own comment) that a "Reset all" shouldn't silently flip back on/off either.
       resetSettings: () =>
         setSettings((prev) => ({
           ...defaultSettings,
           audioReactiveEnabled: prev.audioReactiveEnabled,
           shakeEnabled: prev.shakeEnabled,
+          showGravityMarker: prev.showGravityMarker,
           tiltEnabled: prev.tiltEnabled
         }))
     }),

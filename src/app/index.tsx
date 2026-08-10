@@ -16,15 +16,17 @@ import { hasPolygonSides, PATTERN_ORDER } from '@/constants/patterns'
 import { randomHexColor } from '@/constants/randomColor'
 import { MAX_RADIUS_TO_REFERENCE_RATIO, RIPPLE_BASE_COUNT, rippleModulus, rippleSpacing } from '@/constants/rippleMath'
 import { DASH_STYLE_ORDER } from '@/constants/strokeDash'
-import { useControlGroupSheetDrawer } from '@/hooks/controlGroups'
+import { ControlGroup, useControlGroupSheetDrawer } from '@/hooks/controlGroups'
+import { useRegisterSwirlRandomize } from '@/hooks/swirlRandomize'
 import { useRegisterSwirlReset } from '@/hooks/swirlReset'
 import { useAudioReactive } from '@/hooks/useAudioReactive'
+import { MAX_OFFSET } from '@/hooks/useDragPointPhysics'
 import { GESTURE_TARGET_ORDER, GestureTarget, useEpicenter } from '@/hooks/useEpicenter'
 import { useLoopingProgress } from '@/hooks/useLoopingProgress'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { useSwapColors } from '@/hooks/useSwapColors'
-import { MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_HOLE_RADIUS, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_HOLE_RADIUS, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED, SwirlSettings, useSwirlSettings } from '@/hooks/useSwirlSettings'
-import { useTiltWarp } from '@/hooks/useTiltWarp'
+import { MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_HOLE_RADIUS, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_HOLE_RADIUS, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, SwirlSettings, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const BASE_ROTATION_DURATION_MS = 12000
 // Same spring feel as useEpicenter's own recenter snap — a consistent "settles back to its resting
@@ -39,7 +41,6 @@ const BASE_ROTATION_DURATION_MS = 12000
 const ROTATION_RESET_SPRING = { damping: 18, stiffness: 140, energyThreshold: 1e-3 }
 const PULSE_DURATION_MS = 3000
 const BASE_CYCLE_DURATION_MS = 6000
-const TILT_MAX_OFFSET = 120
 const LONG_PRESS_MS = 400
 const RANDOMIZE_MAX_FOREGROUND_COLORS = 3
 // How many of the 12 look units in rerollUnits a long-press on the forward transport FAB rerolls at
@@ -87,33 +88,26 @@ const CONTROLS_IDLE_FADE_MS = 5000
 // scaling it by exactly the same 2x as the range would have kept that same undershoot, just against
 // a taller ceiling — this pushes a given physical twist noticeably closer to the new max instead.
 const ROTATION_VELOCITY_TO_SPEED_SCALE = 0.8
-// Same idea for the pinch gesture, converting its release velocity into zoomSpeed. Pinch velocity
-// (UIPinchGestureRecognizer.velocity on iOS, and its Android equivalent) is reported in scale
-// units/sec — the rate the finger-spread ratio is changing, not a distance — which puts it in the
-// same rough order of magnitude as rotation's radians/sec, so this is scaled to match
-// ROTATION_VELOCITY_TO_SPEED_SCALE rather than starting from a much smaller guess. (An earlier,
-// ~100x-smaller value here came from testing against RNGH's *web* pinch polyfill, which computes
-// velocity as raw Δscale / Δtime-in-milliseconds — a completely different, much smaller unit than
-// the native platforms report; that mismatch is exactly why a pinch that felt fine in this
-// environment's mouse-only browser tooling did essentially nothing on a real device.) Still a
-// first-pass calibration meant to be retuned by feel on a real device, same as
-// ROTATION_VELOCITY_TO_SPEED_SCALE.
-const ZOOM_VELOCITY_TO_SPEED_SCALE = 0.6
 // How much relative pinch scale (event.scale — always measured relative to 1 at gesture start, not
 // a per-frame delta) moves mirrorGap, when the pinch targets the mirror — see targetsMirrorPinch
 // below. Unlike mirror lines (a whole-number count with no meaningful "in between"), a gap is a
 // smooth fraction, so this drives it the same live, 1:1-tracked way rotationGesture's onUpdate
 // already drives manualOffset — mirrorGap.value gets written every frame the fingers move, not just
-// once on release. Same untestable-in-this-environment disclaimer as ZOOM_VELOCITY_TO_SPEED_SCALE
+// once on release. Same untestable-in-this-environment disclaimer as ROTATION_VELOCITY_TO_SPEED_SCALE
 // above: calibrated so a full, arm's-length pinch spread (scale ~2.5) sweeps close to the whole
 // MIN_MIRROR_GAP..MAX_MIRROR_GAP range; retune by feel on a real device.
 const PINCH_SCALE_TO_MIRROR_GAP_SCALE = 0.6
 // How much relative pinch scale nudges the pattern's own pulse phase live, while the pinch is
 // targeting the pattern — see manualPulseOffset's own comment further down for the full mechanism.
-// Same rough magnitude as PINCH_SCALE_TO_MIRROR_GAP_SCALE above (both are
-// "how far a pinch's scale delta pushes something," just onto a different destination) and the same
-// untestable-without-a-device disclaimer as ZOOM_VELOCITY_TO_SPEED_SCALE: a full, arm's-length
-// pinch spread sweeps the ripples through roughly half a lap; retune by feel on a real device.
+// Deliberately NOT also driven by the pinch's release velocity the way rotationGesture's speed is
+// (see onEnd below) — an earlier version fed event.velocity into zoomSpeed the same "give it a spin"
+// way rotate does, but pinch velocity reads far noisier than a twist's does (a spread/pinch has a lot
+// less room for a clean, consistent release swing than a rotation does), so that momentum landed as
+// janky, unpredictable zoomSpeed jumps rather than a satisfying flick — worse than just leaving
+// zoomSpeed to the slider alone. Same rough magnitude as PINCH_SCALE_TO_MIRROR_GAP_SCALE above (both
+// are "how far a pinch's scale delta pushes something," just onto a different destination) and the
+// same untestable-without-a-device disclaimer as ROTATION_VELOCITY_TO_SPEED_SCALE: a full, arm's-
+// length pinch spread sweeps the ripples through roughly half a lap; retune by feel on a real device.
 const PINCH_SCALE_TO_PULSE_OFFSET_SCALE = 0.5
 // A pinch targeting the pattern moves line thickness and density together with zoom (see
 // targetsPatternZoom's pinch handling further down), rather than zoom being the only thing it
@@ -174,7 +168,7 @@ function pickRandomDistinct<T>(items: T[], count: number): T[] {
 export default function SwirlScreen() {
   const { settings, setAudioReactiveEnabled, setBackgroundColors, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
   const { medium, notification, selection } = useVibration()
-  const { tiltX, tiltY } = useTiltWarp(TILT_MAX_OFFSET, settings.tiltEnabled)
+  const { gravityCenterX, gravityCenterY } = useTiltGravityCenter(MAX_OFFSET, settings.tiltEnabled)
   // isVisible (not isOpen): stays true for the full close animation too, not just until something
   // asks to close — see OnScreenControls for why the row this gates needs to track that same window.
   const { isVisible: groupSheetVisible } = useControlGroupSheetDrawer()
@@ -213,15 +207,6 @@ export default function SwirlScreen() {
   // right where it was left.
   const mirrorAvailable = settings.mirrorLines > 0
   const effectiveGestureTarget: GestureTarget = mirrorAvailable ? gestureTarget : 'pattern'
-
-  // Same split as targetsPatternRotation/targetsMirrorRotation further down, applied to tilt: which
-  // point(s) the device's own tilt nudges, rather than always the pattern regardless of gestureTarget.
-  const targetsPatternTilt = effectiveGestureTarget !== 'mirror'
-  const targetsMirrorTilt = effectiveGestureTarget !== 'pattern'
-  const patternTiltX = useDerivedValue(() => (targetsPatternTilt ? tiltX.value : 0), [targetsPatternTilt])
-  const patternTiltY = useDerivedValue(() => (targetsPatternTilt ? tiltY.value : 0), [targetsPatternTilt])
-  const mirrorTiltX = useDerivedValue(() => (targetsMirrorTilt ? tiltX.value : 0), [targetsMirrorTilt])
-  const mirrorTiltY = useDerivedValue(() => (targetsMirrorTilt ? tiltY.value : 0), [targetsMirrorTilt])
 
   const [controlsVisible, setControlsVisible] = useState(true)
   // Bumped by revealControls (an edge hover/press — the only way the controls come back once hidden)
@@ -493,7 +478,7 @@ export default function SwirlScreen() {
   const bounceFriction = useSharedValue(settings.bounceFriction)
   const gravity = useSharedValue(settings.gravity)
 
-  const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, panGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, medium, settings.mirrorLines, bounceFriction, gravity, frozen, effectiveGestureTarget)
+  const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, medium, settings.mirrorLines, bounceFriction, gravity, gravityCenterX, gravityCenterY, frozen, effectiveGestureTarget)
 
   // What each sheet's own "Reset" button calls (see ControlGroupTopSheetContent) — rotation and
   // position together, not just rotation: a tap-to-recenter gesture used to cover position on its
@@ -709,15 +694,19 @@ export default function SwirlScreen() {
   // mode is switched back off — a wasted reroll, not a surprise. polygonSides is the same story but
   // only for patterns that have it (reactiveSides), so it's skipped inline within the pattern unit
   // instead of being pulled out as its own audioDriven entry.
-  const rerollUnits = useMemo<(() => void)[]>(() => {
+  // Each unit also carries which top-sheet group it belongs to — see ControlGroupTopSheetContent's
+  // per-group "Randomize" buttons (wired through rerollUnitsByGroup below), which reroll only one
+  // group's units instead of everything randomize() below touches.
+  const { rerollUnits, rerollUnitsByGroup } = useMemo<{ rerollUnits: (() => void)[]; rerollUnitsByGroup: Record<ControlGroup, (() => void)[]> }>(() => {
     const randomInRange = (min: number, max: number) => min + Math.random() * (max - min)
     const randomInt = (min: number, max: number) => Math.floor(randomInRange(min, max + 1))
     const audioReactive = settings.audioReactiveEnabled
 
-    const units: { audioDriven: boolean; reroll: () => void }[] = [
+    const units: { group: ControlGroup; audioDriven: boolean; reroll: () => void }[] = [
       // Background is derived from the foreground's own contrast, not independently randomized, so
       // both setters move together as one unit.
       {
+        group: 'colors',
         audioDriven: false,
         reroll: () => {
           const foregroundCount = 1 + Math.floor(Math.random() * RANDOMIZE_MAX_FOREGROUND_COLORS)
@@ -734,6 +723,7 @@ export default function SwirlScreen() {
       // block's own comment above). Bundled with pattern itself as one unit either way, since pattern
       // itself is never audio-driven and still deserves its own reroll regardless of mic mode.
       {
+        group: 'pattern',
         audioDriven: false,
         reroll: () => {
           const nextPattern = PATTERN_ORDER[Math.floor(Math.random() * PATTERN_ORDER.length)]
@@ -743,19 +733,28 @@ export default function SwirlScreen() {
           }
         }
       },
-      { audioDriven: false, reroll: () => setDashStyle(DASH_STYLE_ORDER[Math.floor(Math.random() * DASH_STYLE_ORDER.length)]) },
-      { audioDriven: false, reroll: () => setMirrorLines(randomInt(MIN_MIRROR_LINES, MAX_MIRROR_LINES)) },
-      { audioDriven: true, reroll: () => setMirrorGap(randomInRange(MIN_MIRROR_GAP, MAX_MIRROR_GAP)) },
-      { audioDriven: false, reroll: () => setMirrorAlternateColors(Math.random() < 0.5) },
-      { audioDriven: true, reroll: () => setTightness(randomInRange(MIN_TIGHTNESS, MAX_TIGHTNESS)) },
-      { audioDriven: true, reroll: () => setStrokeWidth(randomInRange(MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)) },
-      { audioDriven: true, reroll: () => setCropRadius(randomInRange(MIN_CROP_RADIUS, MAX_CROP_RADIUS)) },
-      { audioDriven: false, reroll: () => setCropShaped(Math.random() < 0.5) },
-      { audioDriven: true, reroll: () => setHoleRadius(randomInRange(MIN_HOLE_RADIUS, MAX_HOLE_RADIUS)) },
-      { audioDriven: false, reroll: () => setHoleShaped(Math.random() < 0.5) }
+      { group: 'line', audioDriven: false, reroll: () => setDashStyle(DASH_STYLE_ORDER[Math.floor(Math.random() * DASH_STYLE_ORDER.length)]) },
+      { group: 'mirror', audioDriven: false, reroll: () => setMirrorLines(randomInt(MIN_MIRROR_LINES, MAX_MIRROR_LINES)) },
+      { group: 'mirror', audioDriven: true, reroll: () => setMirrorGap(randomInRange(MIN_MIRROR_GAP, MAX_MIRROR_GAP)) },
+      { group: 'mirror', audioDriven: false, reroll: () => setMirrorAlternateColors(Math.random() < 0.5) },
+      { group: 'line', audioDriven: true, reroll: () => setTightness(randomInRange(MIN_TIGHTNESS, MAX_TIGHTNESS)) },
+      { group: 'line', audioDriven: true, reroll: () => setStrokeWidth(randomInRange(MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)) },
+      { group: 'pattern', audioDriven: true, reroll: () => setCropRadius(randomInRange(MIN_CROP_RADIUS, MAX_CROP_RADIUS)) },
+      { group: 'pattern', audioDriven: false, reroll: () => setCropShaped(Math.random() < 0.5) },
+      { group: 'pattern', audioDriven: true, reroll: () => setHoleRadius(randomInRange(MIN_HOLE_RADIUS, MAX_HOLE_RADIUS)) },
+      { group: 'pattern', audioDriven: false, reroll: () => setHoleShaped(Math.random() < 0.5) }
     ]
 
-    return units.filter((unit) => !audioReactive || !unit.audioDriven).map((unit) => unit.reroll)
+    const filteredUnits = units.filter((unit) => !audioReactive || !unit.audioDriven)
+    const rerollUnitsByGroup: Record<ControlGroup, (() => void)[]> = {
+      colors: filteredUnits.filter((unit) => unit.group === 'colors').map((unit) => unit.reroll),
+      line: filteredUnits.filter((unit) => unit.group === 'line').map((unit) => unit.reroll),
+      mirror: filteredUnits.filter((unit) => unit.group === 'mirror').map((unit) => unit.reroll),
+      pattern: filteredUnits.filter((unit) => unit.group === 'pattern').map((unit) => unit.reroll),
+      settings: []
+    }
+
+    return { rerollUnits: filteredUnits.map((unit) => unit.reroll), rerollUnitsByGroup }
   }, [settings.audioReactiveEnabled, setBackgroundColors, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setPattern, setPolygonSides, setStrokeWidth, setTightness])
 
   // The transport row's back/forward FABs (see OnScreenControls) share one lightweight, session-only
@@ -834,6 +833,18 @@ export default function SwirlScreen() {
     pushHistoryAndReroll(rerollUnits)
   }, [pushHistoryAndReroll, rerollUnits])
 
+  // Drives each top sheet group's own "Randomize" button (see ControlGroupTopSheetContent) — same
+  // undo/haptic-free treatment as randomize above, just scoped to one group's units via
+  // rerollUnitsByGroup instead of all of them.
+  const randomizeGroup = useCallback(
+    (group: ControlGroup) => {
+      pushHistoryAndReroll(rerollUnitsByGroup[group])
+    },
+    [pushHistoryAndReroll, rerollUnitsByGroup]
+  )
+
+  useRegisterSwirlRandomize(randomizeGroup)
+
   // A device shake has no Pressable of its own for the package to wire a haptic onto — this fires
   // notification() explicitly so shaking the device still gets *some* tactile confirmation it landed.
   const randomizeGesture = useCallback(() => {
@@ -882,11 +893,13 @@ export default function SwirlScreen() {
       }
       // The pattern-zoom counterpart to the mirrorGap tracking above and to rotationGesture's own
       // manualOffset — nudges the live pulse phase (see manualPulseOffset's own comment) so spreading
-      // or pinching fingers visibly grows or shrinks the ripples immediately, rather than only doing
-      // anything once the gesture ends (see onEnd below for the release-momentum half of this). The
-      // reversed.value sign flip keeps "spread = grow, pinch = shrink" true regardless of which way
-      // the pattern already happens to be zooming — without it, this would visually run backwards
-      // whenever zoomSpeed is currently negative, which is an ordinary state, not an edge case.
+      // or pinching fingers visibly grows or shrinks the ripples immediately. Folded into basePulse on
+      // release (see onEnd below) rather than left to reset, but — unlike rotationGesture's twist —
+      // doesn't also turn into a new sustained zoomSpeed there; see PINCH_SCALE_TO_PULSE_OFFSET_SCALE's
+      // own comment above for why. The reversed.value sign flip keeps "spread = grow, pinch = shrink"
+      // true regardless of which way the pattern already happens to be zooming — without it, this
+      // would visually run backwards whenever zoomSpeed is currently negative, which is an ordinary
+      // state, not an edge case.
       // strokeWidth/tightness ride along live too, the same direct way mirrorGap does above — see
       // PINCH_SCALE_TO_STROKE_WIDTH_SCALE/PINCH_SCALE_TO_TIGHTNESS_SCALE's own comment for why: unlike
       // pulse (bipolar via zoomSpeed's own sign), these two are plain unsigned magnitudes with no
@@ -912,14 +925,10 @@ export default function SwirlScreen() {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         basePulse.value = ((foldedPulse % 1) + 1) % 1
         manualPulseOffset.value = 0
-        // Same "with momentum" design as the rotate gesture's own pattern branch: the pinch's own
-        // release velocity becomes the new sustained zoomSpeed, sign and magnitude both. scale is
-        // measured relative to 1 (no change), so its rate of change is naturally positive while
-        // spreading (pinching out — scale climbing above 1) and negative while pinching in (scale
-        // dropping below 1), which lines up with zoomSpeed's existing convention: positive already
-        // means the ripples grow outward.
-        const nextZoomSpeed = clamp(event.velocity * ZOOM_VELOCITY_TO_SPEED_SCALE, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED)
-        runOnJS(setZoomSpeed)(nextZoomSpeed)
+        // zoomSpeed itself is deliberately left alone here — see PINCH_SCALE_TO_PULSE_OFFSET_SCALE's
+        // own comment above for why a pinch no longer feeds its release velocity into it the way
+        // rotationGesture's twist still does for rotationSpeed. The live pulse nudge above is still
+        // the pinch's own zoom feedback, it just doesn't outlive the gesture as a new sustained speed.
         // Recomputed from event.scale rather than trusting strokeWidth.value/tightness.value already
         // landed here from the last onUpdate — same "onEnd's own event is authoritative" reasoning as
         // mirrorGap's own commit below, and the same dual-write (SharedValue and setting agree
@@ -1062,7 +1071,7 @@ export default function SwirlScreen() {
         of its own at the top) is exactly the kind of child React Native's view-flattening optimizes
         away on native, leaving GestureDetector with no real view to attach its gesture recognizers to. */}
         <View collapsable={false}>
-          <SpiralHost pattern={settings.pattern} foregroundColors={settings.foregroundColors} backgroundColors={settings.backgroundColors} foregroundCycleProgress={foregroundCycleProgress} backgroundCycleProgress={backgroundCycleProgress} rotation={rotation} mirrorRotation={mirrorRotation} tightness={tightness} pulse={pulse} sides={reactiveSides} reversed={reversed} cropRadius={cropRadius} cropShaped={settings.cropShaped} holeRadius={holeRadius} holeShaped={settings.holeShaped} fixedSpacing={settings.fixedSpacing} mirrorLines={settings.mirrorLines} mirrorAlternateColors={settings.mirrorAlternateColors} mirrorGap={mirrorGap} epicenterX={epicenterX} epicenterY={epicenterY} mirrorAnchorX={mirrorAnchorX} mirrorAnchorY={mirrorAnchorY} tiltX={patternTiltX} tiltY={patternTiltY} mirrorTiltX={mirrorTiltX} mirrorTiltY={mirrorTiltY} strokeWidth={reactiveStrokeWidth} dashStyle={dashStyle} />
+          <SpiralHost pattern={settings.pattern} foregroundColors={settings.foregroundColors} backgroundColors={settings.backgroundColors} foregroundCycleProgress={foregroundCycleProgress} backgroundCycleProgress={backgroundCycleProgress} rotation={rotation} mirrorRotation={mirrorRotation} tightness={tightness} pulse={pulse} sides={reactiveSides} reversed={reversed} cropRadius={cropRadius} cropShaped={settings.cropShaped} holeRadius={holeRadius} holeShaped={settings.holeShaped} fixedSpacing={settings.fixedSpacing} mirrorLines={settings.mirrorLines} mirrorAlternateColors={settings.mirrorAlternateColors} mirrorGap={mirrorGap} epicenterX={epicenterX} epicenterY={epicenterY} mirrorAnchorX={mirrorAnchorX} mirrorAnchorY={mirrorAnchorY} gravityCenterX={gravityCenterX} gravityCenterY={gravityCenterY} gravity={gravity} gravityActive={gravityActive} showGravityMarker={settings.showGravityMarker} strokeWidth={reactiveStrokeWidth} dashStyle={dashStyle} />
         </View>
       </GestureDetector>
       {/* Forced on (independent of controlsVisible) while the group sheet is open — see

@@ -33,15 +33,30 @@ export function MdIcon({ name, color, size }: MdIconProps) {
 
 export type IconOrRenderFn = string | ((props: { size: number; color: string }) => React.ReactNode)
 
+// One resolved component per glyph name, reused across every call and every render — react-native-
+// paper's FAB animates its icon through CrossFadeIcon, which decides "did the icon change" by
+// reference (source !== previousSource, see its own isEqualIcon), not by name. resolveIcon used to
+// build a fresh closure on every single call, so a FAB whose icon name never changed still hyphenated
+// a new function identity into that prop on every re-render — and CrossFadeIcon dutifully played its
+// full rotate-and-fade transition in response, reading as a stray little shake on every FAB
+// re-rendered by an unrelated settings change (they all share the same context). Caching by name
+// keeps the identity stable across renders so CrossFadeIcon only actually animates when the glyph
+// itself changes, same as every render-function icon (PatternIcon, DashStyleIcon, appearance icons)
+// already gets for free by virtue of being a stable, module-level constant.
+const resolvedIconCache = new Map<string, (props: { size: number; color: string }) => React.ReactNode>()
+
 // Normalizes a FAB-family `icon` prop so a plain glyph name always renders through MdIcon (above)
 // instead of paper's DefaultIcon, without touching every call site individually — an already-provided
 // render function (PatternIcon, DashStyleIcon, or MdIcon itself) passes through untouched.
 export function resolveIcon(icon: IconOrRenderFn): (props: { size: number; color: string }) => React.ReactNode {
   if (typeof icon === 'string') {
+    const cached = resolvedIconCache.get(icon)
+    if (cached) return cached
     // Named (not an inline anonymous arrow) so eslint-plugin-react's react/display-name check — which
     // can't otherwise prove this returned closure is a component at all, let alone name one — has a
     // binding to read a display name from.
     const ResolvedMdIcon = ({ size, color }: { size: number; color: string }) => <MdIcon name={icon} color={color} size={size} />
+    resolvedIconCache.set(icon, ResolvedMdIcon)
     return ResolvedMdIcon
   }
   return icon

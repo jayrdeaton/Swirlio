@@ -12,9 +12,10 @@ import { PatternType } from '@/constants/patterns'
 import { useControlGroupSheetDrawer } from '@/hooks/controlGroups'
 import { useRegisterSwirlReset } from '@/hooks/swirlReset'
 import { useAudioReactive } from '@/hooks/useAudioReactive'
+import { GRAVITY_SETTLE_DISTANCE } from '@/hooks/useDragPointPhysics'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { MAX_MIRROR_GAP, MAX_STROKE_WIDTH, MIN_STROKE_WIDTH, useSwirlSettings } from '@/hooks/useSwirlSettings'
-import { useTiltWarp } from '@/hooks/useTiltWarp'
+import { useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const mockSpiralSpy = jest.fn()
 const mockOnScreenControlsSpy = jest.fn()
@@ -35,6 +36,15 @@ const frameCallbackTestUtils = (reanimatedModule as typeof reanimatedModule & { 
   reset: () => void
 }
 
+// useDragPointPhysics.ts's ambient-gravity reaction (see its own useAnimatedReaction call) is what
+// lets tilt alone start a point rolling with no drag/release involved — there's no real UI-thread
+// loop driving useAnimatedReaction here either, so a test calls runAll() explicitly (the same shape
+// as stepBounce above) after setting up whatever gravityCenter/gravity values it wants evaluated.
+const animatedReactionTestUtils = (reanimatedModule as typeof reanimatedModule & { __animatedReactionTestUtils: unknown }).__animatedReactionTestUtils as {
+  runAll: () => void
+  reset: () => void
+}
+
 // useEpicenter drives two independent drag points (mirror anchor, then
 // pattern epicentre — see useDragPointPhysics), each registering its own frame callback for bounce
 // physics, in that order. mirror registers first because patternClamp's own worklet closure needs
@@ -49,6 +59,14 @@ function patternFrameCallback() {
 
 function stepBounce(deltaMs: number) {
   const frame = patternFrameCallback()
+  frame?.callback({ timestamp: 0, timeSincePreviousFrame: deltaMs, timeSinceFirstFrame: 0 })
+}
+
+// The mirror anchor's own callback — registered first, index 0 (see patternFrameCallback's own
+// comment above) — only actually needed by the handful of gravityCenter-gating tests that target
+// 'mirror' directly; every other bounce/gravity test in this file drives the pattern's own callback.
+function stepMirrorBounce(deltaMs: number) {
+  const frame = frameCallbackTestUtils.getFrameCallbacks()[0] ?? null
   frame?.callback({ timestamp: 0, timeSincePreviousFrame: deltaMs, timeSinceFirstFrame: 0 })
 }
 
@@ -87,8 +105,8 @@ jest.mock('@rific/haptic-press', () => ({
   useVibration: jest.fn()
 }))
 
-jest.mock('@/hooks/useTiltWarp', () => ({
-  useTiltWarp: jest.fn()
+jest.mock('@/hooks/useTiltGravityCenter', () => ({
+  useTiltGravityCenter: jest.fn()
 }))
 
 // Real @/hooks/useAudioReactive would try to actually request mic permission and stand up the
@@ -119,7 +137,7 @@ jest.mock('@/hooks/swirlReset', () => ({
 
 const mockedUseSwirlSettings = useSwirlSettings as jest.MockedFunction<typeof useSwirlSettings>
 const mockedUseVibration = useVibration as jest.MockedFunction<typeof useVibration>
-const mockedUseTiltWarp = useTiltWarp as jest.MockedFunction<typeof useTiltWarp>
+const mockedUseTiltGravityCenter = useTiltGravityCenter as jest.MockedFunction<typeof useTiltGravityCenter>
 const mockedUseAudioReactive = useAudioReactive as jest.MockedFunction<typeof useAudioReactive>
 const mockedUseShakeToRandomize = useShakeToRandomize as jest.MockedFunction<typeof useShakeToRandomize>
 const mockedUseControlGroupSheetDrawer = useControlGroupSheetDrawer as jest.MockedFunction<typeof useControlGroupSheetDrawer>
@@ -216,6 +234,7 @@ const defaultMockSettings = {
   polygonSides: 4,
   rotationSpeed: 1,
   shakeEnabled: true,
+  showGravityMarker: true,
   showLabels: false,
   strokeWidth: 6,
   tightness: 1,
@@ -247,6 +266,7 @@ function mockSettings(overrides: Partial<typeof defaultMockSettings> = {}) {
     setPolygonSides,
     setRotationSpeed,
     setShakeEnabled: jest.fn(),
+    setShowGravityMarker: jest.fn(),
     setShowLabels: jest.fn(),
     setStrokeWidth,
     setTightness,
@@ -261,17 +281,18 @@ describe('SwirlScreen gestures', () => {
     jest.clearAllMocks()
     gestureTestUtils.reset()
     frameCallbackTestUtils.reset()
+    animatedReactionTestUtils.reset()
 
     mockSettings()
 
     mockedUseVibration.mockReturnValue({ medium, notification: jest.fn(), selection } as any)
-    mockedUseTiltWarp.mockReturnValue({ tiltX: { value: 0 } as any, tiltY: { value: 0 } as any })
+    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any })
     mockedUseAudioReactive.mockReturnValue({ bass: { value: 0 } as any, mid: 0, treble: 0, loudness: 0 })
     mockedUseShakeToRandomize.mockImplementation(() => undefined)
     mockedUseControlGroupSheetDrawer.mockReturnValue({ close: jest.fn(), isOpen: false, isVisible: false, open: jest.fn() })
   })
 
-  it('sets zoomSpeed from a pinch release and turns the swirl from a rotation', async () => {
+  it('leaves zoomSpeed untouched on a pinch release, and still turns the swirl from a simultaneous rotation', async () => {
     await renderScreen()
 
     const initialRotation = getLastSpiralProps().rotation.value
@@ -289,13 +310,12 @@ describe('SwirlScreen gestures', () => {
       rotationGesture.__handlers.update?.({ rotation: Math.PI / 2 })
     })
 
-    // ZOOM_VELOCITY_TO_SPEED_SCALE is 0.6, so 10 * 0.6 = 6.
-    expect(setZoomSpeed).toHaveBeenCalledWith(6)
+    expect(setZoomSpeed).not.toHaveBeenCalled()
     const after = getLastSpiralProps()
     expect(after.rotation.value - initialRotation).toBeCloseTo(90, 5)
   })
 
-  it('carries the sign of a pinch release velocity through to zoomSpeed — pinching in reverses it', async () => {
+  it('never sets zoomSpeed from a pinch release, regardless of velocity magnitude or sign', async () => {
     await renderScreen()
 
     const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
@@ -304,28 +324,16 @@ describe('SwirlScreen gestures', () => {
       pinchGesture.__handlers.start?.()
       pinchGesture.__handlers.end?.({ scale: 1, velocity: -10 })
     })
-
-    expect(setZoomSpeed).toHaveBeenCalledWith(-6)
-  })
-
-  it('clamps the velocity-derived zoomSpeed from a pinch release to MIN/MAX_ZOOM_SPEED', async () => {
-    await renderScreen()
-
-    const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
-
     await act(async () => {
       pinchGesture.__handlers.start?.()
       pinchGesture.__handlers.end?.({ scale: 1, velocity: 100000 })
     })
-
-    expect(setZoomSpeed).toHaveBeenCalledWith(10)
-
     await act(async () => {
       pinchGesture.__handlers.start?.()
       pinchGesture.__handlers.end?.({ scale: 1, velocity: -100000 })
     })
 
-    expect(setZoomSpeed).toHaveBeenCalledWith(-10)
+    expect(setZoomSpeed).not.toHaveBeenCalled()
   })
 
   it('mirrors the persisted tightness into the shared value the patterns read', async () => {
@@ -372,6 +380,32 @@ describe('SwirlScreen gestures', () => {
     await renderScreen()
 
     expect(getLastSpiralProps().fixedSpacing).toBe(true)
+  })
+
+  it('passes the tilt-driven gravity center and strength through to Spiral', async () => {
+    // Deliberately at (0, 0), matching the epicentre's own resting start position — a nonzero
+    // gravity center here would already be "not yet arrived" the instant the resume-on-mount effect
+    // (useDragPointPhysics.ts, the same one that resumes gravity after unfreezing) runs its first
+    // check, immediately flipping gravityActive true on its own. This test wants the quiet-at-rest
+    // case specifically; the "gravity marker turns on" behavior has its own tests further down.
+    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any })
+    mockSettings({ gravity: 2 })
+    await renderScreen()
+
+    const props = getLastSpiralProps()
+    expect(props.gravityCenterX.value).toBe(0)
+    expect(props.gravityCenterY.value).toBe(0)
+    expect(props.gravity.value).toBe(2)
+    // At rest and already exactly where gravity wants it — gravityActive stays false even though
+    // gravity itself is on. It only turns true once something is visibly moving because of it.
+    expect(props.gravityActive.value).toBe(false)
+  })
+
+  it('passes the showGravityMarker setting straight through to Spiral', async () => {
+    mockSettings({ showGravityMarker: false })
+    await renderScreen()
+
+    expect(getLastSpiralProps().showGravityMarker).toBe(false)
   })
 
   it('passes the foreground and background color lists straight through to Spiral, each with its own cycle clock', async () => {
@@ -651,21 +685,114 @@ describe('SwirlScreen gestures', () => {
     // position (not just a low velocity) is what "actually stopped" looks like from the outside.
     let previousX = runningX
     let previousY = getLastSpiralProps().epicenterY.value
-    for (let frame = 0; frame < 1000; frame++) {
+    // 1500, not 1000: tightening the settle threshold to GRAVITY_SETTLE_DISTANCE (see its own
+    // comment for why) means this friction/gravity combo now takes a bit over 1000 simulated frames
+    // (~17s) to actually get there, not because it's slow to approach — it's already imperceptibly
+    // close well before that — but because exponential decay only asymptotes, never truly reaches
+    // zero, so a tighter tolerance costs a few more of the same decay time-constants regardless of
+    // how close it already looks.
+    for (let frame = 0; frame < 1500; frame++) {
       await act(async () => {
         stepBounce(16)
       })
       const { epicenterX, epicenterY } = getLastSpiralProps()
       if (epicenterX.value === previousX && epicenterY.value === previousY) {
-        // 0.05 mirrors useEpicenter's own (unexported) SNAP_DISTANCE — "near enough to call centered".
-        expect(Math.hypot(epicenterX.value, epicenterY.value)).toBeLessThan(0.05)
+        // Within GRAVITY_SETTLE_DISTANCE of the (mocked, tilt-disabled) gravity center — (0, 0) here
+        // — not just anywhere inside the much wider SNAP_DISTANCE tolerance; see
+        // useDragPointPhysics.ts's frame callback. No longer an exact toBe(0): the fix here is
+        // letting decay carry it in smoothly, not teleporting the last bit of the way (that traded
+        // this gap for an equally visible pop instead — see this test file's own git history).
+        expect(Math.hypot(epicenterX.value, epicenterY.value)).toBeLessThan(GRAVITY_SETTLE_DISTANCE)
         return
       }
       previousX = epicenterX.value
       previousY = epicenterY.value
     }
 
-    throw new Error('bounce never settled within 1000 simulated frames')
+    throw new Error('bounce never settled within 1500 simulated frames')
+  })
+
+  it('rolls the epicenter toward wherever tilt is pulling gravity, with no drag or release at all', async () => {
+    mockSettings({ gravity: 4, bounceFriction: 0.5 })
+    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any })
+    await renderScreen()
+
+    // Nothing has been dragged or released — this is exactly what makes gravity ambient rather than
+    // only ever kicking in after startBounce (see useDragPointPhysics.ts's own useAnimatedReaction).
+    // runAll() stands in for the one UI-thread evaluation that would happen on its own, the instant
+    // tilt produced a nonzero reading, on a real device.
+    await act(async () => {
+      animatedReactionTestUtils.runAll()
+    })
+
+    expect(getLastSpiralProps().epicenterX.value).toBe(0)
+    // Already true the instant runAll() decides to start the roll, before any frame has actually
+    // moved the epicentre — gravityActive mirrors bounceActive live, and bounceActive is exactly
+    // what runAll()'s reaction just flipped on.
+    expect(getLastSpiralProps().gravityActive.value).toBe(true)
+
+    await act(async () => {
+      stepBounce(16)
+    })
+
+    // Pulled toward the positive gravity center, entirely on its own.
+    expect(getLastSpiralProps().epicenterX.value).toBeGreaterThan(0)
+    expect(getLastSpiralProps().gravityActive.value).toBe(true)
+  })
+
+  it('turns the gravity marker back off once the pull settles, landing the epicenter within GRAVITY_SETTLE_DISTANCE of the gravity center', async () => {
+    mockSettings({ gravity: 4, bounceFriction: 0.5 })
+    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any })
+    await renderScreen()
+
+    await act(async () => {
+      animatedReactionTestUtils.runAll()
+    })
+    expect(getLastSpiralProps().gravityActive.value).toBe(true)
+
+    let previousX = getLastSpiralProps().epicenterX.value
+    for (let frame = 0; frame < 1000; frame++) {
+      await act(async () => {
+        stepBounce(16)
+      })
+      const { epicenterX } = getLastSpiralProps()
+      if (epicenterX.value === previousX) {
+        // Within GRAVITY_SETTLE_DISTANCE of the gravity center, close enough to read as fully
+        // arrived — not exactly 0.3: decay only asymptotes toward the target, and a final teleport
+        // to close that last sliver was tried and rejected (it traded the gap for an equally visible
+        // pop instead — see this test file's own git history).
+        expect(Math.abs(epicenterX.value - 0.3)).toBeLessThan(GRAVITY_SETTLE_DISTANCE)
+        expect(getLastSpiralProps().gravityActive.value).toBe(false)
+        return
+      }
+      previousX = epicenterX.value
+    }
+
+    throw new Error('gravity pull never settled within 1000 simulated frames')
+  })
+
+  it('reflects off the boundary — and fires the bounce haptic — when tilt pulls the gravity center out to the edge', async () => {
+    mockSettings({ gravity: 4, bounceFriction: 0.2 })
+    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.49 } as any, gravityCenterY: { value: 0 } as any })
+    await renderScreen()
+
+    await act(async () => {
+      animatedReactionTestUtils.runAll()
+    })
+
+    expect(medium).not.toHaveBeenCalled()
+
+    // Enough simulated frames for gravity to accelerate the epicentre out past the real screen edge
+    // and reflect — same "step in small increments and watch for the haptic" shape as the
+    // drag-release bounce test above, just driven by tilt rolling it there instead of a flick.
+    for (let frame = 0; frame < 200; frame++) {
+      await act(async () => {
+        stepBounce(16)
+      })
+      if (medium.mock.calls.length > 0) return
+    }
+
+    throw new Error('gravity never pushed the epicentre into a boundary bounce within 200 simulated frames')
   })
 
   it('interrupts an in-progress bounce as soon as a new drag grabs the epicentre', async () => {
@@ -1777,6 +1904,28 @@ describe('SwirlScreen gestures', () => {
       expect(props.mirrorAnchorY.value).toBe(0)
     })
 
+    // Same per-target split useEpicenter.ts already applies to drag/pinch/rotate, now consolidated to
+    // also gate which point(s) tilt's gravity center actually pulls (see useEpicenter.ts's own
+    // targetsPattern/targetsMirror, now reused for this instead of index.tsx computing an identical
+    // pair just for tilt).
+    it("in 'mirror' mode, tilt's gravity center rolls the mirror anchor and leaves the pattern epicentre untouched", async () => {
+      mockSettings({ mirrorLines: 4, gravity: 4, bounceFriction: 0.5 })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.2 } as any, gravityCenterY: { value: 0 } as any })
+      await renderScreen()
+      await cycleGestureTarget(1)
+
+      await act(async () => {
+        animatedReactionTestUtils.runAll()
+      })
+      await act(async () => {
+        stepMirrorBounce(16)
+      })
+
+      const props = getLastSpiralProps()
+      expect(props.mirrorAnchorX.value).toBeGreaterThan(0)
+      expect(props.epicenterX.value).toBe(0)
+    })
+
     it("in 'pattern' mode (the default), dragging moves the pattern epicentre and leaves the mirror anchor untouched", async () => {
       const { width } = Dimensions.get('window')
       await renderScreen()
@@ -1903,7 +2052,7 @@ describe('SwirlScreen gestures', () => {
       expect(setTightness).not.toHaveBeenCalled()
     })
 
-    it("in 'both' mode, a pinch changes both zoomSpeed and mirrorGap from the same release", async () => {
+    it("in 'both' mode, a pinch commits mirrorGap from the release but never touches zoomSpeed", async () => {
       mockSettings({ mirrorLines: 4 })
       await renderScreen()
       await cycleGestureTarget(2)
@@ -1914,8 +2063,7 @@ describe('SwirlScreen gestures', () => {
         pinchGesture.__handlers.end?.({ scale: 1.15, velocity: 10 })
       })
 
-      // ZOOM_VELOCITY_TO_SPEED_SCALE is 0.6, so 10 * 0.6 = 6.
-      expect(setZoomSpeed).toHaveBeenCalledWith(6)
+      expect(setZoomSpeed).not.toHaveBeenCalled()
       // PINCH_SCALE_TO_MIRROR_GAP_SCALE is 0.6, so (1.15 - 1) * 0.6 = 0.09 (toBeCloseTo — see the
       // 'mirror' mode test above for why this isn't an exact toHaveBeenCalledWith).
       const [committedGap] = setMirrorGap.mock.calls[setMirrorGap.mock.calls.length - 1]

@@ -1,4 +1,4 @@
-import { Canvas, DashPathEffect, FillType, Group, Path, Rect, Skia, SkPath } from '@shopify/react-native-skia'
+import { Canvas, Circle, DashPathEffect, FillType, Group, Path, Rect, Skia, SkPath } from '@shopify/react-native-skia'
 import React from 'react'
 import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { SharedValue, useDerivedValue } from 'react-native-reanimated'
@@ -10,6 +10,7 @@ import { buildPolygonPoints } from '@/constants/polygonMath'
 import { buildStarPoints } from '@/constants/starMath'
 import { DashStyle } from '@/constants/strokeDash'
 import { useCyclingColor } from '@/hooks/useCyclingColor'
+import { MAX_GRAVITY, MIN_GRAVITY } from '@/hooks/useSwirlSettings'
 
 import { FlowerPattern } from './patterns/FlowerPattern'
 import { PolygonPattern } from './patterns/PolygonPattern'
@@ -24,6 +25,19 @@ import { StarPattern } from './patterns/StarPattern'
 const MASK_EXTENT = 100000
 // See `radius`'s own comment below for why this needs to be a whole grid of pixels, not just one.
 const RADIUS_QUANTUM_PX = 6
+// GravityRingMarker's own sizing — the only marker Spiral draws anymore (pattern's and the mirror
+// anchor's were both removed) — deliberately not scaled by zoom/tightness/anything else the pattern
+// itself animates, the same way a map pin stays a constant size regardless of what the map underneath
+// it is doing. Two thin (stroked, not filled) rings rather than a solid dot — see GravityRingMarker's
+// own comment for why that's a deliberately lighter touch. Radius scales with how strong gravity
+// currently is (see gravityMarkerOuterRadius below): MIN_GRAVITY maps to the smaller radius,
+// MAX_GRAVITY to the larger one, so a stronger pull visibly reads as a bigger ring.
+const GRAVITY_MARKER_MIN_RADIUS_PX = 14
+const GRAVITY_MARKER_MAX_RADIUS_PX = 50
+// How much smaller the inner (black) ring is than the outer (white) one — the two need daylight
+// between them to read as two distinct rings rather than one thick blob.
+const GRAVITY_MARKER_RING_GAP_PX = 6
+const GRAVITY_MARKER_STROKE_WIDTH_PX = 1.5
 // A harmless placeholder for KaleidoscopeCopy's wedge-placement matrix when inactive (mirrorLines ===
 // 0) — every hook below still has to run unconditionally, but the value it produces here is never
 // actually rendered (see the `!active` early return in KaleidoscopeCopy), so its exact contents don't
@@ -110,18 +124,32 @@ export type SpiralProps = {
   epicenterY: SharedValue<number>
   // The wedge boundaries' own pivot — independent of epicenterX/Y (the pattern content's own origin)
   // since dragging one is no longer guaranteed to drag the other (see useEpicenter.ts's gestureTarget
-  // routing). Same fraction-of-window convention as epicenterX/Y. Warped by mirrorTiltX/Y (its own
-  // tilt term, separate from tiltX/Y below) — see mirrorOriginX/Y below.
+  // routing). Same fraction-of-window convention as epicenterX/Y.
   mirrorAnchorX: SharedValue<number>
   mirrorAnchorY: SharedValue<number>
-  tiltX: SharedValue<number>
-  tiltY: SharedValue<number>
-  // Tilt's contribution to the mirror pivot specifically — already gated to 0 in index.tsx whenever
-  // gestureTarget doesn't target the mirror, same as tiltX/Y is gated for the pattern. Kept as a
-  // separate pair (rather than reusing tiltX/Y for both) since the two are independently zeroable:
-  // 'mirror'-only tilt should move the wedge but not the pattern, and vice versa.
-  mirrorTiltX: SharedValue<number>
-  mirrorTiltY: SharedValue<number>
+  // Where tilt is currently pulling gravity toward — same fraction-of-window convention as
+  // epicenterX/Y. No longer a render-time offset added on top of epicenterX/Y the way tilt used to
+  // work (see useDragPointPhysics.ts's own gravityCenter param for where tilt's actual pull now
+  // happens) — here purely to draw the marker below, so it's visible where gravity is actually
+  // pulling toward, including whenever nothing is currently gestureTarget-ed by it.
+  gravityCenterX: SharedValue<number>
+  gravityCenterY: SharedValue<number>
+  // How strong gravity currently is — purely to size GravityRingMarker's rings below, see
+  // GRAVITY_MARKER_MIN/MAX_RADIUS_PX's own comment. The physics itself already gets this value
+  // independently (useEpicenter.ts's own gravity SharedValue); this is a second, render-only use.
+  gravity: SharedValue<number>
+  // Gates the gravity marker's own visibility (see gravityMarkerOpacity below) — true only while
+  // gravity is visibly doing something (something is actively rolling/settling because of it), not
+  // just "gravity is turned on." A permanently-on marker read as clutter over the art itself — this
+  // is meant to surface rarely, exactly when there's something worth watching, the same way it was
+  // designed to work once it's promoted to its own touch-draggable gesture target later. See
+  // useEpicenter.ts's own gravityActive comment for the exact definition.
+  gravityActive: SharedValue<boolean>
+  // A temporary settings-drawer toggle (see useSwirlSettings.tsx's own showGravityMarker comment) —
+  // combined with gravityActive above via a plain JS `&&`, not inside a worklet: reading a plain,
+  // non-SharedValue prop from inside a worklet risks exactly the stale-closure bug already fixed once
+  // in useDragPointPhysics.ts (see frozenShared's own comment there) for the same underlying reason.
+  showGravityMarker: boolean
   strokeWidth: SharedValue<number>
   dashStyle: SharedValue<DashStyle>
 }
@@ -151,6 +179,22 @@ type KaleidoscopeCopyProps = {
   // Also identical for every copy — see PatternGeometry's own comment for why sharing this (rather
   // than each copy rebuilding its own pattern content) is the whole point of this restructuring.
   geometry: PatternGeometry
+}
+
+// Gravity's own marker — the only marker Spiral draws anymore. Two thin, stroked (not filled) rings
+// rather than a solid dot, so this reads as a much lighter touch: a hint of where gravity's pulling
+// toward, not a solid shape competing with the art itself. White outer ring, black inner ring keeps
+// it legible over any foreground/background color combination this app can produce, the same
+// contrast reasoning a solid white-behind-black marker would use, just as two concentric rings
+// instead of two concentric fills. outerRadius/innerRadius are driven by how strong gravity currently
+// is — see gravityMarkerOuterRadius in Spiral below.
+function GravityRingMarker({ x, y, outerRadius, innerRadius }: { x: SharedValue<number>; y: SharedValue<number>; outerRadius: SharedValue<number>; innerRadius: SharedValue<number> }) {
+  return (
+    <Group>
+      <Circle cx={x} cy={y} r={outerRadius} color='white' style='stroke' strokeWidth={GRAVITY_MARKER_STROKE_WIDTH_PX} />
+      <Circle cx={x} cy={y} r={innerRadius} color='black' style='stroke' strokeWidth={GRAVITY_MARKER_STROKE_WIDTH_PX} />
+    </Group>
+  )
 }
 
 // One rendered copy of the kaleidoscope — its own clip wedge (a true circular sector, not a rect: see
@@ -224,7 +268,7 @@ function KaleidoscopeCopy({ copyIndex, wedgeAngleDeg, mirrorGap, active, mirrorO
 // elements, one per mirror copy — see PatternGeometry's own comment for why that no longer scales
 // with pool size too) on every committed step, purely because SwirlScreen's own `settings` object
 // (and therefore its render) changed for an unrelated field.
-export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, backgroundColors, foregroundCycleProgress, backgroundCycleProgress, rotation, mirrorRotation, tightness, pulse, sides, reversed, cropRadius, cropShaped, holeRadius, holeShaped, fixedSpacing, mirrorLines, mirrorAlternateColors, mirrorGap, epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, tiltX, tiltY, mirrorTiltX, mirrorTiltY, strokeWidth, dashStyle }: SpiralProps) {
+export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, backgroundColors, foregroundCycleProgress, backgroundCycleProgress, rotation, mirrorRotation, tightness, pulse, sides, reversed, cropRadius, cropShaped, holeRadius, holeShaped, fixedSpacing, mirrorLines, mirrorAlternateColors, mirrorGap, epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityCenterX, gravityCenterY, gravity, gravityActive, showGravityMarker, strokeWidth, dashStyle }: SpiralProps) {
   const { width, height } = useWindowDimensions()
   const centerX = width / 2
   const centerY = height / 2
@@ -237,18 +281,40 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
   const foreground = useCyclingColor(foregroundColors, foregroundCycleProgress)
   const background = useCyclingColor(backgroundColors, backgroundCycleProgress)
 
-  // The epicentre is a fraction of the window, so it survives a rotation without recomputing.
-  const originX = useDerivedValue(() => centerX + epicenterX.value * width + tiltX.value)
-  const originY = useDerivedValue(() => centerY + epicenterY.value * height + tiltY.value)
+  // The epicentre is a fraction of the window, so it survives a rotation without recomputing. Tilt no
+  // longer adds a render-time offset here — it moves gravity's own pull target instead (see
+  // useDragPointPhysics.ts's gravityCenter param), so epicenterX/Y itself already carries tilt's
+  // effect by the time it reaches this component.
+  const originX = useDerivedValue(() => centerX + epicenterX.value * width)
+  const originY = useDerivedValue(() => centerY + epicenterY.value * height)
 
-  // The wedge boundaries' own pivot — same fraction-of-window convention as originX/Y above.
-  // mirrorTiltX/Y is tilt's own contribution here, kept separate from tiltX/Y above: index.tsx gates
-  // each pair to 0 based on gestureTarget, the same split it already applies to drag and twist, so
-  // tilt moves the pattern, the mirror, or both together depending on which mode is active — rather
-  // than always warping the pattern regardless of mode, which was the previous, gesture-target-blind
-  // behavior.
-  const mirrorOriginX = useDerivedValue(() => centerX + mirrorAnchorX.value * width + mirrorTiltX.value)
-  const mirrorOriginY = useDerivedValue(() => centerY + mirrorAnchorY.value * height + mirrorTiltY.value)
+  // The wedge boundaries' own pivot — same fraction-of-window convention as originX/Y above. Same
+  // "tilt moves gravityCenter, not a render offset" story as originX/Y above.
+  const mirrorOriginX = useDerivedValue(() => centerX + mirrorAnchorX.value * width)
+  const mirrorOriginY = useDerivedValue(() => centerY + mirrorAnchorY.value * height)
+
+  // Where gravity is currently pulling toward — purely for the marker below, see gravityCenterX/Y's
+  // own prop comment.
+  const gravityOriginX = useDerivedValue(() => centerX + gravityCenterX.value * width)
+  const gravityOriginY = useDerivedValue(() => centerY + gravityCenterY.value * height)
+  // 0/1, not a plain boolean: Group's opacity prop wants a number, and this has to react to
+  // gravityActive flipping on the UI thread without index.tsx re-rendering (see the gravityActive
+  // prop's own comment above). showGravityMarker (the settings toggle) is a plain JS conditional
+  // around the whole marker instead — see its own prop comment for why that one deliberately isn't
+  // folded in here.
+  const gravityMarkerOpacity = useDerivedValue(() => (gravityActive.value ? 1 : 0))
+  // Maps gravity.value from [MIN_GRAVITY, MAX_GRAVITY] onto [GRAVITY_MARKER_MIN_RADIUS_PX,
+  // GRAVITY_MARKER_MAX_RADIUS_PX] by hand rather than reaching for Reanimated's own interpolate —
+  // this codebase's test mock for interpolate is a plain passthrough (see jest.setup.ts), so a real
+  // interpolate call here would silently return the wrong number under test. Clamped since gravity
+  // itself is already clamped to that same range by its own setter (see useSwirlSettings.tsx), but
+  // nothing stops some future caller from handing this a value outside it.
+  const gravityMarkerOuterRadius = useDerivedValue(() => {
+    const t = (gravity.value - MIN_GRAVITY) / (MAX_GRAVITY - MIN_GRAVITY)
+    const clampedT = Math.min(Math.max(t, 0), 1)
+    return GRAVITY_MARKER_MIN_RADIUS_PX + clampedT * (GRAVITY_MARKER_MAX_RADIUS_PX - GRAVITY_MARKER_MIN_RADIUS_PX)
+  })
+  const gravityMarkerInnerRadius = useDerivedValue(() => gravityMarkerOuterRadius.value - GRAVITY_MARKER_RING_GAP_PX)
 
   // Distance to the furthest corner from wherever the epicentre currently sits — a fixed
   // half-diagonal would leave a bare wedge of screen once the swirl is dragged off-centre.
@@ -257,13 +323,15 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
   // actual path geometry from this value (SpiralArms alone samples up to 1200 points per arm — see
   // spiralSampleCount), and Reanimated's own SharedValue setter (valueSetter.ts) only skips notifying
   // downstream reactions when a write is the exact same value as what's already there — any change,
-  // however small, still counts as "changed" and still propagates. tiltX/tiltY (see useTiltWarp) feed
-  // originX/Y above, and on a real device — unlike the simulator, which reports no motion data at all,
-  // or web, where tilt is disabled entirely — those are never perfectly still: real accelerometer/
-  // gyroscope noise routinely swings a few pixels even with the phone sitting flat on a table, not
-  // the sub-pixel jitter a rounding-to-1px pass would catch. A plain Math.round() here (tried first)
-  // measurably helped but didn't stop the stalling on an actual device, since real sensor noise simply
-  // clears a 1px threshold too easily — only the coarser quantum below actually starves the rebuild.
+  // however small, still counts as "changed" and still propagates. epicenterX/Y feeding originX/Y
+  // above is rarely perfectly still while gravity is active (see useDragPointPhysics.ts's ambient
+  // frame callback and, upstream of it, real accelerometer/gyroscope noise while tilt is on — neither
+  // the simulator, which reports no motion data at all, nor web, where tilt is disabled entirely, hit
+  // this) — the physics loop settles toward a rest point rather than snapping to it, so it keeps
+  // nudging by a pixel or two well past the point it visually reads as "at rest," not the sub-pixel
+  // jitter a rounding-to-1px pass would catch. A plain Math.round() here (tried first) measurably
+  // helped but didn't stop the stalling on an actual device, since real sensor noise simply clears a
+  // 1px threshold too easily — only the coarser quantum below actually starves the rebuild.
   // "How far the pattern's furthest ring/arm extends" tolerates being a few pixels stale far better
   // than a full every-frame path rebuild does, so this rounds much more aggressively than a value
   // driving something actually drawn at that exact position would.
@@ -416,6 +484,16 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
           <FlowerPattern radius={radius} pulse={pulse} tightness={tightness} sides={sides} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
             {renderCopies}
           </FlowerPattern>
+        )}
+        {/* Drawn last, on top of every pattern copy, so it's always legible regardless of what's
+        underneath. gravityActive has to react on the UI thread without waiting for index.tsx to
+        re-render, hence the opacity SharedValue rather than unmounting/remounting the marker —
+        showGravityMarker (the settings toggle) is a plain JS conditional instead, since it only ever
+        changes via a settings update, which already re-renders this component. */}
+        {showGravityMarker && (
+          <Group opacity={gravityMarkerOpacity}>
+            <GravityRingMarker x={gravityOriginX} y={gravityOriginY} outerRadius={gravityMarkerOuterRadius} innerRadius={gravityMarkerInnerRadius} />
+          </Group>
         )}
       </Canvas>
     </View>

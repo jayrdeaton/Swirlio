@@ -30,6 +30,7 @@ type TestApi = {
   setPolygonSides: (sides: number) => void
   setRotationSpeed: (speed: number) => void
   setShakeEnabled: (enabled: boolean) => void
+  setShowGravityMarker: (enabled: boolean) => void
   setStrokeWidth: (strokeWidth: number) => void
   setTiltEnabled: (enabled: boolean) => void
   setZoomSpeed: (speed: number) => void
@@ -44,11 +45,11 @@ function requireApi(value: TestApi | null): TestApi {
 }
 
 function Probe({ onUpdate }: { onUpdate: (api: TestApi) => void }) {
-  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings } = useSwirlSettings()
+  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowGravityMarker, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings } = useSwirlSettings()
 
   useEffect(() => {
-    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings })
-  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings, settings])
+    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowGravityMarker, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings })
+  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowGravityMarker, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings, settings])
 
   return <Text testID='stroke'>{String(settings.strokeWidth)}</Text>
 }
@@ -84,6 +85,7 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.tiltEnabled).toBe(true)
     expect(getApi().settings.mirrorLines).toBe(0)
     expect(getApi().settings.showLabels).toBe(false)
+    expect(getApi().settings.showGravityMarker).toBe(true)
   })
 
   it('hydrates persisted settings from storage', async () => {
@@ -95,6 +97,7 @@ describe('useSwirlSettings', () => {
         shakeEnabled: false,
         tiltEnabled: false,
         showLabels: true,
+        showGravityMarker: false,
         foregroundColors: ['#111111', '#222222'],
         backgroundColors: ['#333333'],
         foregroundCycleSpeed: 2.5,
@@ -109,6 +112,7 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.shakeEnabled).toBe(false)
     expect(getApi().settings.tiltEnabled).toBe(false)
     expect(getApi().settings.showLabels).toBe(true)
+    expect(getApi().settings.showGravityMarker).toBe(false)
     expect(getApi().settings.foregroundColors).toEqual(['#111111', '#222222'])
     expect(getApi().settings.backgroundColors).toEqual(['#333333'])
     expect(getApi().settings.foregroundCycleSpeed).toBe(2.5)
@@ -533,11 +537,11 @@ describe('useSwirlSettings', () => {
     await waitFor(() => expect(getApi().settings.bounceFriction).toBe(5))
   })
 
-  it('defaults gravity to 0 and lets it be changed', async () => {
+  it('defaults gravity to 1 (nonzero, so tilt has something to roll with out of the box) and lets it be changed', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
-    expect(getApi().settings.gravity).toBe(0)
+    expect(getApi().settings.gravity).toBe(1)
 
     await act(async () => {
       getApi().setGravity(2.5)
@@ -856,14 +860,17 @@ describe('useSwirlSettings', () => {
 
   // shakeEnabled/tiltEnabled are opt-outs, not look/tuning knobs — someone who's turned off shake-to-
   // randomize or tilt warp shouldn't have Reset all silently switch them back on, mirroring
-  // audioReactiveEnabled's carve-out above. See resetSettings's own comment in useSwirlSettings.tsx.
-  it('resetSettings leaves shakeEnabled and tiltEnabled exactly as they were, on or off', async () => {
+  // audioReactiveEnabled's carve-out above. showGravityMarker joins them for the same reason, plus
+  // it's a temporary debug toggle (see its own comment in useSwirlSettings.tsx) that a "Reset all"
+  // shouldn't silently flip either. See resetSettings's own comment in useSwirlSettings.tsx.
+  it('resetSettings leaves shakeEnabled, tiltEnabled, and showGravityMarker exactly as they were, on or off', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
     await act(async () => {
       getApi().setShakeEnabled(false)
       getApi().setTiltEnabled(false)
+      getApi().setShowGravityMarker(false)
     })
     await waitFor(() => expect(getApi().settings.shakeEnabled).toBe(false))
 
@@ -874,5 +881,6 @@ describe('useSwirlSettings', () => {
     await waitFor(() => expect(getApi().settings.strokeWidth).toBe(6))
     expect(getApi().settings.shakeEnabled).toBe(false)
     expect(getApi().settings.tiltEnabled).toBe(false)
+    expect(getApi().settings.showGravityMarker).toBe(false)
   })
 })

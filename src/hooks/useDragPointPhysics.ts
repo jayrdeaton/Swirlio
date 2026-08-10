@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { runOnJS, SharedValue, useFrameCallback, useSharedValue, withSpring } from 'react-native-reanimated'
+import { runOnJS, SharedValue, useAnimatedReaction, useFrameCallback, useSharedValue, withSpring } from 'react-native-reanimated'
 
 // Shared by every draggable point on screen (the pattern's own epicentre, and the mirror's wedge
 // anchor — see useEpicenter.ts) so dragging either one feels identical: same drag boundary, same
@@ -11,6 +11,18 @@ export const SNAP_DISTANCE = 0.05
 export const SNAP_VELOCITY = 0.25
 const SPRING = { damping: 18, stiffness: 140 }
 const BOUNCE_STOP_SPEED = 0.02
+// How close counts as "arrived" for gravity's own settle detection — deliberately much tighter than
+// SNAP_DISTANCE above, which exists for a completely different purpose (the drag-release "let go
+// near the visual center and it clicks home" shortcut in useEpicenter.ts, where a generous 5%-of-
+// window tolerance is exactly the point). Gravity settling to within SNAP_DISTANCE of its target
+// used to leave a gap wide enough to visibly notice once something was actually watching for it — a
+// first attempt at fixing that teleported the point the rest of the way there once "close enough,"
+// but that traded the gap for an equally visible pop/clip at the very end. This is the real fix: let
+// the exponential decay itself carry it in the rest of the way, closer than a couple of screen
+// pixels on most devices, so there's nothing left to visibly snap by the time the simulation actually
+// stops. Exponential decay means tightening this by 25x only costs a few more of the same decay
+// time-constants already elapsed getting this far, not a proportionally longer wait.
+export const GRAVITY_SETTLE_DISTANCE = 0.002
 // Floor between onBounce haptics — a slow-friction/high-gravity bounce can still cross the boundary
 // several times a second as it settles, and firing a haptic on every single one of those reads as a
 // buzz rather than a series of distinct impacts.
@@ -86,6 +98,11 @@ export const defaultBounceBoundary: BounceBoundary = (nextX, nextY, velocityX, v
 export type DragPointPhysics = {
   x: SharedValue<number>
   y: SharedValue<number>
+  // Whether the bounce frame callback is actively running right now — true for a flick settling
+  // down, a live gravity pull, or a resumed-from-freeze roll alike, false once at rest or mid-drag.
+  // Read-only for callers (see useEpicenter.ts's gravityActive) — nothing outside this hook should
+  // ever write to it.
+  bounceActive: SharedValue<boolean>
   // Grabbing this point mid-bounce takes over from wherever it currently is, same as interrupting a
   // withSpring/withDecay by overwriting .value — just with an explicit stop since the bounce is a
   // frame callback rather than one of those.
@@ -100,12 +117,18 @@ export type DragPointPhysics = {
 }
 
 // One draggable point's worth of physics — position, release-velocity bounce (decayed by
-// bounceFriction, pulled inward by gravity), and the frozen/recenter behavior every such point
-// shares. Extracted out of what used to be useEpicenter's own internals so a second point (the
-// mirror's wedge anchor) can get the exact same feel without duplicating the frame-callback math.
-// clamp/bounceBoundary both default to the plain circular boundary — the mirror anchor uses exactly
-// that, unchanged; only the pattern epicentre passes its own wedge-aware ones (see useEpicenter.ts).
-export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity: SharedValue<number>, frozen: boolean, onBounce?: () => void, clamp: DragClamp = defaultClamp, bounceBoundary: BounceBoundary = defaultBounceBoundary): DragPointPhysics {
+// bounceFriction, pulled toward gravityCenter by gravity), and the frozen/recenter behavior every
+// such point shares. Extracted out of what used to be useEpicenter's own internals so a second
+// point (the mirror's wedge anchor) can get the exact same feel without duplicating the
+// frame-callback math. clamp/bounceBoundary both default to the plain circular boundary — the
+// mirror anchor uses exactly that, unchanged; only the pattern epicentre passes its own wedge-aware
+// ones (see useEpicenter.ts).
+//
+// gravityCenterX/Y default to a fixed (0, 0) point (the same behavior this always had before tilt
+// could move them) when the caller has nothing live to drive them — see useEpicenter.ts's own
+// per-target gating for why the mirror anchor and pattern epicentre each get their own pair rather
+// than always sharing one.
+export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity: SharedValue<number>, frozen: boolean, onBounce?: () => void, clamp: DragClamp = defaultClamp, bounceBoundary: BounceBoundary = defaultBounceBoundary, gravityCenterX?: SharedValue<number>, gravityCenterY?: SharedValue<number>): DragPointPhysics {
   const x = useSharedValue(0)
   const y = useSharedValue(0)
   const startX = useSharedValue(0)
@@ -132,14 +155,41 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
   // SharedValue, which is what they're actually for.
   const bounceActive = useSharedValue(false)
 
+  // Called unconditionally (hooks can't be conditional) even when the caller passed its own live
+  // pair — only actually read below when gravityCenterX/Y themselves are undefined, so this is just
+  // "pull toward the origin," the same as gravity has always meant before tilt could move it.
+  const fallbackGravityCenterX = useSharedValue(0)
+  const fallbackGravityCenterY = useSharedValue(0)
+  const resolvedGravityCenterX = gravityCenterX ?? fallbackGravityCenterX
+  const resolvedGravityCenterY = gravityCenterY ?? fallbackGravityCenterY
+
+  // Set in beginDrag, cleared at the top of startBounce/recenter — guards the ambient-activation
+  // reaction below from fighting a live finger-drag: updateDrag writes x/y directly every frame
+  // while a pan gesture is in progress, so the frame callback (and whatever re-activates it) must
+  // stay off for that whole window regardless of what gravityCenter is doing in the meantime.
+  const isDragging = useSharedValue(false)
+
+  // A SharedValue mirror of the plain `frozen` prop, kept in sync below — every other value the
+  // ambient-activation reaction's worklet reads (bounceFriction, gravity, resolvedGravityCenterX/Y)
+  // is already a SharedValue for exactly this reason: a worklet's closure over a plain JS value is
+  // captured when it's sent to the UI thread, and isn't guaranteed to pick up a later JS-thread
+  // change the reliable way a SharedValue read does. Reading the raw `frozen` prop directly inside
+  // that worklet (as this used to) could leave it permanently stuck on whatever `frozen` happened to
+  // be at some earlier capture, silently ignoring every pause/resume after that — read `frozenShared.
+  // value` there instead, never the prop itself.
+  const frozenShared = useSharedValue(frozen)
+  useEffect(() => {
+    frozenShared.value = frozen
+  }, [frozen, frozenShared])
+
   useFrameCallback((frameInfo) => {
     if (!bounceActive.value) return
     const deltaMs = frameInfo.timeSincePreviousFrame
     if (deltaMs === null) return
     const deltaSeconds = deltaMs / 1000
 
-    bounceVelocityX.value -= gravity.value * x.value * deltaSeconds
-    bounceVelocityY.value -= gravity.value * y.value * deltaSeconds
+    bounceVelocityX.value -= gravity.value * (x.value - resolvedGravityCenterX.value) * deltaSeconds
+    bounceVelocityY.value -= gravity.value * (y.value - resolvedGravityCenterY.value) * deltaSeconds
 
     const decay = Math.exp(-bounceFriction.value * deltaSeconds)
     bounceVelocityX.value *= decay
@@ -160,28 +210,57 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
     }
 
     // With gravity active, velocity crosses zero momentarily at the top of every swing — including
-    // ones still well away from center — so the speed check alone isn't enough to call it settled.
+    // ones still well away from the gravity center — so the speed check alone isn't enough to call
+    // it settled. Measured from resolvedGravityCenter, not a hardcoded origin — "centered" now means
+    // "at rest wherever gravity is actually pulling," which moves with tilt. Uses
+    // GRAVITY_SETTLE_DISTANCE, not SNAP_DISTANCE — see its own comment for why those two needed to
+    // split apart: this one has to be tight enough that stopping here never has anything left worth
+    // snapping.
     const slowEnough = Math.hypot(bounceVelocityX.value, bounceVelocityY.value) < BOUNCE_STOP_SPEED
-    const centeredEnough = gravity.value <= 0 || Math.hypot(x.value, y.value) < SNAP_DISTANCE
+    const centeredEnough = gravity.value <= 0 || Math.hypot(x.value - resolvedGravityCenterX.value, y.value - resolvedGravityCenterY.value) < GRAVITY_SETTLE_DISTANCE
     if (slowEnough && centeredEnough) {
       bounceActive.value = false
     }
   }, true)
 
+  // Makes gravity ambient rather than only ever kicking in after a release: whenever it's on and
+  // this point isn't already at rest relative to wherever the gravity center currently sits, this
+  // (re)activates the frame callback above on its own — no drag/fling required. This is what lets
+  // tilt alone start the point rolling, and what makes turning the Gravity slider up do anything at
+  // all without first flinging the point by hand, which was the whole "gravity doesn't always work"
+  // complaint: today gravity is otherwise inert unless startBounce happened to already be running.
+  // Skipped entirely while frozen or mid-drag (isDragging) — beginDrag already stops bounceActive
+  // dead for the same reason, and a live pan gesture's updateDrag calls own x/y outright for that
+  // whole window; this must not fight that by flipping bounceActive back on underneath it.
+  useAnimatedReaction(
+    () => ({ gcx: resolvedGravityCenterX.value, gcy: resolvedGravityCenterY.value, g: gravity.value }),
+    ({ gcx, gcy, g }) => {
+      if (frozenShared.value || isDragging.value || g <= 0) return
+      if (Math.hypot(x.value - gcx, y.value - gcy) < GRAVITY_SETTLE_DISTANCE) return
+      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see beginDrag's comment below
+      bounceActive.value = true
+    }
+  )
+
   // Freezing stops this point dead in its tracks rather than just pausing the pattern around it —
   // see index.tsx's own frozen effects for rotation/zoom/color-cycling, which this now matches.
   // Unfreezing resumes from wherever it was, carrying the same leftover velocity forward, but only if
-  // there was still enough of it left to be worth resuming.
+  // there was still enough of it left to be worth resuming — or, now that gravity is ambient, if it's
+  // still off from the gravity center it wants to be at. The ambient reaction above only fires on a
+  // *change* to gravityCenter/gravity, so it wouldn't otherwise notice a plain frozen->unfrozen flip
+  // while tilt happens to be holding still.
   useEffect(() => {
     if (frozen) {
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       bounceActive.value = false
       return
     }
-    if (Math.hypot(bounceVelocityX.value, bounceVelocityY.value) >= BOUNCE_STOP_SPEED) {
+    const hasResidualVelocity = Math.hypot(bounceVelocityX.value, bounceVelocityY.value) >= BOUNCE_STOP_SPEED
+    const pulledByGravity = gravity.value > 0 && Math.hypot(x.value - resolvedGravityCenterX.value, y.value - resolvedGravityCenterY.value) >= GRAVITY_SETTLE_DISTANCE
+    if (hasResidualVelocity || pulledByGravity) {
       bounceActive.value = true
     }
-  }, [frozen, bounceActive, bounceVelocityX, bounceVelocityY])
+  }, [frozen, bounceActive, bounceVelocityX, bounceVelocityY, gravity, resolvedGravityCenterX, resolvedGravityCenterY, x, y])
 
   // react-hooks/immutability flags every SharedValue write below once this hook has more than one
   // gesture-affecting closure in play (beginDrag/updateDrag/startBounce/recenter, plus the bounce
@@ -193,6 +272,7 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
     'worklet'
     // eslint-disable-next-line react-hooks/immutability
     bounceActive.value = false
+    isDragging.value = true
 
     startX.value = x.value
     startY.value = y.value
@@ -211,6 +291,7 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
 
   const startBounce = (velocityX: number, velocityY: number) => {
     'worklet'
+    isDragging.value = false
     // eslint-disable-next-line react-hooks/immutability
     bounceVelocityX.value = velocityX
     // eslint-disable-next-line react-hooks/immutability
@@ -221,6 +302,7 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
 
   const recenter = () => {
     'worklet'
+    isDragging.value = false
     // eslint-disable-next-line react-hooks/immutability
     bounceActive.value = false
     // eslint-disable-next-line react-hooks/immutability
@@ -229,5 +311,5 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
     y.value = withSpring(0, SPRING)
   }
 
-  return { x, y, beginDrag, updateDrag, startBounce, recenter }
+  return { x, y, bounceActive, beginDrag, updateDrag, startBounce, recenter }
 }

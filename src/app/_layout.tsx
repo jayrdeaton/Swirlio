@@ -19,6 +19,7 @@ import { ControlGroupTopSheetContent } from '@/components/ControlGroupTopSheetCo
 import { PhotosensitivityWarning } from '@/components/PhotosensitivityWarning'
 import { MONOCHROME_BLACK, MONOCHROME_WHITE } from '@/constants/fabTheme'
 import { ControlGroupBottomSheetProvider, ControlGroupProvider, ControlGroupTopSheetProvider } from '@/hooks/controlGroups'
+import { SwirlRandomizeProvider } from '@/hooks/swirlRandomize'
 import { SwirlResetProvider } from '@/hooks/swirlReset'
 import { SwirlSettingsProvider } from '@/hooks/useSwirlSettings'
 
@@ -97,14 +98,16 @@ export default function RootLayout() {
               <MonochromeThemeBridge />
               <DrawerProvider autoPaper={AutoPaper}>
                 <SwirlResetProvider>
-                  <ControlGroupProvider>
-                    <ControlGroupTopSheetProvider content={<ControlGroupTopSheetContent />}>
-                      <ControlGroupBottomSheetProvider content={<ControlGroupBottomSheetContent />}>
-                        <Stack screenOptions={{ headerShown: false }} />
-                        <PhotosensitivityWarning />
-                      </ControlGroupBottomSheetProvider>
-                    </ControlGroupTopSheetProvider>
-                  </ControlGroupProvider>
+                  <SwirlRandomizeProvider>
+                    <ControlGroupProvider>
+                      <ControlGroupTopSheetProvider content={<ControlGroupTopSheetContent />}>
+                        <ControlGroupBottomSheetProvider content={<ControlGroupBottomSheetContent />}>
+                          <Stack screenOptions={{ headerShown: false }} />
+                          <PhotosensitivityWarning />
+                        </ControlGroupBottomSheetProvider>
+                      </ControlGroupTopSheetProvider>
+                    </ControlGroupProvider>
+                  </SwirlRandomizeProvider>
                 </SwirlResetProvider>
               </DrawerProvider>
             </AutoPaperProvider>

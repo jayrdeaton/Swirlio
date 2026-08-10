@@ -7,6 +7,7 @@ import { PATTERN_LABELS, PATTERN_ORDER } from '@/constants/patterns'
 import { TOP_SHEET_HEADER_CLEARANCE, TOP_SHEET_RIGHT_CLEARANCE } from '@/constants/sheetLayout'
 import { DASH_STYLE_LABELS, DASH_STYLE_ORDER } from '@/constants/strokeDash'
 import { useControlGroups } from '@/hooks/controlGroups'
+import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { useSwirlReset } from '@/hooks/swirlReset'
 import { useSwapColors } from '@/hooks/useSwapColors'
 import { DEFAULT_BACKGROUND_COLORS, DEFAULT_FOREGROUND_COLORS, useSwirlSettings } from '@/hooks/useSwirlSettings'
@@ -41,9 +42,10 @@ const DASH_STYLE_OPTIONS = DASH_STYLE_ORDER.map((dashStyle) => ({
 export function ControlGroupTopSheetContent() {
   const insets = useSafeAreaInsets()
   const { activeGroup } = useControlGroups()
-  const { settings, resetSettings, setBackgroundColors, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setHoleShaped, setMirrorAlternateColors, setPattern, setShakeEnabled, setShowLabels, setTiltEnabled } = useSwirlSettings()
+  const { settings, resetSettings, setBackgroundColors, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setHoleShaped, setMirrorAlternateColors, setPattern, setShakeEnabled, setShowGravityMarker, setShowLabels, setTiltEnabled } = useSwirlSettings()
   const { swapColors } = useSwapColors()
   const { resetMirror, resetPattern } = useSwirlReset()
+  const { randomizeGroup } = useSwirlRandomize()
   // App-wide look rather than a per-swirl setting, so it lives in @rific/auto-paper's own
   // ThemeSettingsContext instead of useSwirlSettings — see _layout.tsx's MonochromeThemeBridge for
   // how `appearance` feeds back into the forced black/white accent.
@@ -74,6 +76,11 @@ export function ControlGroupTopSheetContent() {
             whenever mirror lines does go above 0. */}
             <FabRow>
               <SettingToggleFab icon='checkerboard' label='Alternate colors' value={settings.mirrorAlternateColors} onValueChange={setMirrorAlternateColors} />
+              {/* Rerolls mirror lines/gap/alternate-colors — same rerollUnitsByGroup slice the global
+              dice FAB and shake gesture already pull 'mirror' units from (see index.tsx's
+              randomizeGroup), just scoped to this group instead of every field at once. Same icon as
+              the global dice FAB (OnScreenControls) for a consistent "this randomizes" affordance. */}
+              <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('mirror')} />
               {/* Squares the wedges' rotation back to 0 AND snaps the mirror anchor back to center —
               see index.tsx's resetMirror. Used to be rotation-only, paired with a tap on the anchor
               itself to recentre it, but that tap had no fixed visual marker to aim at once the
@@ -100,6 +107,11 @@ export function ControlGroupTopSheetContent() {
               {backgroundColorFabs.fabs}
               <FabDivider />
               <ActionFab icon='swap-horizontal' label='Swap' onPress={swapColors} />
+              {/* Rerolls the fg/bg color pair — the same single 'colors' rerollUnitsByGroup unit the
+              global dice FAB and shake gesture already reroll (see index.tsx's randomizeGroup). Same
+              icon as the global dice FAB (OnScreenControls) for a consistent "this randomizes"
+              affordance. */}
+              <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('colors')} />
               <ActionFab
                 icon='backup-restore'
                 // Short, single-word labels here (not "Reset colors"/"Swap colors" — the icon alone
@@ -139,6 +151,11 @@ export function ControlGroupTopSheetContent() {
             <SettingToggleFab icon='shape-outline' label='Crop shape' value={settings.cropShaped} onValueChange={setCropShaped} />
             <SettingToggleFab icon='contain' label='Hole shape' value={settings.holeShaped} onValueChange={setHoleShaped} />
             <FabDivider />
+            {/* Rerolls pattern+sides, crop radius/shaped, and hole radius/shaped — the 'pattern'
+            rerollUnitsByGroup slice the global dice FAB and shake gesture already pull from (see
+            index.tsx's randomizeGroup), just scoped to this group. Same icon as the global dice FAB
+            (OnScreenControls) for a consistent "this randomizes" affordance. */}
+            <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('pattern')} />
             {/* Squares the pattern's rotation back to 0 AND snaps the epicentre back to center —
             see index.tsx's resetPattern. No effect on zoom, which has no orientation of its own to
             reset. Used to be rotation-only, paired with a tap on the epicentre itself to recentre
@@ -164,6 +181,13 @@ export function ControlGroupTopSheetContent() {
             spread out right along with it. This pins that spacing to what it looks like at a
             centered epicentre instead. */}
             <SettingToggleFab icon='ruler' label='Fixed spacing' value={settings.fixedSpacing} onValueChange={setFixedSpacing} />
+            <FabDivider />
+            {/* Rerolls dash style, tightness, and stroke width — the 'line' rerollUnitsByGroup slice
+            the global dice FAB and shake gesture already pull from (see index.tsx's randomizeGroup).
+            No Reset button in this group today (unlike Mirror/Colors/Pattern above) — Randomize is
+            the first per-field action to land here. Same icon as the global dice FAB
+            (OnScreenControls) for a consistent "this randomizes" affordance. */}
+            <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('line')} />
           </FabRow>
         )}
 
@@ -177,7 +201,11 @@ export function ControlGroupTopSheetContent() {
             <SettingToggleFab icon='label' label='Labels' value={settings.showLabels} onValueChange={setShowLabels} />
             <FabDivider />
             <SettingToggleFab icon='vibrate' label='Shake to randomize' value={settings.shakeEnabled} onValueChange={setShakeEnabled} />
-            <SettingToggleFab icon='axis-arrow' label='Tilt to warp' value={settings.tiltEnabled} onValueChange={setTiltEnabled} />
+            <SettingToggleFab icon='axis-arrow' label='Tilt to roll' value={settings.tiltEnabled} onValueChange={setTiltEnabled} />
+            {/* Temporary — see useSwirlSettings.tsx's own showGravityMarker comment for why this is
+            expected to move once gravity becomes its own gestureTarget rather than staying a
+            standalone toggle here. */}
+            <SettingToggleFab icon='target' label='Gravity marker' value={settings.showGravityMarker} onValueChange={setShowGravityMarker} />
             <FabDivider />
             {/* The one button in this group that isn't its own preference — every slider and toggle
             across all five groups, plus appearance/blur (themeSettings, a separate persisted store

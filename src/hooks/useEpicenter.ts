@@ -1,6 +1,6 @@
 import { useWindowDimensions } from 'react-native'
 import { Gesture, PanGesture } from 'react-native-gesture-handler'
-import { runOnJS, SharedValue, useSharedValue } from 'react-native-reanimated'
+import { runOnJS, SharedValue, useDerivedValue, useSharedValue } from 'react-native-reanimated'
 
 import { clamp } from '@/constants/clamp'
 import { copyCountForMirrorLines, inverseWedgeVector, wedgeAngleDegrees, wedgeIndexAtPoint, wedgeVector } from '@/constants/kaleidoscope'
@@ -18,6 +18,11 @@ export type Epicenter = {
   epicenterY: SharedValue<number>
   mirrorAnchorX: SharedValue<number>
   mirrorAnchorY: SharedValue<number>
+  // Whether gravity is visibly doing something right now, on either point — a flick still settling
+  // with gravity on, tilt actively rolling something toward it, or a resumed-from-freeze pull, but
+  // never just "gravity is turned on." Purely a transient-debug-visibility signal (see Spiral.tsx's
+  // gravity marker) — the physics itself never reads this back.
+  gravityActive: SharedValue<boolean>
   panGesture: PanGesture
   // Always the pattern's own epicentre, regardless of gestureTarget — used by the tap-to-recenter
   // gesture in index.tsx, which detects "near the epicentre" by the pattern's position specifically.
@@ -28,7 +33,7 @@ export type Epicenter = {
   recenterMirror: () => void
 }
 
-export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => void, onBounce: () => void, mirrorLines: number, bounceFriction: SharedValue<number>, gravity: SharedValue<number>, frozen: boolean, gestureTarget: GestureTarget): Epicenter {
+export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => void, onBounce: () => void, mirrorLines: number, bounceFriction: SharedValue<number>, gravity: SharedValue<number>, gravityCenterX: SharedValue<number>, gravityCenterY: SharedValue<number>, frozen: boolean, gestureTarget: GestureTarget): Epicenter {
   const { height, width } = useWindowDimensions()
   const centerX = width / 2
   const centerY = height / 2
@@ -37,6 +42,14 @@ export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => voi
   // booleans were captured directly in the gesture closures below.
   const wedgeAngleDeg = wedgeAngleDegrees(mirrorLines)
   const copyCount = copyCountForMirrorLines(mirrorLines)
+
+  // Which point(s) tilt's gravity center actually pulls — same split drag/pinch/rotate already use
+  // below (targetsPattern/targetsMirror), just computed up front so it can also gate which
+  // useDragPointPhysics call below gets the live gravityCenterX/Y and which gets left on its default
+  // (fixed-at-origin) pull — consolidated here rather than duplicated in index.tsx, which used to
+  // compute this identical split itself just for tilt (see patternTiltX/mirrorTiltX, now gone).
+  const targetsPattern = gestureTarget !== 'mirror'
+  const targetsMirror = gestureTarget !== 'pattern'
 
   // Same physics, two independent points — see useDragPointPhysics for what each one owns (position,
   // bounce, frozen/recenter). Both share bounceFriction/gravity rather than getting their own
@@ -52,7 +65,7 @@ export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => voi
   // pattern's — the opposite of this file's older order — so test helpers that pick "the pattern's own
   // callback" by registration index need to look at index 1, not 0 (see
   // swirlScreen.gesture.test.tsx's own patternFrameCallback).
-  const mirror = useDragPointPhysics(bounceFriction, gravity, frozen, onBounce)
+  const mirror = useDragPointPhysics(bounceFriction, gravity, frozen, onBounce, undefined, undefined, targetsMirror ? gravityCenterX : undefined, targetsMirror ? gravityCenterY : undefined)
 
   // Which wedge the current drag actually grabbed, decided once at touch-down (see onStart) — every
   // update and the release velocity both correct through this same copy's own inverse transform (see
@@ -141,13 +154,11 @@ export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => voi
       bounced
     }
   }
-  const pattern = useDragPointPhysics(bounceFriction, gravity, frozen, onBounce, patternClamp, patternBounceBoundary)
+  const pattern = useDragPointPhysics(bounceFriction, gravity, frozen, onBounce, patternClamp, patternBounceBoundary, targetsPattern ? gravityCenterX : undefined, targetsPattern ? gravityCenterY : undefined)
 
-  // Captured once per render, same as wedgeAngleDeg/copyCount above — gestureTarget is a plain mode
-  // (not a SharedValue), so the gesture is simply rebuilt (fresh closures) whenever it changes, the
-  // same way every other settings-derived value already works in this file.
-  const targetsPattern = gestureTarget !== 'mirror'
-  const targetsMirror = gestureTarget !== 'pattern'
+  // See the Epicenter type's own comment — a flick with gravity off still sets bounceActive, so this
+  // isn't just "is either point bouncing," it specifically requires gravity to be the reason.
+  const gravityActive = useDerivedValue(() => gravity.value > 0 && (pattern.bounceActive.value || mirror.bounceActive.value))
 
   const recenterPattern = () => pattern.recenter()
   const recenterMirror = () => mirror.recenter()
@@ -229,5 +240,5 @@ export function useEpicenter(onSnapToCenter: () => void, onDragChange: () => voi
       }
     })
 
-  return { epicenterX: pattern.x, epicenterY: pattern.y, mirrorAnchorX: mirror.x, mirrorAnchorY: mirror.y, panGesture, recenterPattern, recenterMirror }
+  return { epicenterX: pattern.x, epicenterY: pattern.y, mirrorAnchorX: mirror.x, mirrorAnchorY: mirror.y, gravityActive, panGesture, recenterPattern, recenterMirror }
 }
