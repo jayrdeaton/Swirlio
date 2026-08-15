@@ -3,9 +3,7 @@ import React from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { PATTERN_LABELS, PATTERN_ORDER } from '@/constants/patterns'
 import { TOP_SHEET_HEADER_CLEARANCE, TOP_SHEET_RIGHT_CLEARANCE } from '@/constants/sheetLayout'
-import { DASH_STYLE_LABELS, DASH_STYLE_ORDER } from '@/constants/strokeDash'
 import { useControlGroups } from '@/hooks/controlGroups'
 import { useGravityMarkerVisibility } from '@/hooks/gravityMarkerVisibility'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
@@ -14,31 +12,18 @@ import { useSwapColors } from '@/hooks/useSwapColors'
 import { DEFAULT_BACKGROUND_COLORS, DEFAULT_BOUNCE_FRICTION, DEFAULT_DASH_STYLE, DEFAULT_FIXED_SPACING, DEFAULT_FOREGROUND_COLORS, DEFAULT_GRAVITY, DEFAULT_MIRROR_ALTERNATE_COLORS, DEFAULT_MIRROR_GAP, DEFAULT_MIRROR_LINES, DEFAULT_MIRROR_ROTATION_SPEED, DEFAULT_STROKE_WIDTH, DEFAULT_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { ActionFab } from './ActionFab'
-import { DashStyleIcon } from './DashStyleIcon'
 import { FAB_ROW_GAP, FabRow } from './FabRow'
-import { PatternIcon } from './PatternIcon'
 import { SettingToggleFab } from './SettingToggleFab'
 import { useAppearanceIconFabs } from './useAppearanceIconFabs'
 import { useColorListFabs } from './useColorListFabs'
-import { usePreviewOptionFabs } from './usePreviewOptionFabs'
-
-const PATTERN_OPTIONS = PATTERN_ORDER.map((pattern) => ({
-  value: pattern,
-  label: PATTERN_LABELS[pattern],
-  renderIcon: ({ color, size }: { color: string; size: number }) => <PatternIcon pattern={pattern} color={color} size={size} />
-}))
+import { useDashStyleIconFabs } from './useDashStyleIconFabs'
+import { usePatternIconFabs } from './usePatternIconFabs'
 
 // Shake (Accelerometer), tilt (DeviceMotion), audio-reactive (mic capture), and haptics all no-op (or
 // worse — see Audio reactive's own comment below) on web already — hiding their toggles here too
 // rather than leaving them visible-but-inert avoids the "why doesn't this do anything" confusion of a
 // control with nothing behind it to control.
 const isWeb = Platform.OS === 'web'
-
-const DASH_STYLE_OPTIONS = DASH_STYLE_ORDER.map((dashStyle) => ({
-  value: dashStyle,
-  label: DASH_STYLE_LABELS[dashStyle],
-  renderIcon: ({ color, size }: { color: string; size: number }) => <DashStyleIcon dashStyle={dashStyle} color={color} size={size} />
-}))
 
 // The buttons/pickers half of the group sheet — see ControlGroupBottomSheetContent for the sliders
 // half. Split into two independently-anchored sheets (this one top, sliders bottom) that open and
@@ -66,8 +51,8 @@ export function ControlGroupTopSheetContent() {
   // individually spreadable ones, and the branches below need every FAB as a real flat sibling to
   // place into whichever FabRow (see usePreviewOptionFabs for the same reasoning). Called
   // unconditionally regardless of which group is active, same as any other hook.
-  const patternFabs = usePreviewOptionFabs(PATTERN_OPTIONS, settings.pattern, setPattern)
-  const dashStyleFabs = usePreviewOptionFabs(DASH_STYLE_OPTIONS, settings.dashStyle, setDashStyle)
+  const patternFabs = usePatternIconFabs(settings.pattern, setPattern)
+  const dashStyleFabs = useDashStyleIconFabs(settings.dashStyle, setDashStyle)
   const foregroundColorFabs = useColorListFabs('Foreground', settings.foregroundColors, setForegroundColors)
   const backgroundColorFabs = useColorListFabs('Background', settings.backgroundColors, setBackgroundColors)
   const appearanceFabs = useAppearanceIconFabs(themeSettings.appearance, (value) => setThemeSettings({ appearance: value }))

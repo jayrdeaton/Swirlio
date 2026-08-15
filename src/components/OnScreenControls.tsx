@@ -16,8 +16,9 @@ import { useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { DashStyleIcon } from './DashStyleIcon'
 import { FAB_ROW_GAP } from './FabRow'
+import { FAN_DURATION_MS, fanItemOffset, GestureFanItem } from './GestureFanItem'
 import { GlassToggleFab } from './GlassToggleFab'
-import { FAB_HEIGHT_MEDIUM, FAB_HEIGHT_SMALL } from './LabeledFab'
+import { BORDER_RADIUS_MULTIPLIER_SMALL, FAB_HEIGHT_MEDIUM, FAB_HEIGHT_SMALL } from './LabeledFab'
 import { IconOrRenderFn, MdIcon, resolveIcon } from './MdIcon'
 import { PatternIcon } from './PatternIcon'
 
@@ -88,56 +89,6 @@ const GESTURE_TARGET_ICONS: Record<GestureTarget, IconOrRenderFn> = {
   // gravity" mark across the trigger stack, this FAB, and the sheet content itself.
   gravity: 'magnet',
   speed: 'speedometer'
-}
-
-// How far each fan item sits from the primary FAB's own center once open, and how wide a wedge the
-// whole fan sweeps — biased toward straight up rather than a full semicircle, but wider than it would
-// need to be if the neighboring FABs stayed put: they don't (see fanFlanksStyle), fading out of the
-// way whenever the fan opens, so there's the whole row's width to spread into rather than just the
-// gap between two still-visible buttons. Tuned by eye, not derived from anything — expect this to
-// move once it's actually visible on a real device.
-const FAN_RADIUS = 92
-const FAN_ANGLE_SPAN_DEG = 130
-const FAN_DURATION_MS = 220
-// Evenly spaces `total` items across FAN_ANGLE_SPAN_DEG, centered straight up (0,-FAN_RADIUS) at the
-// midpoint index. Plain trig on plain numbers, not a worklet — this only ever runs during render to
-// produce each item's fixed *target* offset, never inside an animated callback.
-function fanItemOffset(index: number, total: number) {
-  const angleDeg = total <= 1 ? 0 : -FAN_ANGLE_SPAN_DEG / 2 + (FAN_ANGLE_SPAN_DEG * index) / (total - 1)
-  const angleRad = (angleDeg * Math.PI) / 180
-  return { dx: FAN_RADIUS * Math.sin(angleRad), dy: -FAN_RADIUS * Math.cos(angleRad) }
-}
-
-type GestureFanItemProps = {
-  icon: IconOrRenderFn
-  testID: string
-  active: boolean
-  open: boolean
-  dx: number
-  dy: number
-  onPress: () => void
-}
-
-// One per GESTURE_TARGET_ORDER entry, each a real component (not a shared style shaped in a .map())
-// specifically so its own useAnimatedStyle call is a single, unconditional hook call the rules of
-// hooks are fine with — mapping a *component* per item is fine, mapping a raw hook call inside a loop
-// is not. `open` is read as a plain prop directly inside useAnimatedStyle, the same established
-// pattern this file's own animatedStyle/sheetFadeStyle/siblingsFadeStyle already use for
-// visible/anySheetVisible/siblingsVisible — Reanimated recompiles this worklet fresh every render, so
-// there's no stale-closure risk the way there would be inside a persistent useFrameCallback/
-// useAnimatedReaction (see useDragPointPhysics.ts's frozenShared for that other case). Collapsed
-// (open: false) sits exactly on top of the primary FAB (dx/dy both animate back to 0) rather than just
-// fading out in place, so it visibly retracts into the button it came from.
-function GestureFanItem({ icon, testID, active, open, dx, dy, onPress }: GestureFanItemProps) {
-  const style = useAnimatedStyle(() => ({
-    opacity: withTiming(open ? 1 : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }),
-    transform: [{ translateX: withTiming(open ? dx : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }) }, { translateY: withTiming(open ? dy : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }) }]
-  }))
-  return (
-    <Animated.View testID={`${testID}-fan-item`} style={[styles.fanItem, style]} pointerEvents={open ? 'auto' : 'none'}>
-      <GlassToggleFab icon={icon} testID={testID} active={active} onPress={onPress} />
-    </Animated.View>
-  )
 }
 
 type OnScreenControlsProps = {
@@ -373,7 +324,7 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
   // canvas, not just the floating icon.
   const fabOutlineStyle = { borderColor: solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH }
   const solidFabStyle = { backgroundColor: colors.primary, ...fabOutlineStyle }
-  const disabledBackdropStyle = { borderRadius: 3 * (roundness ?? 4), overflow: 'hidden' as const }
+  const disabledBackdropStyle = { borderRadius: BORDER_RADIUS_MULTIPLIER_SMALL * (roundness ?? 4), overflow: 'hidden' as const }
   // Every boundary-disabled small FAB (skip-previous, Add/Remove mirror below) needs this conditional
   // treatment rather than plain solidFabStyle: react-native-paper's FAB reads a `customBackgroundColor`
   // out of the raw `style` prop and correctly ignores it while disabled in favor of the theme's
@@ -714,15 +665,6 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: 'absolute'
-  },
-  // Rests centered on the primary FAB (see gestureTargetCluster below) at dx/dy (0,0) — GestureFanItem
-  // animates transform away from here when the fan opens, back to here when it closes. FAB_HEIGHT_SMALL
-  // matches GlassToggleFab's own fixed diameter (see its FAB_DIAMETER, not exported — same number,
-  // already imported here), so top/left center it exactly within the larger medium-sized cluster.
-  fanItem: {
-    left: (FAB_HEIGHT_MEDIUM - FAB_HEIGHT_SMALL) / 2,
-    position: 'absolute',
-    top: (FAB_HEIGHT_MEDIUM - FAB_HEIGHT_SMALL) / 2
   },
   // Sized to exactly the primary FAB's own medium footprint, not the fan's spread — the fan items
   // themselves escape these bounds via transform (see fanItem above), which layout doesn't account

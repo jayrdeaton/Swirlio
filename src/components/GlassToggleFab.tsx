@@ -6,6 +6,7 @@ import { useTheme } from 'react-native-paper'
 
 import { VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
 
+import { BORDER_RADIUS_MULTIPLIER_SMALL, FAB_HEIGHT_SMALL } from './LabeledFab'
 import { resolveIcon } from './MdIcon'
 import { useToggleFabAppearance } from './useToggleFabAppearance'
 
@@ -28,8 +29,6 @@ type GlassToggleFabProps = {
   disabled?: boolean
 }
 
-const FAB_DIAMETER = 40
-
 // The on-canvas trigger stack and mic FAB (see OnScreenControls) float directly over the live,
 // continuously-animating canvas. All the actual color/blur logic lives in useToggleFabAppearance
 // now, shared with every other toggle FAB in the app (see its own comment) — this component is just
@@ -41,19 +40,20 @@ const FAB_DIAMETER = 40
 export function GlassToggleFab({ icon, active, onPress, testID, disabled }: GlassToggleFabProps) {
   const { roundness } = useTheme()
   const { backgroundColor, iconColor, borderColor, blurEnabled, tintOpacity } = useToggleFabAppearance(active)
-  // getFabStyle (react-native-paper's FAB/utils.ts, not exported): a small FAB's borderRadius is
-  // `3 * roundness` — mirrored here so the blur backdrop is clipped to the exact same rounded shape as
-  // the FAB sitting on top of it, not a guessed circle.
-  const borderRadius = 3 * (roundness ?? 4)
+  // Same borderRadius math LabeledFab's own small FAB uses (see BORDER_RADIUS_MULTIPLIER_SMALL there)
+  // — imported rather than re-derived, so the blur backdrop stays clipped to the exact same rounded
+  // shape as the FAB sitting on top of it, not a second, possibly-drifting copy of paper's own
+  // getFabStyle math.
+  const borderRadius = BORDER_RADIUS_MULTIPLIER_SMALL * (roundness ?? 4)
   const backdropStyle = { borderRadius, overflow: 'hidden' as const }
-  const fabStyle = { backgroundColor: active ? backgroundColor : 'transparent', borderColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_DIAMETER, width: FAB_DIAMETER, boxSizing: 'border-box' as const }
+  const fabStyle = { backgroundColor: active ? backgroundColor : 'transparent', borderColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' as const }
 
   return (
     <View style={styles.wrapper}>
       {!active && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, backdropStyle]} />}
       {/* height/width/boxSizing: without an explicit box-sizing, the border this style adds grows the
-      FAB Surface's own intrinsic box a couple pixels past FAB_DIAMETER — see LabeledFab's fabStyle for
-      the full mechanism (same underlying react-native-paper FAB, same bug). That leaves the Surface a
+      FAB Surface's own intrinsic box a couple pixels past FAB_HEIGHT_SMALL — see LabeledFab's fabStyle
+      for the full mechanism (same underlying react-native-paper FAB, same bug). That leaves the Surface a
       couple pixels taller than the BlurView backdrop above, both sharing the same top edge, so a
       sliver of whatever's behind both shows through at the bottom. border-box is what makes this
       explicit height/width actually include the border instead of adding to it. */}
@@ -64,7 +64,7 @@ export function GlassToggleFab({ icon, active, onPress, testID, disabled }: Glas
 
 const styles = StyleSheet.create({
   wrapper: {
-    height: FAB_DIAMETER,
-    width: FAB_DIAMETER
+    height: FAB_HEIGHT_SMALL,
+    width: FAB_HEIGHT_SMALL
   }
 })

@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { isDarkColor } from '@rific/auto-paper'
 import { useVibration } from '@rific/haptic-press'
 import { StatusBar } from 'expo-status-bar'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -12,10 +11,10 @@ import { OnScreenControls } from '@/components/OnScreenControls'
 import { SpiralHost } from '@/components/SpiralHost'
 import { mapAudioBand } from '@/constants/audioMapping'
 import { clamp } from '@/constants/clamp'
+import { computeEffectiveSwirlValues } from '@/constants/effectiveSwirlValues'
 import { gravityParticleFrictionSpeed } from '@/constants/gravityWellMath'
 import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
-import { hasPolygonSides, isZoomlessPattern, PATTERN_ORDER } from '@/constants/patterns'
-import { randomHexColor } from '@/constants/randomColor'
+import { isZoomlessPattern, PATTERN_ORDER } from '@/constants/patterns'
 import { MAX_RADIUS_TO_REFERENCE_RATIO, RIPPLE_BASE_COUNT, rippleModulus, rippleSpacing } from '@/constants/rippleMath'
 import { DASH_STYLE_ORDER } from '@/constants/strokeDash'
 import { ControlGroup, useControlGroupSheetDrawer } from '@/hooks/controlGroups'
@@ -26,11 +25,13 @@ import { useRegisterSwirlReset } from '@/hooks/swirlReset'
 import { useAudioReactive } from '@/hooks/useAudioReactive'
 import { SCREEN_EDGE_OFFSET, useDragPointPhysics } from '@/hooks/useDragPointPhysics'
 import { GestureTarget, useEpicenter } from '@/hooks/useEpicenter'
+import { useLookHistory } from '@/hooks/useLookHistory'
 import { PAUSE_EASE_DURATION_MS, useLoopingProgress } from '@/hooks/useLoopingProgress'
+import { useRerollUnits } from '@/hooks/useRerollUnits'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { useSwapColors } from '@/hooks/useSwapColors'
-import { DEFAULT_DASH_STYLE, MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIRROR_GAP, MIN_POLYGON_SIDES, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED, SwirlSettings, useSwirlSettings } from '@/hooks/useSwirlSettings'
-import { useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
+import { DEFAULT_DASH_STYLE, MAX_BOUNCE_FRICTION, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_CYCLE_SPEED, MIN_MIRROR_GAP, MIN_POLYGON_SIDES, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { TILT_EASE_SPRING, useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const BASE_ROTATION_DURATION_MS = 12000
 // Same spring feel as useEpicenter's own recenter snap — a consistent "settles back to its resting
@@ -68,44 +69,19 @@ const GRAVITY_PARTICLE_BASE_DURATION_MS = 3500
 const GRAVITY_PARTICLE_FRICTION_MIN_SPEED = 0.3
 const GRAVITY_PARTICLE_FRICTION_MAX_SPEED = 15
 const LONG_PRESS_MS = 400
-const RANDOMIZE_MAX_FOREGROUND_COLORS = 3
-// lookHistory/audioRotationReversed's own persistence — see the hydrate/save effect right after
-// pushHistory. Versioned/named the same way useSwirlSettings.tsx's own SETTINGS_STORAGE_KEY is, kept as
-// separate keys (rather than folded into that one) since these are this screen's own local state, not
-// part of the SwirlSettings context.
-const LOOK_HISTORY_STORAGE_KEY = 'swirlio.lookHistory.v1'
+// audioRotationReversed's own persistence — see the hydrate/save effect below. Versioned/named the
+// same way useSwirlSettings.tsx's own SETTINGS_STORAGE_KEY is (and useLookHistory.tsx's own
+// LOOK_HISTORY_STORAGE_KEY), kept as its own separate key since this is this screen's own local
+// state, not part of the SwirlSettings context.
 const AUDIO_ROTATION_REVERSED_STORAGE_KEY = 'swirlio.audioRotationReversed.v1'
-// Same 400ms debounce useSwirlSettings.tsx's own settings writer uses — see that file's
-// PERSIST_DEBOUNCE_MS for why (a slider drag/hot key can change this dozens of times a second; only the
-// value it settles on is worth a write).
+// Same 400ms debounce useSwirlSettings.tsx's own settings writer (and useLookHistory.tsx's own) uses
+// — see that file's PERSIST_DEBOUNCE_MS for why (a hot key can flip this dozens of times a second;
+// only the value it settles on is worth a write).
 const SESSION_STATE_PERSIST_DEBOUNCE_MS = 400
-// How many Look entries lookHistory keeps once persisted — see pushHistory's own comment. 100 is
-// generous relative to a typical sitting's worth of hot-key taps/randomizes (each Look is a handful of
-// small fields, so the whole capped array is a trivial write), not a storage-size compromise.
-const MAX_LOOK_HISTORY = 100
 // How many of the 12 look units in rerollUnits a long-press on the forward transport FAB rerolls at
 // once (see goForwardBatch) — enough to read as "several things changed," short of rerollUnits.length
 // (a full randomize), which is what the separate dice FAB/shake gesture already covers.
 const TWEAK_BATCH_COUNT = 4
-// While audio-reactive mode is on, every animated value it drives quantizes its audio-mapped speed
-// to this many discrete steps across that value's own min..max range, rather than using the raw
-// mapped number directly. Only matters for the three rate-driven values (rotation/mirror rotation
-// speed, zoom/pulse speed, cycle speed — see BAND_STATE_THROTTLE_MS's own comment in
-// useAudioReactive.ts), each of which re-syncs a SharedValue rate from a plain-number effect on every
-// change (see baseRotationRate's own sync effect, and useLoopingProgress). Throttling how often
-// mid/treble/loudness update already cuts that re-sync down to a few times a second, but small
-// fluctuations within the same rough "loudness bucket" would still fire it on every one of those
-// updates without this, since even a throttled reading rarely lands on the exact same float twice.
-// Snapping to a coarser grid means most consecutive readings round to the same step and change
-// nothing, so the rate only actually changes on a real, musically meaningful swing — one fewer effect
-// (and re-render) to run for no visible difference. Stroke width (bass) doesn't need this — it's a
-// live per-frame SharedValue read, not something that re-syncs through a React effect, so raw,
-// unquantized values are exactly what makes it track bass hits precisely.
-const AUDIO_SPEED_QUANTIZE_STEPS = 12
-function quantizeAudioSpeed(mapped: number, min: number, max: number): number {
-  const stepSize = (max - min) / AUDIO_SPEED_QUANTIZE_STEPS
-  return min + Math.round((mapped - min) / stepSize) * stepSize
-}
 // "Reset rotation" only means undoing manual/gesture drift once the pattern (or mirror) isn't actively
 // spinning — see resetRotation/resetMirrorRotation below. At that point, springing all the way back to
 // a literal 0 can mean a long, weird-looking unwind, since baseRotation accumulates without ever
@@ -214,19 +190,6 @@ const WHEEL_PINCH_DELTA_TO_SCALE = 0.01
 // "gesture end" has to be inferred: no further wheel tick within this window after the last one
 // means the pinch is over.
 const WHEEL_PINCH_IDLE_MS = 150
-// Caps how far audio-reactive mode itself is willing to push holeRadius — deliberately short of
-// MAX_HOLE_RADIUS (1, a fully-hollowed-out ring with no solid center left at all). At full loudness
-// the pattern should read as "the middle is punching through," not "there's nothing left but an
-// outline" — a first-pass calibration meant to be retuned by ear/eye on a real device, the same as
-// every gesture-derived scale above. Manual slider use (and randomize) are untouched — this only
-// clamps the audio-reactive mapping's own ceiling.
-const MAX_REACTIVE_HOLE_RADIUS = 0.5
-// Same idea as MAX_REACTIVE_HOLE_RADIUS above, for the mirror gap — deliberately short of
-// MAX_MIRROR_GAP (0.9, wedges pulled apart to a bare sliver). At full loudness the wedges should
-// visibly pull apart, not nearly vanish — a first-pass calibration meant to be retuned by eye on a
-// real device. Manual slider use (and randomize) are untouched — this only clamps the audio-reactive
-// mapping's own ceiling.
-const MAX_REACTIVE_MIRROR_GAP = 0.5
 // How long cropRadius/holeRadius/mirrorGap ease toward a new audio-reactive target, in ms — unlike
 // rotation/zoom/cycle speed (rates, already smooth in motion regardless of how choppy their own
 // target updates are — see effectiveRotationSpeed's own comment) or bass-driven stroke width/sides
@@ -237,93 +200,6 @@ const MAX_REACTIVE_MIRROR_GAP = 0.5
 // Set close to that same throttle interval so each ease has just about finished by the time the next
 // target arrives — long enough to read as motion, short enough not to lag behind the beat driving it.
 const AUDIO_SHAPE_TWEEN_MS = 180
-
-// The SwirlSettings fields rerollUnits (see randomize/tweakLook in SwirlScreen) can touch —
-// restoring a snapshot of just these, rather than the full SwirlSettings, is what keeps the transport
-// row's back button from ever reverting a field it had no part in changing, like a manually-tuned
-// rotationSpeed or the live audioReactiveEnabled mic state. bounceFriction/gravity joined once the
-// gravity group got its own Randomize button (see the units list above) — every existing reroll
-// unit's own fields were already covered here, so these two have to be too, or a "back" after a
-// randomize that happened to touch gravity's strength would leave it un-undone.
-type Look = Pick<SwirlSettings, 'backgroundColors' | 'bounceFriction' | 'cropRadius' | 'cropShaped' | 'dashStyle' | 'foregroundColors' | 'gravity' | 'holeRadius' | 'holeShaped' | 'mirrorAlternateColors' | 'mirrorGap' | 'mirrorLines' | 'pattern' | 'polygonSides' | 'strokeWidth' | 'tightness'>
-
-// resetAllSettings (see its own comment) is the one undoable action broad enough that Look's own 16
-// fields aren't enough to restore what it touches: it delegates to resetSettings, which resets nearly
-// every SwirlSettings field, including several — the speed sliders, fixedSpacing, micSensitivity, the
-// trigger-stack chrome preference — that Look deliberately leaves out (see Look's own comment: a plain
-// hot key or randomize/tweak's own undo entry should never surprise-revert a speed slider a manual
-// drag just set). Rather than widen Look itself for everyone (which would reintroduce exactly that
-// surprise-revert risk for every other push), only resetAllSettings' own entry additionally carries
-// these — see captureExtraResetFields/pushHistory's own comments for how.
-type ExtraResetFields = Pick<SwirlSettings, 'backgroundCycleSpeed' | 'fixedSpacing' | 'followSpeed' | 'foregroundCycleSpeed' | 'micSensitivity' | 'mirrorRotationSpeed' | 'rotationSpeed' | 'triggerStackExpanded' | 'zoomSpeed'>
-type LookHistoryEntry = Look & Partial<ExtraResetFields>
-
-const LOOK_HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
-
-function isValidLookColorList(value: unknown): value is string[] {
-  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === 'string' && LOOK_HEX_COLOR_PATTERN.test(item))
-}
-
-// A lighter validator than useSwirlSettings.tsx's own mergePersistedSettings: that one merges whatever
-// partial/legacy shape it finds into defaultSettings field by field, since a returning user's settings
-// blob is always meant to apply. A Look snapshot has no such fallback to merge into — a persisted entry
-// missing even one field, or carrying one of the wrong type, isn't safely restorable, so an invalid
-// entry is dropped from the array entirely here rather than partially trusted. Range validation
-// (cropRadius in bounds, mirrorLines an integer in range, and so on) isn't repeated here either:
-// restoreLook's own setters (setCropRadius, setMirrorLines, ...) already clamp everything on the way
-// in, the same safety net every other caller of those setters already relies on. The 9
-// ExtraResetFields are the one part of a LookHistoryEntry that's genuinely optional (only
-// resetAllSettings' own entries carry them, see its own comment) — validated as "absent, or present
-// with the right type" rather than required, so a plain Look-only entry from any other push still
-// passes.
-function isValidLookHistoryEntry(value: unknown): value is LookHistoryEntry {
-  if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<LookHistoryEntry>
-  return (
-    isValidLookColorList(candidate.backgroundColors) &&
-    isValidLookColorList(candidate.foregroundColors) &&
-    typeof candidate.bounceFriction === 'number' &&
-    typeof candidate.cropRadius === 'number' &&
-    typeof candidate.cropShaped === 'boolean' &&
-    typeof candidate.dashStyle === 'string' &&
-    DASH_STYLE_ORDER.includes(candidate.dashStyle) &&
-    typeof candidate.gravity === 'number' &&
-    typeof candidate.holeRadius === 'number' &&
-    typeof candidate.holeShaped === 'boolean' &&
-    typeof candidate.mirrorAlternateColors === 'boolean' &&
-    typeof candidate.mirrorGap === 'number' &&
-    typeof candidate.mirrorLines === 'number' &&
-    typeof candidate.pattern === 'string' &&
-    PATTERN_ORDER.includes(candidate.pattern) &&
-    typeof candidate.polygonSides === 'number' &&
-    typeof candidate.strokeWidth === 'number' &&
-    typeof candidate.tightness === 'number' &&
-    (candidate.backgroundCycleSpeed === undefined || typeof candidate.backgroundCycleSpeed === 'number') &&
-    (candidate.fixedSpacing === undefined || typeof candidate.fixedSpacing === 'boolean') &&
-    (candidate.followSpeed === undefined || typeof candidate.followSpeed === 'number') &&
-    (candidate.foregroundCycleSpeed === undefined || typeof candidate.foregroundCycleSpeed === 'number') &&
-    (candidate.micSensitivity === undefined || typeof candidate.micSensitivity === 'number') &&
-    (candidate.mirrorRotationSpeed === undefined || typeof candidate.mirrorRotationSpeed === 'number') &&
-    (candidate.rotationSpeed === undefined || typeof candidate.rotationSpeed === 'number') &&
-    (candidate.triggerStackExpanded === undefined || typeof candidate.triggerStackExpanded === 'boolean') &&
-    (candidate.zoomSpeed === undefined || typeof candidate.zoomSpeed === 'number')
-  )
-}
-
-// Parses/validates a persisted lookHistory blob (see the hydrate effect in SwirlScreen, right after
-// pushHistory) — returns [] rather than throwing for anything unreadable (corrupt JSON, a shape from
-// some future/rolled-back version, garbage), the same "never let bad storage crash the app" contract
-// mergePersistedSettings holds in useSwirlSettings.tsx. Slicing to MAX_LOOK_HISTORY here too, not just
-// on every future push, covers a blob written by a since-lowered cap.
-function sanitizeLookHistory(rawValue: string): LookHistoryEntry[] {
-  try {
-    const parsed: unknown = JSON.parse(rawValue)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(isValidLookHistoryEntry).slice(-MAX_LOOK_HISTORY)
-  } catch {
-    return []
-  }
-}
 
 // Picks up to `count` distinct random entries out of `items`, without replacement — used by
 // tweakLook (SwirlScreen) to choose which of rerollUnits' 12 look units a forward tap/long-press rerolls.
@@ -337,126 +213,21 @@ function pickRandomDistinct<T>(items: T[], count: number): T[] {
 }
 
 export default function SwirlScreen() {
-  const { settings, resetSettings, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setTriggerStackExpanded, setZoomSpeed } = useSwirlSettings()
+  const { settings, resetSettings, setBackgroundCycleSpeed, setDashStyle, setForegroundCycleSpeed, setGestureTarget, setGravity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
   const { medium, notification, selection } = useVibration()
 
   // The transport row's back/forward FABs (see OnScreenControls) — and every direct on-canvas "hot
   // key" change too (Cycle shape/Cycle line type's tap and long-press pair, Add/Remove mirror and its
   // own long-press, Reverse gravity, Reset all settings) — share one lightweight undo stack, pushed onto
   // before touching a single setting, so "back" can step backward through any mix of them, in the order
-  // they actually happened. Scoped to a Look — the handful of fields any of those can touch — rather
-  // than the full SwirlSettings, so a "back" can never surprise-revert something it had no part in
-  // changing, like rotationSpeed a manual slider tweak just set, or the live audioReactiveEnabled mic
-  // state. Persisted (see the hydrate/save effect further down, right after pushHistory), capped at
-  // MAX_LOOK_HISTORY — a returning user can still step "back" through their last sitting's worth of
-  // exploration instead of the stack always starting empty. Defined this early — well before
-  // rerollUnits/randomize/tweakLook further down, which pushHistory also backs via pushHistoryAndReroll
-  // — because nearly
-  // every settings-mutating callback in this whole file now needs pushHistory in its own dependency
-  // array, and a useCallback's dependency array is evaluated eagerly on every render, so it has to
-  // already exist by the time any of them are *declared*, not just by the time they're actually called.
-  const captureLook = useCallback(
-    (): Look => ({
-      backgroundColors: settings.backgroundColors,
-      bounceFriction: settings.bounceFriction,
-      cropRadius: settings.cropRadius,
-      cropShaped: settings.cropShaped,
-      dashStyle: settings.dashStyle,
-      foregroundColors: settings.foregroundColors,
-      gravity: settings.gravity,
-      holeRadius: settings.holeRadius,
-      holeShaped: settings.holeShaped,
-      mirrorAlternateColors: settings.mirrorAlternateColors,
-      mirrorGap: settings.mirrorGap,
-      mirrorLines: settings.mirrorLines,
-      pattern: settings.pattern,
-      polygonSides: settings.polygonSides,
-      strokeWidth: settings.strokeWidth,
-      tightness: settings.tightness
-    }),
-    [settings]
-  )
-
-  // Only resetAllSettings' own pushHistory call passes this along — see ExtraResetFields' own comment
-  // for why every other push stays scoped to captureLook's narrower 16 fields.
-  const captureExtraResetFields = useCallback(
-    (): ExtraResetFields => ({
-      backgroundCycleSpeed: settings.backgroundCycleSpeed,
-      fixedSpacing: settings.fixedSpacing,
-      followSpeed: settings.followSpeed,
-      foregroundCycleSpeed: settings.foregroundCycleSpeed,
-      micSensitivity: settings.micSensitivity,
-      mirrorRotationSpeed: settings.mirrorRotationSpeed,
-      rotationSpeed: settings.rotationSpeed,
-      triggerStackExpanded: settings.triggerStackExpanded,
-      zoomSpeed: settings.zoomSpeed
-    }),
-    [settings]
-  )
-
-  const restoreLook = useCallback(
-    (look: LookHistoryEntry) => {
-      setBackgroundColors(look.backgroundColors)
-      setBounceFriction(look.bounceFriction)
-      setCropRadius(look.cropRadius)
-      setCropShaped(look.cropShaped)
-      setDashStyle(look.dashStyle)
-      setForegroundColors(look.foregroundColors)
-      setGravity(look.gravity)
-      setHoleRadius(look.holeRadius)
-      setHoleShaped(look.holeShaped)
-      setMirrorAlternateColors(look.mirrorAlternateColors)
-      setMirrorGap(look.mirrorGap)
-      setMirrorLines(look.mirrorLines)
-      setPattern(look.pattern)
-      setPolygonSides(look.polygonSides)
-      setStrokeWidth(look.strokeWidth)
-      setTightness(look.tightness)
-      // Only resetAllSettings' own entries carry these (see ExtraResetFields' own comment) — every
-      // other push (randomize, tweakLook, every single-field hot key) only ever captured the base
-      // Look above, so these read undefined there and are correctly left untouched, not reset to some
-      // default.
-      if (look.backgroundCycleSpeed !== undefined) setBackgroundCycleSpeed(look.backgroundCycleSpeed)
-      if (look.fixedSpacing !== undefined) setFixedSpacing(look.fixedSpacing)
-      if (look.followSpeed !== undefined) setFollowSpeed(look.followSpeed)
-      if (look.foregroundCycleSpeed !== undefined) setForegroundCycleSpeed(look.foregroundCycleSpeed)
-      if (look.micSensitivity !== undefined) setMicSensitivity(look.micSensitivity)
-      if (look.mirrorRotationSpeed !== undefined) setMirrorRotationSpeed(look.mirrorRotationSpeed)
-      if (look.rotationSpeed !== undefined) setRotationSpeed(look.rotationSpeed)
-      if (look.triggerStackExpanded !== undefined) setTriggerStackExpanded(look.triggerStackExpanded)
-      if (look.zoomSpeed !== undefined) setZoomSpeed(look.zoomSpeed)
-    },
-    [setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setTriggerStackExpanded, setZoomSpeed]
-  )
-
-  const [lookHistory, setLookHistory] = useState<LookHistoryEntry[]>([])
-  const backDisabled = lookHistory.length === 0
-
-  const goBack = useCallback(() => {
-    setLookHistory((prev) => {
-      if (prev.length === 0) return prev
-      restoreLook(prev[prev.length - 1])
-      return prev.slice(0, -1)
-    })
-  }, [restoreLook])
-
-  // The one primitive every undoable action in this file goes through — captures the look as it
-  // stands right now, before the caller's own mutation actually runs, so a single goBack always undoes
-  // exactly what that mutation is about to do. pushHistoryAndReroll (below, next to randomize/
-  // tweakLook, where it's used) is just this plus running a batch of reroll units in one go; every
-  // single-field hot key elsewhere in this file calls it directly instead.
-  // extra is only ever passed by resetAllSettings (its own captureExtraResetFields) — every other
-  // caller pushes a plain Look, same as before ExtraResetFields existed.
-  const pushHistory = useCallback(
-    (extra?: ExtraResetFields) => {
-      // Capped at MAX_LOOK_HISTORY, oldest entry dropped first — this is a big part of what makes
-      // persisting lookHistory to disk (see the hydrate/save effect below) reasonable at all: without a
-      // cap, a long sitting full of hot-key taps and randomizes would grow this array, and the blob
-      // written to storage on its heels, without bound.
-      setLookHistory((prev) => [...prev, { ...captureLook(), ...extra }].slice(-MAX_LOOK_HISTORY))
-    },
-    [captureLook]
-  )
+  // they actually happened. See useLookHistory.tsx for the full mechanism (captureLook/restoreLook,
+  // the persisted stack itself, hydrate/save effects). Called this early — well before rerollUnits/
+  // randomize/tweakLook further down, which pushHistory also backs via pushHistoryAndReroll — because
+  // nearly every settings-mutating callback in this whole file now needs pushHistory in its own
+  // dependency array, and a useCallback's dependency array is evaluated eagerly on every render, so it
+  // has to already exist by the time any of them are *declared*, not just by the time they're actually
+  // called.
+  const { backDisabled, captureExtraResetFields, goBack, pushHistory } = useLookHistory()
 
   // Tilt's own output — fed to whichever gesture target is currently active: pattern/mirror pull toward
   // tiltX/tiltY through useEpicenter's own tiltStrength (a real physics pull, friction-decayed the same
@@ -486,46 +257,41 @@ export default function SwirlScreen() {
   // mode is driving rotation instead of the rotationSpeed/zoomSpeed sliders: effectiveRotationSpeed's
   // audio-reactive branch is always non-negative on its own (mapped straight from treble via
   // mapAudioBand, whose own min is 0), so negating settings.rotationSpeed there has nothing to flip.
-  // PERSISTENT across the mic turning off and back on (see the hydrate/save effect further down,
-  // alongside lookHistory's own) — flipping direction is a deliberate choice about which way the art
-  // should spin, not a transient tool mode, so there's no reason turning the mic off and back on, or
-  // relaunching the app entirely, should silently discard it. Kept as its own local, self-persisted
-  // piece of state rather than folded into useSwirlSettings: unlike gestureTarget below, this is read
-  // continuously (every render feeds it straight into effectiveRotationSpeed), not just seeded once, so
-  // it has to stay real component state that setAudioRotationReversed can update synchronously — a
-  // context round-trip would only add a layer with nothing to gain here.
+  // PERSISTENT across the mic turning off and back on (see the hydrate/save effect below, the same
+  // shape useLookHistory.tsx's own lookHistory uses) — flipping direction is a deliberate choice about
+  // which way the art should spin, not a transient tool mode, so there's no reason turning the mic off
+  // and back on, or relaunching the app entirely, should silently discard it. Kept as its own local,
+  // self-persisted piece of state rather than folded into useSwirlSettings: unlike gestureTarget below,
+  // this is read continuously (every render feeds it straight into effectiveRotationSpeed), not just
+  // seeded once, so it has to stay real component state that setAudioRotationReversed can update
+  // synchronously — a context round-trip would only add a layer with nothing to gain here.
   const [audioRotationReversed, setAudioRotationReversed] = useState(false)
 
-  // Gates the two debounced save effects below (not this screen's own first paint — see their shared
-  // comment) so neither one fires its very first write with lookHistory/audioRotationReversed still at
-  // their freshly-mounted defaults, clobbering whatever a previous launch actually saved before the read
-  // below has even resolved.
-  const [sessionStateHydrated, setSessionStateHydrated] = useState(false)
+  // Gates the debounced save effect below (not this screen's own first paint — see its own comment) so
+  // it doesn't fire its very first write with audioRotationReversed still at its freshly-mounted
+  // default, clobbering whatever a previous launch actually saved before the read below has resolved.
+  const [audioRotationReversedHydrated, setAudioRotationReversedHydrated] = useState(false)
 
-  // Restores lookHistory/audioRotationReversed from a previous launch, and keeps saving them back as
-  // they change — the same "read once on mount, debounce writes" shape useSwirlSettings.tsx uses for
-  // everything else, just kept local to this component instead of routed through that context (see
-  // audioRotationReversed's and activeTargets' own comments above for why each of those specifically
-  // stayed here). Deliberately NOT gating this screen's own first paint on hydration finishing the way
-  // useSwirlSettings.tsx's `ready` does for settings — SwirlScreen already only mounts once settings are
-  // hydrated, and blocking it a second time here just to avoid the back button briefly reading disabled
-  // (or a mic-reactive spin briefly reading forward) for a frame isn't worth another splash-screen-style
-  // gate; nothing about the art itself flashes.
+  // Restores audioRotationReversed from a previous launch, and keeps saving it back as it changes —
+  // the same "read once on mount, debounce writes" shape useSwirlSettings.tsx (and useLookHistory.tsx's
+  // own lookHistory) uses, just kept local to this component instead of routed through that context
+  // (see audioRotationReversed's and activeTargets' own comments above for why each of those
+  // specifically stayed here). Deliberately NOT gating this screen's own first paint on hydration
+  // finishing the way useSwirlSettings.tsx's `ready` does for settings — SwirlScreen already only
+  // mounts once settings are hydrated, and blocking it a second time here just to avoid a mic-reactive
+  // spin briefly reading forward for a frame isn't worth another splash-screen-style gate; nothing
+  // about the art itself flashes.
   useEffect(() => {
     let isMounted = true
 
-    Promise.all([AsyncStorage.getItem(LOOK_HISTORY_STORAGE_KEY), AsyncStorage.getItem(AUDIO_ROTATION_REVERSED_STORAGE_KEY)])
-      .then(([rawLookHistory, rawAudioRotationReversed]) => {
+    AsyncStorage.getItem(AUDIO_ROTATION_REVERSED_STORAGE_KEY)
+      .then((rawAudioRotationReversed) => {
         if (!isMounted) return
-        if (rawLookHistory) {
-          const restored = sanitizeLookHistory(rawLookHistory)
-          if (restored.length > 0) setLookHistory(restored)
-        }
         if (rawAudioRotationReversed === 'true') setAudioRotationReversed(true)
-        setSessionStateHydrated(true)
+        setAudioRotationReversedHydrated(true)
       })
       .catch(() => {
-        if (isMounted) setSessionStateHydrated(true)
+        if (isMounted) setAudioRotationReversedHydrated(true)
       })
 
     return () => {
@@ -534,21 +300,9 @@ export default function SwirlScreen() {
   }, [])
 
   // Debounced the same way useSwirlSettings.tsx's own settings writer is (see PERSIST_DEBOUNCE_MS
-  // there) — pushHistory fires on every hot key, which could otherwise mean a write per key press.
+  // there) — flipDirections can fire this dozens of times in quick succession.
   useEffect(() => {
-    if (!sessionStateHydrated) return
-
-    const id = setTimeout(() => {
-      AsyncStorage.setItem(LOOK_HISTORY_STORAGE_KEY, JSON.stringify(lookHistory)).catch(() => {
-        // ignore persistence errors and keep app responsive
-      })
-    }, SESSION_STATE_PERSIST_DEBOUNCE_MS)
-
-    return () => clearTimeout(id)
-  }, [sessionStateHydrated, lookHistory])
-
-  useEffect(() => {
-    if (!sessionStateHydrated) return
+    if (!audioRotationReversedHydrated) return
 
     const id = setTimeout(() => {
       AsyncStorage.setItem(AUDIO_ROTATION_REVERSED_STORAGE_KEY, String(audioRotationReversed)).catch(() => {
@@ -557,7 +311,7 @@ export default function SwirlScreen() {
     }, SESSION_STATE_PERSIST_DEBOUNCE_MS)
 
     return () => clearTimeout(id)
-  }, [sessionStateHydrated, audioRotationReversed])
+  }, [audioRotationReversedHydrated, audioRotationReversed])
 
   // Which point the one-finger drag and two-finger twist currently apply to — see useEpicenter.ts.
   // A Set of exactly one entry, not a bare value (see GestureTarget's own comment in useEpicenter.ts
@@ -707,67 +461,14 @@ export default function SwirlScreen() {
     return () => clearTimeout(timer)
   }, [controlsVisible, activityEpoch, groupSheetVisible, gestureFanOpen])
 
-  // Audio-reactive mode REPLACES every one of these settings while it's on, rather than boosting
-  // them — a whole separate mode to play around in, not a flourish layered on top of whatever the
-  // sliders already say. Settings themselves are never written here — turning audio-reactive mode
-  // back off snaps every one of these right back to whatever the sliders were already set to, because
-  // they were never actually touched. Each of the three frequency bands drives a small cluster of
-  // properties that already relate to each other in the existing (non-audio) math, rather than one
-  // band each driving one lone, unrelated property:
-  //  - treble: rotation speed, and (via negation, see effectiveMirrorRotationSpeed) mirror rotation
-  //    speed — already a matched pair, the mirror has never had an independent speed of its own.
-  //  - mid: zoom/pulse speed, and tightness (see effectiveTightness below) — already coupled in
-  //    pulse's own duration formula further down, so driving both from the same band keeps that
-  //    formula internally consistent instead of only half of it reacting.
-  //  - bass: stroke width, and polygon/star/flower side count (see reactiveStrokeWidth/reactiveSides
-  //    below) — "thickness and complexity," both live/unthrottled since neither one feeds into any
-  //    duration math the way tightness does.
-  // loudness (not itself one of the three bands an FFT would call a "frequency" one, but the overall
-  // level across all of them) drives foreground/background cycle speed here, and crop/hole radius
-  // further down — the "how much is happening, and how much of it can you see" dial.
-  // mid/treble/loudness's speed-driving readings are quantized (see quantizeAudioSpeed) so their own
-  // frequent-but-throttled updates don't re-sync the underlying rate on every single reading.
+  // audioReactiveEnabled is still read directly off settings by name in a few places below
+  // (reactiveStrokeWidth/reactiveSides' own live per-frame reads, and the cropRadius/holeRadius/
+  // mirrorGap sync effects further down) — kept as its own local alias for exactly those, while the
+  // main "what does each slider effectively read while audio-reactive mode overrides it" computation
+  // itself lives in computeEffectiveSwirlValues (constants/effectiveSwirlValues.ts) — see that
+  // function's own comment for the full band-to-property mapping.
   const audioReactiveEnabled = settings.audioReactiveEnabled
-  // audioRotationReversed (see its own comment above) only ever flips this one band's sign — treble's
-  // own mapAudioBand output is always non-negative, so without it there'd be nothing for flipDirections
-  // to act on while the mic is driving rotation instead of the rotationSpeed slider. Quantized first,
-  // then signed, so the sign flip itself never lands mid-step and isn't part of what gets quantized.
-  // Speed-mode tilt no longer has a branch of its own here — it now commits straight into
-  // settings.rotationSpeed/mirrorRotationSpeed/zoomSpeed as it happens (see the tilt reaction above),
-  // so those settings are already correct while tilting and this only ever needs to choose between
-  // audio-reactive's own override and the plain persisted value, same as effectiveZoomSpeed already did.
-  const effectiveRotationSpeed = audioReactiveEnabled ? (audioRotationReversed ? -1 : 1) * quantizeAudioSpeed(mapAudioBand(treble, 0, MAX_ROTATION_SPEED), 0, MAX_ROTATION_SPEED) : settings.rotationSpeed
-  const effectiveMirrorRotationSpeed = audioReactiveEnabled ? -effectiveRotationSpeed : settings.mirrorRotationSpeed
-  const effectiveZoomSpeed = audioReactiveEnabled ? quantizeAudioSpeed(mapAudioBand(mid, 0, MAX_ZOOM_SPEED), 0, MAX_ZOOM_SPEED) : settings.zoomSpeed
-  // Paired with zoom/pulse speed above rather than off on its own: tightness and zoom speed already
-  // feed the exact same ripple-spacing formula below (pulse's own duration is
-  // rippleModulus(rippleSpacing(..., tightness), ...) times zoom speed), so driving both from mid
-  // keeps that formula internally consistent instead of only half of it reacting. This has to be a
-  // plain, throttled number rather than a live per-frame SharedValue read the way reactiveStrokeWidth
-  // reads bass — it feeds pulse's duration calculation below, and that calculation already only
-  // reruns on render, not every animation frame (retuning it that often would just be wasted work:
-  // useLoopingProgress's own per-frame accumulator already reads whatever duration is current each
-  // frame with no restart needed, see its own comment).
-  const effectiveTightness = audioReactiveEnabled ? mapAudioBand(mid, MIN_TIGHTNESS, MAX_TIGHTNESS) : settings.tightness
-  const effectiveForegroundCycleSpeed = audioReactiveEnabled ? quantizeAudioSpeed(mapAudioBand(loudness, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED), MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) : settings.foregroundCycleSpeed
-  const effectiveBackgroundCycleSpeed = audioReactiveEnabled ? effectiveForegroundCycleSpeed : settings.backgroundCycleSpeed
-  // Same loudness reading driving cycle speed above also opens up the crop/hole/mirror gap — quiet
-  // stretches pull the pattern back to a small, solid, unhollowed, seamless shape (near
-  // MIN_CROP_RADIUS, no hole, no gap), loud ones blow it open toward full size with a hollowed-out,
-  // visibly-separated-wedge center (each toward their own MAX — holeRadius/mirrorGap capped at
-  // MAX_REACTIVE_HOLE_RADIUS/MAX_REACTIVE_MIRROR_GAP respectively, see their own comments on why
-  // those are short of MAX_HOLE_RADIUS/MAX_MIRROR_GAP), so a loud hit visibly "punches through and
-  // pulls apart" rather than just spinning/cycling faster. No
-  // quantizeAudioSpeed here — that exists only to stop loudness's throttled-but-frequent updates from
-  // re-syncing an in-flight useLoopingProgress rate on every single reading (see
-  // effectiveForegroundCycleSpeed's own comment); cropRadius/holeRadius/mirrorGap are plain
-  // point-in-time targets, not rates — nothing about a "rate" applies to them, but they still need
-  // their own explicit tween (see
-  // AUDIO_SHAPE_TWEEN_MS and the cropRadius/holeRadius/mirrorGap SharedValues' own sync effects
-  // further down) since, unlike a rate, nothing else is already animating them frame to frame.
-  const effectiveCropRadius = audioReactiveEnabled ? mapAudioBand(loudness, MIN_CROP_RADIUS, MAX_CROP_RADIUS) : settings.cropRadius
-  const effectiveHoleRadius = audioReactiveEnabled ? mapAudioBand(loudness, MIN_HOLE_RADIUS, MAX_REACTIVE_HOLE_RADIUS) : settings.holeRadius
-  const effectiveMirrorGap = audioReactiveEnabled ? mapAudioBand(loudness, MIN_MIRROR_GAP, MAX_REACTIVE_MIRROR_GAP) : settings.mirrorGap
+  const { effectiveRotationSpeed, effectiveMirrorRotationSpeed, effectiveZoomSpeed, effectiveTightness, effectiveForegroundCycleSpeed, effectiveBackgroundCycleSpeed, effectiveCropRadius, effectiveHoleRadius, effectiveMirrorGap } = computeEffectiveSwirlValues(settings, audioRotationReversed, treble, mid, loudness)
 
   // No manual-twist overlay anymore — the twist/rotation gesture means Focus now (density/mirror
   // lines, see rotationGesture's own comment), not "spin the pattern," so baseRotation is the whole
@@ -1158,8 +859,8 @@ export default function SwirlScreen() {
   // motion. Feeds both the physics (via useEpicenter below) and the marker's own on-screen position (see
   // SpiralHost's gravityCenterX/Y prop further down), so what you see is always exactly what pattern/
   // mirror are actually being pulled toward.
-  const effectiveGravityCenterX = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.x.value : withSpring(tiltX.value, { damping: 20, stiffness: 90 })))
-  const effectiveGravityCenterY = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.y.value : withSpring(tiltY.value, { damping: 20, stiffness: 90 })))
+  const effectiveGravityCenterX = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.x.value : withSpring(tiltX.value, TILT_EASE_SPRING)))
+  const effectiveGravityCenterY = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.y.value : withSpring(tiltY.value, TILT_EASE_SPRING)))
 
   const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, longPressGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, medium, settings.mirrorLines, bounceFriction, gravity, followSpeed, effectiveGravityCenterX, effectiveGravityCenterY, activeTargets, gravityHandle, isDraggingGravity, gravityManualControl, stopAllSpeeds, applySpeedRelease, baseRotation, mirrorProgress, mirrorRotationSign, speedTargetsMirror, tiltX, tiltY, tiltEnabledShared)
 
@@ -1663,98 +1364,13 @@ export default function SwirlScreen() {
     medium()
   }, [activeTargets, medium, setMirrorRotationSpeed, setRotationSpeed, setZoomSpeed, settings.mirrorRotationSpeed, settings.rotationSpeed, settings.zoomSpeed])
 
-  // Broad: everything that's purely "what does this look like" gets rerolled — colors, pattern,
-  // sides/points/petals, dash style, mirror count, its wedge gap, and its alternating-colors toggle,
-  // tightness, stroke width, crop/hole radius, whether either traces the pattern's own shape, and
-  // bounce friction/gravity strength too. Left out on purpose: rotation/zoom/mirror-rotation/
-  // color-cycle speed (deliberate tuning, not a look-based surprise — see flipDirections for the one
-  // randomize-adjacent thing speed does get), shake/tilt/mic (behavioral device-capability toggles,
-  // never touched by this), fixed spacing (a layout-precision preference, not a look to reroll), and
-  // showLabels (an interface preference, not part of the art either). Doesn't recenter the epicentre,
-  // the gravity handle, or touch activeTargets — those are session-only, position-preserving state,
-  // not persisted look settings; that's the gravity group's own Reset button's job instead (see
-  // resetGravityPosition), same "Randomize touches persisted values, Reset also squares up position"
-  // split every other group's own Randomize/Reset pair already keeps.
-  //
-  // Broken into one reroll function per conceptual "look" unit, rather than one flat block, so both
-  // randomize (below — rerolls every unit) and the forward transport FAB's tweak (goForward/
-  // goForwardBatch further down — rerolls just one or a few units at a time) share the exact same
-  // per-field random logic instead of two copies that can drift apart.
-  //
-  // audioDriven units are filtered out entirely while audio-reactive mode is on: mirrorGap, tightness,
-  // strokeWidth, cropRadius, and holeRadius are each already live-overridden every frame by one of the
-  // audio bands then (see effectiveTightness/effectiveCropRadius/effectiveHoleRadius/effectiveMirrorGap
-  // and reactiveStrokeWidth above), so rerolling the underlying setting would be invisible until mic
-  // mode is switched back off — a wasted reroll, not a surprise. polygonSides is the same story but
-  // only for patterns that have it (reactiveSides), so it's skipped inline within the pattern unit
-  // instead of being pulled out as its own audioDriven entry.
-  // Each unit also carries which top-sheet group it belongs to — see ControlGroupTopSheetContent's
-  // per-group "Randomize" buttons (wired through rerollUnitsByGroup below), which reroll only one
-  // group's units instead of everything randomize() below touches.
-  const { rerollUnits, rerollUnitsByGroup } = useMemo<{ rerollUnits: (() => void)[]; rerollUnitsByGroup: Record<ControlGroup, (() => void)[]> }>(() => {
-    const randomInRange = (min: number, max: number) => min + Math.random() * (max - min)
-    const randomInt = (min: number, max: number) => Math.floor(randomInRange(min, max + 1))
-    const audioReactive = settings.audioReactiveEnabled
-
-    const units: { group: ControlGroup; audioDriven: boolean; reroll: () => void }[] = [
-      // Background is derived from the foreground's own contrast, not independently randomized, so
-      // both setters move together as one unit.
-      {
-        group: 'colors',
-        audioDriven: false,
-        reroll: () => {
-          const foregroundCount = 1 + Math.floor(Math.random() * RANDOMIZE_MAX_FOREGROUND_COLORS)
-          const foregroundColors = Array.from({ length: foregroundCount }, () => randomHexColor())
-          const backgroundColor = isDarkColor(foregroundColors[0]) ? '#FFFFFF' : '#000000'
-          setForegroundColors(foregroundColors)
-          setBackgroundColors([backgroundColor])
-        }
-      },
-      // Only worth rerolling sides when it'll actually be visible — Polygon, Star, and Flower are the
-      // only patterns that read it, so randomizing it for anything else would just be an invisible
-      // change waiting to surprise someone later, whenever they happen to switch to one of those
-      // manually — same reasoning extends to skipping it outright while audio-reactive (see this
-      // block's own comment above). Bundled with pattern itself as one unit either way, since pattern
-      // itself is never audio-driven and still deserves its own reroll regardless of mic mode.
-      {
-        group: 'pattern',
-        audioDriven: false,
-        reroll: () => {
-          const nextPattern = PATTERN_ORDER[Math.floor(Math.random() * PATTERN_ORDER.length)]
-          setPattern(nextPattern)
-          if (!audioReactive && hasPolygonSides(nextPattern)) {
-            setPolygonSides(randomInt(MIN_POLYGON_SIDES, MAX_POLYGON_SIDES))
-          }
-        }
-      },
-      { group: 'line', audioDriven: false, reroll: () => setDashStyle(DASH_STYLE_ORDER[Math.floor(Math.random() * DASH_STYLE_ORDER.length)]) },
-      { group: 'mirror', audioDriven: false, reroll: () => setMirrorLines(randomInt(MIN_MIRROR_LINES, MAX_MIRROR_LINES)) },
-      { group: 'mirror', audioDriven: true, reroll: () => setMirrorGap(randomInRange(MIN_MIRROR_GAP, MAX_MIRROR_GAP)) },
-      { group: 'mirror', audioDriven: false, reroll: () => setMirrorAlternateColors(Math.random() < 0.5) },
-      { group: 'line', audioDriven: true, reroll: () => setTightness(randomInRange(MIN_TIGHTNESS, MAX_TIGHTNESS)) },
-      { group: 'line', audioDriven: true, reroll: () => setStrokeWidth(randomInRange(MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)) },
-      { group: 'pattern', audioDriven: true, reroll: () => setCropRadius(randomInRange(MIN_CROP_RADIUS, MAX_CROP_RADIUS)) },
-      { group: 'pattern', audioDriven: false, reroll: () => setCropShaped(Math.random() < 0.5) },
-      { group: 'pattern', audioDriven: true, reroll: () => setHoleRadius(randomInRange(MIN_HOLE_RADIUS, MAX_HOLE_RADIUS)) },
-      { group: 'pattern', audioDriven: false, reroll: () => setHoleShaped(Math.random() < 0.5) },
-      // Neither is audio-driven — audio-reactive mode overrides stroke width/tightness/crop/hole
-      // radius/mirror gap (see the comment above), not the physics sliders.
-      { group: 'gravity', audioDriven: false, reroll: () => setBounceFriction(randomInRange(MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION)) },
-      { group: 'gravity', audioDriven: false, reroll: () => setGravity(randomInRange(MIN_GRAVITY, MAX_GRAVITY)) }
-    ]
-
-    const filteredUnits = units.filter((unit) => !audioReactive || !unit.audioDriven)
-    const rerollUnitsByGroup: Record<ControlGroup, (() => void)[]> = {
-      colors: filteredUnits.filter((unit) => unit.group === 'colors').map((unit) => unit.reroll),
-      gravity: filteredUnits.filter((unit) => unit.group === 'gravity').map((unit) => unit.reroll),
-      line: filteredUnits.filter((unit) => unit.group === 'line').map((unit) => unit.reroll),
-      mirror: filteredUnits.filter((unit) => unit.group === 'mirror').map((unit) => unit.reroll),
-      pattern: filteredUnits.filter((unit) => unit.group === 'pattern').map((unit) => unit.reroll),
-      settings: []
-    }
-
-    return { rerollUnits: filteredUnits.map((unit) => unit.reroll), rerollUnitsByGroup }
-  }, [settings.audioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setPattern, setPolygonSides, setStrokeWidth, setTightness])
+  // Broad: everything that's purely "what does this look like" gets rerolled — see useRerollUnits.tsx
+  // for the full field list and per-group breakdown. Broken into one reroll function per conceptual
+  // "look" unit there, rather than one flat block, so both randomize (below — rerolls every unit) and
+  // the forward transport FAB's tweak (goForward/goForwardBatch further down — rerolls just one or a
+  // few units at a time) share the exact same per-field random logic instead of two copies that can
+  // drift apart.
+  const { rerollUnits, rerollUnitsByGroup } = useRerollUnits()
 
   // pushHistoryAndReroll is captureLook/pushHistory's own batch-of-setters cousin — see pushHistory's
   // own comment (moved up near the top of this component, alongside captureLook/restoreLook/

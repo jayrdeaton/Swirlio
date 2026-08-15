@@ -1,3 +1,5 @@
+import { hexToRgb } from '@/constants/colorBlend'
+
 // react-native-paper's stock disabled-FAB colors come from the theme's neutral surface palette,
 // which for this app's zero-chroma monochrome seed resolves to a near-white gray rather than true
 // black/white — at the library's default 12%/38% alpha, that's barely visible against a light
@@ -33,10 +35,7 @@ export const VISIBLE_HAIRLINE_WIDTH = 1
 export const TOGGLE_OFF_BLUR_TINT_OPACITY = 0.6
 
 export function withAlpha(hexColor: string, alpha: number): string {
-  const clean = hexColor.replace('#', '')
-  const r = parseInt(clean.substring(0, 2), 16)
-  const g = parseInt(clean.substring(2, 4), 16)
-  const b = parseInt(clean.substring(4, 6), 16)
+  const { r, g, b } = hexToRgb(hexColor)
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 

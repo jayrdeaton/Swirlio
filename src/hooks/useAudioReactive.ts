@@ -3,10 +3,11 @@ import { Platform } from 'react-native'
 import { AudioContext, AudioManager, AudioRecorder } from 'react-native-audio-api'
 import { useSharedValue } from 'react-native-reanimated'
 
+import { BASS_ALPHA, RECORDER_SAMPLE_RATE, rmsToUnit, TREBLE_ALPHA } from '@/constants/audioDsp'
+
 // Samples per onAudioReady callback, at RECORDER_SAMPLE_RATE — ~93ms/reading, small enough to feel
 // responsive without crossing the JS bridge so often it becomes its own overhead.
 const RECORDER_BUFFER_LENGTH = 4096
-const RECORDER_SAMPLE_RATE = 44100
 
 // This hook used to run the recorder's audio through AudioContext -> RecorderAdapterNode ->
 // AnalyserNode and read FFT bins from getByteFrequencyData, matching the library's own visualizer
@@ -20,32 +21,9 @@ const RECORDER_SAMPLE_RATE = 44100
 // it either, and introduced its own native crash (`.start()` throwing on an internal default
 // argument). Computing bass/mid/treble/loudness directly from onAudioReady's raw PCM — a data source
 // that's been reliable through every one of those attempts — sidesteps AnalyserNode entirely instead
-// of continuing to chase it.
-//
-// The band split is three simple one-pole low-pass filters (RC-style exponential moving averages)
-// run directly over the raw samples, not a real FFT — cheap enough to run in plain JS on every
-// buffer, and "cheap DSP that's obviously bass/mid/treble" is all a background visual pulse needs.
-// alpha = 1 - exp(-2*pi*fc/sampleRate) is the standard one-pole coefficient for a given cutoff.
-function onePoleAlpha(cutoffHz: number): number {
-  return 1 - Math.exp((-2 * Math.PI * cutoffHz) / RECORDER_SAMPLE_RATE)
-}
-const BASS_ALPHA = onePoleAlpha(250)
-const TREBLE_ALPHA = onePoleAlpha(2000)
-
-// RMS amplitude (0..1 scale, since PCM samples are -1..1) doesn't itself read as "how loud does this
-// feel" — normal speech into a phone mic barely nudges it (see the raw onAudioReady maxAbsSample
-// readings this was calibrated against: ~0.01-0.03, not anywhere near 1). Converting to dB and
-// normalizing across a plausible quiet-to-loud range is the same shape of correction
-// getByteFrequencyData's own minDecibels/maxDecibels used to apply for free. Untestable in this
-// environment (no way to feed real mic input here) — a first-pass calibration meant to be retuned by
-// ear on a real device, the same as every gesture-derived scale constant in index.tsx.
-const MIN_DB = -60
-const MAX_DB = -10
-function rmsToUnit(rms: number): number {
-  if (rms <= 0) return 0
-  const db = 20 * Math.log10(rms)
-  return Math.min(1, Math.max(0, (db - MIN_DB) / (MAX_DB - MIN_DB)))
-}
+// of continuing to chase it. The one-pole band-split filters and rmsToUnit's own dB normalization
+// that turn those raw samples into bass/mid/treble/loudness live in constants/audioDsp.ts — pure math,
+// split out the same way every other DSP/render helper elsewhere in this app is.
 
 // mid/treble/loudness feed index.tsx's effectiveRotationSpeed/effectiveZoomSpeed/effectiveCycleSpeed,
 // which in turn re-render the whole component every time they change (they're plain numbers, not

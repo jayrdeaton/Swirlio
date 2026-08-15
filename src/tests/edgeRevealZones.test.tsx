@@ -53,9 +53,18 @@ describe('EdgeRevealZones', () => {
     const expanded = await render(<EdgeRevealZones active={true} onReveal={jest.fn()} triggerStackExpanded={true} />)
     const collapsed = await render(<EdgeRevealZones active={true} onReveal={jest.fn()} triggerStackExpanded={false} />)
 
-    const expandedHeight = expanded.getByTestId('edge-reveal-top-right').props.style.flat().find((s: { height?: number }) => s?.height !== undefined).height
-    const collapsedHeight = collapsed.getByTestId('edge-reveal-top-right').props.style.flat().find((s: { height?: number }) => s?.height !== undefined).height
-    const topLeftHeight = expanded.getByTestId('edge-reveal-top-left').props.style.flat().find((s: { height?: number }) => s?.height !== undefined).height
+    const expandedHeight = expanded
+      .getByTestId('edge-reveal-top-right')
+      .props.style.flat()
+      .find((s: { height?: number }) => s?.height !== undefined).height
+    const collapsedHeight = collapsed
+      .getByTestId('edge-reveal-top-right')
+      .props.style.flat()
+      .find((s: { height?: number }) => s?.height !== undefined).height
+    const topLeftHeight = expanded
+      .getByTestId('edge-reveal-top-left')
+      .props.style.flat()
+      .find((s: { height?: number }) => s?.height !== undefined).height
 
     expect(collapsedHeight).toBe(topLeftHeight)
     expect(collapsedHeight).toBeLessThan(expandedHeight)

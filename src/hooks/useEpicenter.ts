@@ -209,6 +209,16 @@ export function useEpicenter(
   // see onUpdate/onEnd's own comment for why the two need different treatment here.
   const dragCopyIndex = useSharedValue(0)
 
+  // Where the mirror anchor currently sits, in real screen pixels — the pivot every wedge boundary is
+  // drawn around (see kaleidoscope.ts). Shared by patternClamp/patternBounceBoundary below (which call
+  // it mirrorOriginX/Y, matching the clamp math's own naming) and by glideTargetsTo/panGesture's
+  // onUpdate further down (which call it wedgeOriginX/Y — same value, just the name that reads clearer
+  // for wedge-pivot math there) — all four independently needed this exact computation.
+  const mirrorOriginScreen = () => {
+    'worklet'
+    return { x: centerX + mirror.x.value * width, y: centerY + mirror.y.value * height }
+  }
+
   // The pattern epicentre's own clamp: the only boundary is the real screen rectangle, evaluated
   // against wherever the drag would actually *appear* for whichever wedge was grabbed — not some
   // abstract distance from center, and not a limit on which wedge or direction the drag can move
@@ -222,8 +232,7 @@ export function useEpicenter(
   // boundary is a real, visible wall; landing exactly on it is the point.
   const patternClamp: DragClamp = (nextX, nextY) => {
     'worklet'
-    const mirrorOriginX = centerX + mirror.x.value * width
-    const mirrorOriginY = centerY + mirror.y.value * height
+    const { x: mirrorOriginX, y: mirrorOriginY } = mirrorOriginScreen()
     const originX = centerX + nextX * width
     const originY = centerY + nextY * height
     const visible = wedgeVector(originX - mirrorOriginX, originY - mirrorOriginY, dragCopyIndex.value, wedgeAngleDeg)
@@ -250,8 +259,7 @@ export function useEpicenter(
   // point, so it transforms exactly the way inverseWedgeVector already documents.
   const patternBounceBoundary: BounceBoundary = (nextX, nextY, velocityX, velocityY) => {
     'worklet'
-    const mirrorOriginX = centerX + mirror.x.value * width
-    const mirrorOriginY = centerY + mirror.y.value * height
+    const { x: mirrorOriginX, y: mirrorOriginY } = mirrorOriginScreen()
     const originX = centerX + nextX * width
     const originY = centerY + nextY * height
     const visiblePosition = wedgeVector(originX - mirrorOriginX, originY - mirrorOriginY, dragCopyIndex.value, wedgeAngleDeg)
@@ -297,8 +305,7 @@ export function useEpicenter(
     // mirror anchor, not the fixed screen center — once that anchor's been dragged away from it.
     // Settled before any of the glides below, which need it to correct pattern's own touch position
     // back into wedge-0's own space.
-    const wedgeOriginX = centerX + mirror.x.value * width
-    const wedgeOriginY = centerY + mirror.y.value * height
+    const { x: wedgeOriginX, y: wedgeOriginY } = mirrorOriginScreen()
     // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
     dragCopyIndex.value = copyCount > 1 ? wedgeIndexAtPoint(wedgeOriginX, wedgeOriginY, x, y, wedgeAngleDeg, copyCount) : 0
 
@@ -327,6 +334,20 @@ export function useEpicenter(
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       gravityManualControl.value = true
     }
+  }
+
+  // Shared by every branch of releaseTargets below — gravity/pattern/mirror all decide "close enough
+  // and slow enough to click home" the same way, just measured against a different point/target.
+  // targetX/Y default to (0, 0), matching gravity's own release (nothing else for the gravity source
+  // itself to fall back toward but the origin) and recenter()'s own identical default.
+  const trySnapOrBounce = (point: DragPointPhysics, vx: number, vy: number, targetX = 0, targetY = 0): boolean => {
+    'worklet'
+    if (Math.hypot(point.x.value - targetX, point.y.value - targetY) < SNAP_DISTANCE && Math.hypot(vx, vy) < SNAP_VELOCITY) {
+      point.recenter(targetX, targetY)
+      return true
+    }
+    point.startBounce(vx, vy)
+    return false
   }
 
   // Shared by panGesture's onEnd below and longPressGesture's own onEnd further down — the same
@@ -363,14 +384,7 @@ export function useEpicenter(
       // this handoff is safe to do instantly: it eases via withSpring rather than teleporting.
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       gravityManualControl.value = false
-      const vx = velocityX / width
-      const vy = velocityY / height
-      if (Math.hypot(gravityHandle.x.value, gravityHandle.y.value) < SNAP_DISTANCE && Math.hypot(vx, vy) < SNAP_VELOCITY) {
-        gravityHandle.recenter()
-        anySnapped = true
-      } else {
-        gravityHandle.startBounce(vx, vy)
-      }
+      if (trySnapOrBounce(gravityHandle, velocityX / width, velocityY / height)) anySnapped = true
     }
 
     // Snap-vs-bounce is decided independently per active point (see the raw-vs-corrected split
@@ -385,27 +399,11 @@ export function useEpicenter(
     // release that was already basically there.
     if (targetsPattern) {
       const releaseVelocity = inverseWedgeVector(velocityX, velocityY, dragCopyIndex.value, wedgeAngleDeg)
-      const vx = releaseVelocity.dx / width
-      const vy = releaseVelocity.dy / height
-      const distanceFromGravity = Math.hypot(pattern.x.value - gravityCenterX.value, pattern.y.value - gravityCenterY.value)
-      if (distanceFromGravity < SNAP_DISTANCE && Math.hypot(vx, vy) < SNAP_VELOCITY) {
-        pattern.recenter(gravityCenterX.value, gravityCenterY.value)
-        anySnapped = true
-      } else {
-        pattern.startBounce(vx, vy)
-      }
+      if (trySnapOrBounce(pattern, releaseVelocity.dx / width, releaseVelocity.dy / height, gravityCenterX.value, gravityCenterY.value)) anySnapped = true
     }
 
     if (targetsMirror) {
-      const vx = velocityX / width
-      const vy = velocityY / height
-      const distanceFromGravity = Math.hypot(mirror.x.value - gravityCenterX.value, mirror.y.value - gravityCenterY.value)
-      if (distanceFromGravity < SNAP_DISTANCE && Math.hypot(vx, vy) < SNAP_VELOCITY) {
-        mirror.recenter(gravityCenterX.value, gravityCenterY.value)
-        anySnapped = true
-      } else {
-        mirror.startBounce(vx, vy)
-      }
+      if (trySnapOrBounce(mirror, velocityX / width, velocityY / height, gravityCenterX.value, gravityCenterY.value)) anySnapped = true
     }
 
     if (anySnapped) {
@@ -471,8 +469,7 @@ export function useEpicenter(
     .onUpdate((event) => {
       // Same wedge pivot as onStart above, re-read fresh every frame in case mirror is *also* being
       // dragged simultaneously and has itself moved since the last one.
-      const wedgeOriginX = centerX + mirror.x.value * width
-      const wedgeOriginY = centerY + mirror.y.value * height
+      const { x: wedgeOriginX, y: wedgeOriginY } = mirrorOriginScreen()
       // The same glideTo as onStart, called again on every frame — see its own comment in
       // useDragPointPhysics.ts for why re-targeting the spring at the live touch position, rather than
       // jumping straight to it, is what keeps onStart's own catch-up actually visible instead of

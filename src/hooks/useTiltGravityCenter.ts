@@ -8,6 +8,9 @@ import { tiltToScreenAxes } from '@/constants/tiltOrientation'
 
 const UPDATE_INTERVAL_MS = 100
 const NORMALIZE_RADIANS = Math.PI / 4
+// Shared with index.tsx's own effectiveGravityCenterX/Y, which deliberately eases with this exact
+// same feel on a manual-to-tilt handoff — see that call site's own comment for why.
+export const TILT_EASE_SPRING = { damping: 20, stiffness: 90 } as const
 
 // Tilt's own raw signal, in two shapes: gravityCenterX/Y (the eased, screen-edge-scaled pair) is what
 // index.tsx/useEpicenter.ts feed into whichever draggable point (pattern epicentre, mirror anchor,
@@ -83,13 +86,13 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
   useAnimatedReaction(
     () => rawX.value,
     (value) => {
-      gravityCenterX.value = withSpring(value, { damping: 20, stiffness: 90 })
+      gravityCenterX.value = withSpring(value, TILT_EASE_SPRING)
     }
   )
   useAnimatedReaction(
     () => rawY.value,
     (value) => {
-      gravityCenterY.value = withSpring(value, { damping: 20, stiffness: 90 })
+      gravityCenterY.value = withSpring(value, TILT_EASE_SPRING)
     }
   )
 

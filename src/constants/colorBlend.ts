@@ -1,4 +1,4 @@
-function hexToRgb(hex: string) {
+export function hexToRgb(hex: string) {
   'worklet'
   const clean = hex.replace('#', '')
   return {

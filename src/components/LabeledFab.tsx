@@ -18,8 +18,8 @@ export const FAB_HEIGHT_MEDIUM = 56
 // FAB/utils.ts's getFabStyle: borderRadius is roundness * 3 for a small FAB, * 4 for medium — mirrored
 // here for the same reason as the sizes above, so a blur backdrop clips to the exact same rounded
 // shape as the FAB sitting on top of it, not a guessed circle.
-const BORDER_RADIUS_MULTIPLIER_SMALL = 3
-const BORDER_RADIUS_MULTIPLIER_MEDIUM = 4
+export const BORDER_RADIUS_MULTIPLIER_SMALL = 3
+export const BORDER_RADIUS_MULTIPLIER_MEDIUM = 4
 
 type LabeledFabColorProps =
   // The common case — an on/off state, colored via useToggleFabAppearance below.
