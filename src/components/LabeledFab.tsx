@@ -12,7 +12,7 @@ import { useToggleFabAppearance } from './useToggleFabAppearance'
 
 const LABEL_MAX_WIDTH = 72
 // react-native-paper's own v3 FAB sizing (FAB/utils.ts's v3SmallSize/v3MediumSize) — not configurable
-// from here, so mirrored as constants rather than guessed, for FabDivider to match exactly.
+// from here, so mirrored as constants rather than guessed.
 export const FAB_HEIGHT_SMALL = 40
 export const FAB_HEIGHT_MEDIUM = 56
 // FAB/utils.ts's getFabStyle: borderRadius is roundness * 3 for a small FAB, * 4 for medium — mirrored
@@ -96,9 +96,18 @@ export function LabeledFab({ icon, label, active, colorOverride, disabled = fals
         {showBlurBackdrop && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, backdropStyle]} />}
         <FAB testID={testID} size={size} icon={resolveIcon(icon)} disabled={disabled} accessibilityLabel={label} accessibilityState={{ disabled, selected: active }} color={iconColor} style={fabStyle} theme={disabledFabTheme(colors.primary)} onPress={onPress} />
       </View>
+      {/* One word per line via an explicit break, rather than letting a long caption wrap on its
+      own: a browser sizes an auto-width block to its max-width whenever IT has to wrap the text
+      itself (CSS's fit-content clamps toward max-width, not toward the width of the wrapped line
+      it actually produces), so any caption over LABEL_MAX_WIDTH — "Gravity marker", "Alternate
+      colors", "Shake to randomize" — ended up in a column notably wider than every single-word
+      neighbour's, throwing off FabRow's otherwise-even gaps (see the FAB that follows it). Pre-
+      breaking at each word sidesteps that: every word here is short enough to render on its own
+      line without wrapping, so the box always shrinks to its widest *word*, which stays under the
+      icon's own width for every caption currently in the app. */}
       {settings.showLabels && (
         <Text variant='labelSmall' style={styles.label}>
-          {label}
+          {label.split(' ').join('\n')}
         </Text>
       )}
     </View>

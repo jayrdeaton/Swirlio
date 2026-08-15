@@ -18,6 +18,14 @@ type GlassToggleFabProps = {
   // Jest mock deriving one from the icon prop) can tell apart from any other icon's. Every caller
   // should pass its own explicit testID rather than relying on one being derived.
   testID?: string
+  // Belt-and-suspenders for callers that fade this FAB out via an ancestor's pointerEvents='none'
+  // (see OnScreenControls' trigger-stack-siblings): react-native-web's pointerEvents polyfill only
+  // forces pointer-events:none one DOM level deep (a `parent>* {...}` rule), and the underlying FAB
+  // renders several nodes deeper than that with its own explicit pointer-events, which resets the
+  // cascade — so a merely-faded-out FAB stays genuinely clickable through its own invisible pixels
+  // without this. Threaded straight to the real FAB below, whose disabled handling is a proper
+  // component-level check, not a CSS hack.
+  disabled?: boolean
 }
 
 const FAB_DIAMETER = 40
@@ -30,7 +38,7 @@ const FAB_DIAMETER = 40
 // Only mounted for the off state: the "on" fill is fully opaque colors.primary, which already
 // completely occludes anything blurred behind it, so blurring there would be pure wasted compositor
 // work with zero visible effect.
-export function GlassToggleFab({ icon, active, onPress, testID }: GlassToggleFabProps) {
+export function GlassToggleFab({ icon, active, onPress, testID, disabled }: GlassToggleFabProps) {
   const { roundness } = useTheme()
   const { backgroundColor, iconColor, borderColor, blurEnabled, tintOpacity } = useToggleFabAppearance(active)
   // getFabStyle (react-native-paper's FAB/utils.ts, not exported): a small FAB's borderRadius is
@@ -49,7 +57,7 @@ export function GlassToggleFab({ icon, active, onPress, testID }: GlassToggleFab
       couple pixels taller than the BlurView backdrop above, both sharing the same top edge, so a
       sliver of whatever's behind both shows through at the bottom. border-box is what makes this
       explicit height/width actually include the border instead of adding to it. */}
-      <FAB testID={testID} icon={resolveIcon(icon)} size='small' color={iconColor} style={fabStyle} onPress={onPress} />
+      <FAB testID={testID} icon={resolveIcon(icon)} size='small' color={iconColor} style={fabStyle} onPress={onPress} disabled={disabled} />
     </View>
   )
 }

@@ -2,37 +2,44 @@ import React from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-// Sized to actually cover where the real (currently invisible) sliders/FABs render, plus a little
-// slop — not an arbitrary edge margin. These used to be much thinner, on the theory that a wide zone
-// was what let ordinary color-swap taps accidentally reveal the controls; measuring the real
-// controls' own footprints showed that reproduction was actually landing squarely on where the
-// tightness slider itself renders (12px inset + 44px touch width), so shrinking below that just broke
-// hovering over the real slider position without fixing anything — the actual cause of random reveals
-// was a since-removed passive reveal timer (see revealControls in index.tsx), not zone size. A tap
-// that lands on a control's own footprint revealing it is correct; these numbers just make sure that
-// footprint is what's actually covered, matching each control's own margin + touch size in
-// OnScreenControls.tsx (12+44 for the sliders, 16+56 for the transport row's medium FAB, 16+40 for
-// the corner FABs). The left zone's full-height 64px width already happens to cover the single
-// Randomize FAB in the top-left corner too (it sits within x:[16,56]), so it doesn't need a zone of
-// its own — only the top-right trigger stack (the settings cog + 4 group triggers, plus the always-
-// visible siblings-collapse toggle anchored at the top of that column — see OnScreenControls'
-// triggerStack) needs a dedicated zone, tall enough to cover the whole column rather than just one
-// corner FAB's own footprint the way it used to when that row ran horizontally.
-const EDGE_ZONE_WIDTH = 64
+import { FAB_ROW_GAP } from './FabRow'
+import { FAB_HEIGHT_SMALL } from './LabeledFab'
+
+// Only three zones now: the bottom band, and the two top corners — deliberately NOT the full left/
+// right edges, so an ordinary swipe/drag anywhere along the sides of the canvas can't accidentally
+// reveal the controls; only the actual corners the hidden controls render in do that. Sized to cover
+// where the real (currently invisible) FABs render, plus a little slop, matching each control's own
+// margin + touch size in OnScreenControls.tsx (FAB_EDGE_MARGIN 16 + 40 for the corner FABs, 16 + 56
+// for the transport row's medium FAB at bottom-center).
+const TOP_LEFT_ZONE_WIDTH = 72
+const TOP_LEFT_ZONE_HEIGHT = 72
 const BOTTOM_ZONE_HEIGHT = 88
 const TOP_RIGHT_ZONE_WIDTH = 72
-// 6 stacked FABs (the settings cog + 4 triggers, plus the siblings-collapse toggle) at 40px + a 2px
-// hairline-border allowance each, 5 gaps between them (see OnScreenControls' TRIGGER_STACK_GAP), plus
-// the same slop the other zones get. Sized for the stack's fully-expanded footprint — the collapse
-// toggle's own siblings-hide state is a separate, later interaction, irrelevant to this zone, which
-// only exists while the whole overlay is hidden and reappears fully expanded.
-const TOP_RIGHT_ZONE_HEIGHT = 6 * 42 + 5 * 16 + 20
+// 7 stacked FABs (the settings cog, the 5 GROUP_TRIGGERS, and the siblings-collapse toggle itself that
+// leads the stack — see OnScreenControls' triggerStack), each FAB_HEIGHT_SMALL tall with no extra
+// border allowance (the hairline border is drawn within that box via boxSizing: 'border-box', not
+// added on top of it — confirmed by measuring the live stack, which came out exactly N * FAB_HEIGHT_SMALL
+// + (N - 1) * FAB_ROW_GAP with nothing left over), 6 gaps between them (FabRow's own FAB_ROW_GAP), plus
+// the same FAB_EDGE_MARGIN clearance from the true edge every other zone here bakes in (see this file's
+// own top comment) and the same slop the other zones get. Sized for the stack's fully-expanded
+// footprint — the collapse toggle's own siblings-hide state is a separate, later interaction,
+// irrelevant to this zone, which only exists while the whole overlay is hidden and reappears fully
+// expanded.
+const TOP_RIGHT_ZONE_HEIGHT_EXPANDED = 16 + 7 * FAB_HEIGHT_SMALL + 6 * FAB_ROW_GAP + 20
+// When the trigger stack is collapsed (see OnScreenControls' own siblingsVisible), only the
+// collapse-toggle FAB itself remains on screen, so this zone shrinks to match the top-left zone's
+// single-FAB footprint instead of staying sized for FABs that aren't there to reveal.
+const TOP_RIGHT_ZONE_HEIGHT_COLLAPSED = TOP_LEFT_ZONE_HEIGHT
 
 type EdgeRevealZonesProps = {
   // Only meaningful while the real controls are hidden — see the `active` prop below, which is what
   // actually gates whether these zones exist at all.
   onReveal: () => void
   active: boolean
+  // Mirrors OnScreenControls' own siblingsVisible (settings.triggerStackExpanded) — what the top-right
+  // zone needs to know to size itself correctly, since a collapsed stack leaves only the single toggle
+  // FAB behind for it to cover. See TOP_RIGHT_ZONE_HEIGHT_COLLAPSED above.
+  triggerStackExpanded: boolean
 }
 
 // Always mounted while active (unlike OnScreenControls, which fades in and out) — these invisible
@@ -40,17 +47,18 @@ type EdgeRevealZonesProps = {
 // hidden, since a fully faded-out control can't very well reveal itself. Once revealed, `active`
 // flips false and this unmounts entirely, so it never double-handles a touch meant for the real
 // buttons/sliders now sitting on top of the same screen real estate.
-export function EdgeRevealZones({ onReveal, active }: EdgeRevealZonesProps) {
+export function EdgeRevealZones({ onReveal, active, triggerStackExpanded }: EdgeRevealZonesProps) {
   const insets = useSafeAreaInsets()
 
   if (!active) return null
 
+  const topRightZoneHeight = triggerStackExpanded ? TOP_RIGHT_ZONE_HEIGHT_EXPANDED : TOP_RIGHT_ZONE_HEIGHT_COLLAPSED
+
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents='box-none'>
-      <Pressable testID='edge-reveal-left' onPressIn={onReveal} onHoverIn={onReveal} style={[styles.leftZone, { top: insets.top, bottom: insets.bottom }]} />
-      <Pressable testID='edge-reveal-right' onPressIn={onReveal} onHoverIn={onReveal} style={[styles.rightZone, { top: insets.top, bottom: insets.bottom }]} />
+      <Pressable testID='edge-reveal-top-left' onPressIn={onReveal} onHoverIn={onReveal} style={[styles.topLeftZone, { top: insets.top }]} />
       <Pressable testID='edge-reveal-bottom' onPressIn={onReveal} onHoverIn={onReveal} style={[styles.bottomZone, { bottom: insets.bottom }]} />
-      <Pressable testID='edge-reveal-top-right' onPressIn={onReveal} onHoverIn={onReveal} style={[styles.topRightZone, { top: insets.top }]} />
+      <Pressable testID='edge-reveal-top-right' onPressIn={onReveal} onHoverIn={onReveal} style={[styles.topRightZone, { top: insets.top, height: topRightZoneHeight }]} />
     </View>
   )
 }
@@ -62,18 +70,15 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 0
   },
-  leftZone: {
+  topLeftZone: {
+    height: TOP_LEFT_ZONE_HEIGHT,
     left: 0,
     position: 'absolute',
-    width: EDGE_ZONE_WIDTH
+    width: TOP_LEFT_ZONE_WIDTH
   },
-  rightZone: {
-    position: 'absolute',
-    right: 0,
-    width: EDGE_ZONE_WIDTH
-  },
+  // height omitted — always set inline per-render (see topRightZoneHeight above), since it depends on
+  // triggerStackExpanded rather than being a fixed constant like every other zone's here.
   topRightZone: {
-    height: TOP_RIGHT_ZONE_HEIGHT,
     position: 'absolute',
     right: 0,
     width: TOP_RIGHT_ZONE_WIDTH

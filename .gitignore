@@ -3,6 +3,10 @@
 # dependencies
 node_modules/
 
+# yalc — local package testing (see @rific/drawer in package.json); not a real published version
+.yalc/
+yalc.lock
+
 # Expo
 .expo/
 dist/

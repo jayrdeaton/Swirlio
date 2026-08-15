@@ -1,10 +1,24 @@
 import { buildFlowerPath, buildFlowerPoints } from '@/constants/flowerMath'
 
-// Matches the private FLOWER_SAMPLES_PER_PETAL/FLOWER_INNER_RATIO in flowerMath.ts — not exported
+// Matches the private flowerSamplesPerPetal/FLOWER_INNER_RATIO in flowerMath.ts — not exported
 // (polygonMath/starMath don't export their own per-vertex constants either), so both are spelled
-// out here.
-const SAMPLES_PER_PETAL = 24
+// out here. samplesPerPetal mirrors flowerSamplesPerPetal's own radius scaling exactly (see its
+// comment for why the scale factor is floored at 1 rather than left to range below it) — every test
+// radius below stays under FLOWER_REFERENCE_RADIUS (480, also spelled out here), so today they all
+// still resolve to exactly SAMPLES_PER_PETAL_BASE, same as before this became radius-aware; the
+// formula is still spelled out in full, not just hardcoded back to 24, so it keeps tracking the real
+// one if either the base or the reference radius ever changes.
+const SAMPLES_PER_PETAL_BASE = 24
+const REFERENCE_RADIUS = 480
+const MAX_SAMPLES_PER_PETAL = 64
 const INNER_RATIO = 0.5
+
+function samplesPerPetal(radius: number): number {
+  const scaleFactor = Math.max(1, Math.sqrt(radius / REFERENCE_RADIUS))
+  const scaled = SAMPLES_PER_PETAL_BASE * scaleFactor
+  const evened = Math.round(scaled / 2) * 2
+  return Math.min(MAX_SAMPLES_PER_PETAL, evened)
+}
 
 describe('buildFlowerPath', () => {
   it('starts and ends pointing straight up, at a petal tip', () => {
@@ -15,7 +29,7 @@ describe('buildFlowerPath', () => {
 
   it('emits petals * samples-per-petal + 1 vertices (the extra one closes the loop) plus the Z close command', () => {
     const path = buildFlowerPath(5, 50)
-    expect(path.match(/[ML]/g)?.length).toBe(5 * SAMPLES_PER_PETAL + 1)
+    expect(path.match(/[ML]/g)?.length).toBe(5 * samplesPerPetal(50) + 1)
     expect(path.endsWith('Z')).toBe(true)
   })
 
@@ -32,10 +46,11 @@ describe('buildFlowerPath', () => {
       .slice(1, -1)
       .split('L')
       .map((pair) => pair.split(',').map(Number))
+    const perPetal = samplesPerPetal(radius)
 
     for (let petal = 0; petal < petals; petal++) {
-      const tipIndex = petal * SAMPLES_PER_PETAL
-      const notchIndex = tipIndex + SAMPLES_PER_PETAL / 2
+      const tipIndex = petal * perPetal
+      const notchIndex = tipIndex + perPetal / 2
       const [tipX, tipY] = coords[tipIndex]
       const [notchX, notchY] = coords[notchIndex]
       expect(Math.hypot(tipX, tipY)).toBeCloseTo(radius, 1)
@@ -67,16 +82,17 @@ describe('buildFlowerPoints', () => {
   // straight into Skia's PathBuilder.addPoly(points, true), whose own `close` flag draws that edge.
   it('returns petals * samples-per-petal points', () => {
     const pts = buildFlowerPoints(5, 50)
-    expect(pts.length).toBe(5 * SAMPLES_PER_PETAL)
+    expect(pts.length).toBe(5 * samplesPerPetal(50))
   })
 
   it.each([3, 4, 5, 8])('traces %i petal tips at full radius and notches short of the center', (petals) => {
     const radius = 100
     const pts = buildFlowerPoints(petals, radius)
+    const perPetal = samplesPerPetal(radius)
 
     for (let petal = 0; petal < petals; petal++) {
-      const tipIndex = petal * SAMPLES_PER_PETAL
-      const notchIndex = tipIndex + SAMPLES_PER_PETAL / 2
+      const tipIndex = petal * perPetal
+      const notchIndex = tipIndex + perPetal / 2
       expect(Math.hypot(pts[tipIndex].x, pts[tipIndex].y)).toBeCloseTo(radius, 1)
       expect(Math.hypot(pts[notchIndex].x, pts[notchIndex].y)).toBeCloseTo(radius * INNER_RATIO, 1)
     }

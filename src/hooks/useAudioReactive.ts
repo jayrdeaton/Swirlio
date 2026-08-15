@@ -38,7 +38,7 @@ const TREBLE_ALPHA = onePoleAlpha(2000)
 // normalizing across a plausible quiet-to-loud range is the same shape of correction
 // getByteFrequencyData's own minDecibels/maxDecibels used to apply for free. Untestable in this
 // environment (no way to feed real mic input here) — a first-pass calibration meant to be retuned by
-// ear on a real device, the same as ROTATION_VELOCITY_TO_SPEED_SCALE and friends in index.tsx.
+// ear on a real device, the same as every gesture-derived scale constant in index.tsx.
 const MIN_DB = -60
 const MAX_DB = -10
 function rmsToUnit(rms: number): number {
@@ -47,14 +47,13 @@ function rmsToUnit(rms: number): number {
   return Math.min(1, Math.max(0, (db - MIN_DB) / (MAX_DB - MIN_DB)))
 }
 
-// mid/treble/loudness feed values that RESTART an in-flight animation on every change (see
-// index.tsx's effectiveRotationSpeed/effectiveZoomSpeed/effectiveCycleSpeed and useLoopingProgress's
-// own "changing speed restarts the animation" comment) — updating those on every single onAudioReady
-// buffer (~11/sec) would tear down and rebuild that animation just as often, reading as jitter instead
-// of motion. Throttling how often they're allowed to change keeps the restarts infrequent enough to
-// read as smooth while still tracking the music. bass skips this entirely (see below) since it drives
-// stroke width through a plain SharedValue read, not a restarted animation — there's nothing there to
-// protect from updating on every buffer.
+// mid/treble/loudness feed index.tsx's effectiveRotationSpeed/effectiveZoomSpeed/effectiveCycleSpeed,
+// which in turn re-render the whole component every time they change (they're plain numbers, not
+// SharedValues) — updating those on every single onAudioReady buffer (~11/sec) would mean that many
+// re-renders a second just from the mic. Throttling how often they're allowed to change keeps that
+// down to something reasonable while still tracking the music. bass skips this entirely (see below)
+// since it drives stroke width through a plain SharedValue read on the UI thread, never touching
+// React's render cycle at all — there's nothing there to protect from updating on every buffer.
 const BAND_STATE_THROTTLE_MS = 150
 
 // Live microphone band energy, each 0 (silence) to 1 (loudest rmsToUnit's dB range captures): `bass`
@@ -64,12 +63,22 @@ const BAND_STATE_THROTTLE_MS = 150
 // doesn't). Mic capture only starts once `enabled` is true — permission is requested at that point
 // too, not on mount, so nothing touches the microphone (or prompts for it) unless the audio-reactive
 // setting is actually turned on.
-export function useAudioReactive(enabled: boolean) {
+export function useAudioReactive(enabled: boolean, sensitivity: number = 1) {
   const bass = useSharedValue(0)
   const [mid, setMid] = useState(0)
   const [treble, setTreble] = useState(0)
   const [loudness, setLoudness] = useState(0)
   const lastBandStateUpdate = useRef(0)
+  // A ref, not a dependency of the mic-capture effect below: that effect owns the whole recording
+  // lifecycle (permission prompt, AudioContext, AudioRecorder), and restarting all of that on every
+  // slider frame would tear down and re-arm the native recording session mid-drag. Reading sensitivity
+  // through a ref instead lets a live change reach the very next onAudioReady buffer without touching
+  // anything upstream of it.
+  const sensitivityRef = useRef(sensitivity)
+
+  useEffect(() => {
+    sensitivityRef.current = sensitivity
+  }, [sensitivity])
 
   useEffect(() => {
     // No reset needed here: every field already defaults to 0 (see the useState/useSharedValue calls
@@ -142,14 +151,19 @@ export function useAudioReactive(enabled: boolean) {
             overallSumSquares += sample * sample
           }
 
-          bass.value = rmsToUnit(Math.sqrt(bassSumSquares / channelData.length))
+          // Multiplying the RMS scalar by sensitivity here is equivalent to gaining every raw sample
+          // by the same amount (RMS(k*x) = k*RMS(x)) — cheaper than reapplying it inside the per-
+          // sample loop above, and applied before rmsToUnit's dB conversion rather than after, so it
+          // shifts the whole quiet-to-loud window instead of just rescaling an already-clamped 0..1
+          // reading.
+          bass.value = rmsToUnit(Math.sqrt(bassSumSquares / channelData.length) * sensitivityRef.current)
 
           const now = Date.now()
           if (now - lastBandStateUpdate.current >= BAND_STATE_THROTTLE_MS) {
             lastBandStateUpdate.current = now
-            const nextMid = rmsToUnit(Math.sqrt(midSumSquares / channelData.length))
-            const nextTreble = rmsToUnit(Math.sqrt(trebleSumSquares / channelData.length))
-            const nextLoudness = rmsToUnit(Math.sqrt(overallSumSquares / channelData.length))
+            const nextMid = rmsToUnit(Math.sqrt(midSumSquares / channelData.length) * sensitivityRef.current)
+            const nextTreble = rmsToUnit(Math.sqrt(trebleSumSquares / channelData.length) * sensitivityRef.current)
+            const nextLoudness = rmsToUnit(Math.sqrt(overallSumSquares / channelData.length) * sensitivityRef.current)
             setMid(nextMid)
             setTreble(nextTreble)
             setLoudness(nextLoudness)

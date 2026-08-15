@@ -18,7 +18,12 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 // it used to hold only the pattern's own rotation/zoom speed, while mirror and colors each already
 // kept their own speed settings internal to their own group — an inconsistency with no structural
 // reason behind it. Rotation/zoom speed moved into 'pattern' to match.
-export type ControlGroup = 'colors' | 'line' | 'mirror' | 'pattern' | 'settings'
+//
+// 'gravity' is the newest split, out of the old 'settings' catch-all: Friction/Gravity (the physics
+// sliders) and Tilt to roll now live here instead, alongside gravity's own gestureTarget (see
+// useEpicenter.ts) — promoting the whole thing to a first-class mode, touch-drag and settings sheet
+// together, rather than two sliders buried in a generic drawer.
+export type ControlGroup = 'colors' | 'gravity' | 'line' | 'mirror' | 'pattern' | 'settings'
 
 // Pre-measurement placeholders only (see contentSize below) — used for the very first layout before
 // each half's real content height is known, not a cap on how tall either can grow.
@@ -31,12 +36,23 @@ export const CONTROL_GROUP_BOTTOM_SHEET_HEIGHT = 200
 // backdrop dim (backdropOpacity 0) and no visible handle pill (showHandle false), so the canvas stays
 // fully visible through the middle of the screen and around both sheets while either is open.
 // dismissible: false — swipe-to-dismiss is off entirely rather than just visually understated: with
-// no handle pill it was never discoverable as a gesture anyway, tapping outside the sheets already
-// closes both halves together (see useControlGroupSheetDrawer's sync effect), and a second, invisible
-// way to dismiss just meant reserving a strip of clearance along each sheet's own dismiss-edge (see
-// TOP_SHEET_HANDLE_CLEARANCE/BOTTOM_SHEET_HANDLE_CLEARANCE, both since removed) so real content
-// couldn't sit under its still-live hit area. Top-anchored/bottom-anchored so each opens right under/
-// over the vertical group-trigger stack and transport row it came from — see OnScreenControls.
+// no handle pill it was never discoverable as a gesture anyway.
+//
+// blockingBackdrop: false — the backdrop stays invisible (backdropOpacity 0) *and* stops swallowing
+// touches: without this, @rific/drawer's Drawer captures every touch outside the sheet itself and
+// treats it as "tap away to dismiss," which meant a sheet had to close before a drag/pinch/rotate on
+// the canvas underneath it could even start. That made "open a sheet, then drag the epicentre to see
+// the effect live" impossible — the first touch on the canvas always closed the sheet instead of
+// reaching it. With this off, canvas gestures pass straight through the (invisible) backdrop and the
+// sheet just stays open while you fine-tune. The tradeoff is real: this disables @rific/drawer's own
+// backdrop-tap-to-dismiss entirely, since that gesture is gated on `open && blockingBackdrop` — but a
+// tap on the exposed canvas still closes the sheet, just via index.tsx's own tap gesture rather than
+// the backdrop's: handleCanvasTap treats an open drawer as chrome to dismiss first, the same way it
+// already treated the on-screen controls, so a plain tap on the canvas closes the sheet (and hides the
+// controls) without also swapping colors underneath it. That's on top of two other explicit,
+// always-available closes: re-tapping the open group's own trigger (see OnScreenControls' trigger-stack
+// onPress) and the hide-fabs chevron (see its own onPress). Top-anchored/bottom-anchored so each opens right under/over the vertical
+// group-trigger stack and transport row it came from — see OnScreenControls.
 //
 // blur is deliberately left unset here (not blur: true) — @rific/drawer's Drawer resolves it via
 // @rific/auto-paper's useBlur(override), which is `override ?? settings.blur`: passing an explicit
@@ -45,8 +61,8 @@ export const CONTROL_GROUP_BOTTOM_SHEET_HEIGHT = 200
 // themeSettings.blur every other @rific/auto-paper-aware surface already reads). Leaving it undefined
 // is what lets these two sheets fall through to that single setting like everything else does, instead
 // of carrying their own silently-conflicting opinion.
-const topSheet = createDrawer({ backdropOpacity: 0, contentSize: true, dismissible: false, height: CONTROL_GROUP_TOP_SHEET_HEIGHT, showHandle: false, side: 'top' })
-const bottomSheet = createDrawer({ backdropOpacity: 0, contentSize: true, dismissible: false, height: CONTROL_GROUP_BOTTOM_SHEET_HEIGHT, showHandle: false, side: 'bottom' })
+const topSheet = createDrawer({ backdropOpacity: 0, blockingBackdrop: false, contentSize: true, dismissible: false, height: CONTROL_GROUP_TOP_SHEET_HEIGHT, showHandle: false, side: 'top' })
+const bottomSheet = createDrawer({ backdropOpacity: 0, blockingBackdrop: false, contentSize: true, dismissible: false, height: CONTROL_GROUP_BOTTOM_SHEET_HEIGHT, showHandle: false, side: 'bottom' })
 
 export const ControlGroupTopSheetProvider = topSheet.DrawerInstanceProvider
 export const ControlGroupBottomSheetProvider = bottomSheet.DrawerInstanceProvider
@@ -77,13 +93,17 @@ export function useControlGroups() {
 // them as a single unit here, rather than requiring both to agree, is what keeps a consumer like
 // OnScreenControls' portal correctly up for the full duration either one is still visually on screen.
 //
-// The sync effect below covers the other direction: each half also has its own full-screen backdrop
-// (see @rific/drawer's Drawer), and with both stacked at the same z-index, only ONE of them ever
-// actually receives a press-away tap — the other sits underneath it and never sees the touch. Left
-// alone, that meant tapping outside the sheets closed only whichever half's backdrop happened to be
-// on top, leaving its sibling stuck open. Both halves are only ever meant to be open or closed
-// together (nothing in this app opens/closes them independently), so as soon as they disagree, this
-// snaps the one still open closed too.
+// The sync effect below covers the other direction: both halves are only ever meant to be open or
+// closed together (nothing in this app opens/closes them independently — see close() below and
+// useOpenControlGroup), so if they ever disagree, this snaps the one still open closed too. Used to
+// have a live trigger: each half had its own full-screen backdrop (see @rific/drawer's Drawer), and
+// with both stacked at the same z-index, only ONE of them ever actually received a press-away tap —
+// the other sat underneath it and never saw the touch, so tapping outside the sheets closed only
+// whichever half's backdrop happened to be on top, leaving its sibling stuck open, and this effect is
+// what snapped it shut too. Both sheets now set blockingBackdrop: false (see the topSheet/bottomSheet
+// definitions above), which disables that backdrop-tap gesture entirely, so this no longer has a
+// known way to actually fire — kept anyway as a safety net against the two ever drifting apart some
+// other way, since it costs nothing to leave running.
 export function useControlGroupSheetDrawer() {
   const top = topSheet.useDrawer()
   const bottom = bottomSheet.useDrawer()

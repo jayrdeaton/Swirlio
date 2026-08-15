@@ -64,6 +64,26 @@ describe('wedgeClipPath', () => {
   it('leaves the wedge boundary untouched at copyIndex 0 spanning [0, wedgeAngle] when gapFraction is 0', () => {
     expect(wedgeClipPath(0, 0, 10, 0, 60, 0)).toBe(wedgePath(0, 0, 10, 0, 60))
   })
+
+  it('defaults overlapDeg to 0 — every caller above already relies on exact gapFraction-only tiling', () => {
+    expect(wedgeClipPath(50, 50, 1000, 2, 90, 0.2)).toBe(wedgeClipPath(50, 50, 1000, 2, 90, 0.2, 0))
+  })
+
+  it('overlapDeg widens the wedge past its gapFraction boundary on both edges, unlike gapFraction which only shrinks it', () => {
+    // wedgeAngle 90, gapFraction 0 -> insetDeg would be 0; overlapDeg 3 pushes it to -3, i.e. the
+    // wedge now spans 3 degrees past each of its nominal [180, 270] edges instead of stopping there.
+    const clip = wedgeClipPath(50, 50, 1000, 2, 90, 0, 3)
+    const expected = wedgePath(50, 50, 1000, 2 * 90 - 3, 3 * 90 + 3)
+    expect(clip).toBe(expected)
+  })
+
+  it('overlapDeg is subtracted after gapFraction — a real gap only shrinks by that fixed amount, not to zero', () => {
+    // wedgeAngle 90, gapFraction 0.2 -> insetDeg 9 (see the gapFraction-only test above); overlapDeg 3
+    // brings the effective inset to 6, still a real, smaller gap rather than an overlap.
+    const clip = wedgeClipPath(50, 50, 1000, 2, 90, 0.2, 3)
+    const expected = wedgePath(50, 50, 1000, 2 * 90 + 6, 3 * 90 - 6)
+    expect(clip).toBe(expected)
+  })
 })
 
 // Applies a Skia-style row-major affine matrix ([a, c, e, b, d, f, 0, 0, 1]) to a point.

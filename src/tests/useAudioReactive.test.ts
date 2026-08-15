@@ -198,6 +198,62 @@ describe('useAudioReactive', () => {
     expect(result.current.mid).toBe(throttledMid)
   })
 
+  // A quiet buffer boosted by a high sensitivity should read at least as loud as the same buffer at
+  // unity gain — the actual number isn't meaningful (rmsToUnit's dB conversion is nonlinear), only
+  // that turning sensitivity up measurably helps a quiet room register.
+  it('scales quieter readings up when sensitivity is raised', async () => {
+    const { result: unityResult } = await renderHook(() => useAudioReactive(true, 1))
+    await flushSetup()
+    const unityRecorder = mockedAudioRecorder.mock.results[0].value
+    const unityOnAudioReady = unityRecorder.onAudioReady.mock.calls[0][1]
+    await act(async () => {
+      unityOnAudioReady(fakeAudioReadyEvent(0.005))
+    })
+
+    jest.clearAllMocks()
+    mockedRequestRecordingPermissions.mockResolvedValue('Granted')
+
+    const { result: boostedResult } = await renderHook(() => useAudioReactive(true, 4))
+    await flushSetup()
+    const boostedRecorder = mockedAudioRecorder.mock.results[0].value
+    const boostedOnAudioReady = boostedRecorder.onAudioReady.mock.calls[0][1]
+    await act(async () => {
+      boostedOnAudioReady(fakeAudioReadyEvent(0.005))
+    })
+
+    expect(boostedResult.current.bass.value).toBeGreaterThan(unityResult.current.bass.value)
+    expect(boostedResult.current.loudness).toBeGreaterThan(unityResult.current.loudness)
+  })
+
+  // A live drag on the sensitivity slider must reach the very next buffer without tearing down and
+  // restarting mic capture — the ref-based wiring in useAudioReactive.ts is what makes that possible;
+  // asserting the recorder/context are untouched is what would catch a regression back to a dependency
+  // that restarts the whole effect instead.
+  it('picks up a live sensitivity change without restarting the recorder', async () => {
+    const { result, rerender } = await renderHook(({ sensitivity }: { sensitivity: number }) => useAudioReactive(true, sensitivity), { initialProps: { sensitivity: 1 } })
+    await flushSetup()
+
+    const recorderInstance = mockedAudioRecorder.mock.results[0].value
+    const onAudioReady = recorderInstance.onAudioReady.mock.calls[0][1]
+
+    await act(async () => {
+      onAudioReady(fakeAudioReadyEvent(0.005))
+    })
+    const unityBass = result.current.bass.value
+
+    await act(async () => {
+      rerender({ sensitivity: 4 })
+    })
+    expect(mockedAudioRecorder).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      onAudioReady(fakeAudioReadyEvent(0.005))
+    })
+
+    expect(mockedAudioRecorder).toHaveBeenCalledTimes(1)
+    expect(result.current.bass.value).toBeGreaterThan(unityBass)
+  })
+
   // start() reports failure through this Result object, not a rejected promise (see
   // useAudioReactive.ts's own comment on why it checks `status`) — a native-level failure here must
   // not crash the render tree, the same "degrade silently" contract as the outer catch below.

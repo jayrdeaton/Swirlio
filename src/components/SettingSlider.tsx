@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { LayoutChangeEvent, Platform, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Text, useTheme } from 'react-native-paper'
@@ -58,7 +58,39 @@ type SettingSliderProps = {
   // tick-soup case showTicks' own default-off exists to avoid). Defaults to `step` itself, so a
   // caller that doesn't pass this gets the original one-tick-per-step behavior unchanged.
   tickStep?: number
+  // A single magnetic stop at 0, independent of step/showTicks/tickStep entirely — for a slider that
+  // should otherwise drag completely freely (no step grid at all) but still wants to be easy to land
+  // exactly on 0 by feel, without hunting for it among decimal places. Draws its own single tick at
+  // 0's own position regardless of whatever showTicks/tickStep are doing (or not doing) elsewhere on
+  // this same slider. See positionToValue's own comment for the actual snap distance/logic — a no-op
+  // whenever 0 isn't strictly between minimumValue and maximumValue.
+  snapToZero?: boolean
   onChange: (value: number) => void
+  // A plain JS function, called alongside onChange on every commit — commitFromX already runs on the
+  // JS thread (see panGesture's own .runOnJS(true) comment below for why), so no worklet is needed
+  // here either. Not a replacement for onChange: a low-latency addition for the handful of sliders
+  // (Rotation/Zoom/Mirror rotation speed, Foreground/Background cycle speed, Friction) that also need
+  // to write straight to a UI-thread rate SharedValue the instant a drag moves, instead of waiting for
+  // onChange's own React state → re-render → effect round trip. Left undefined everywhere else.
+  onLiveValue?: (value: number) => void
+  // Caps how often a continuous drag (onUpdate specifically — onStart and the release/tap settle
+  // always commit immediately, see commitFromX's own `live` parameter) is allowed to call onChange,
+  // in ms between commits. onLiveValue is never throttled — it's cheap (a direct SharedValue write,
+  // no re-render); onChange is what's expensive here, since it drives a React state update and a
+  // full re-render of whichever screen owns the setting. Undefined (the default) means "no cap,
+  // commit every pixel," the original behavior every other slider keeps. Only the 6 speed sliders
+  // (Rotation/Zoom/Mirror rotation speed, Foreground/Background cycle speed, Friction) opt in — see
+  // ControlGroupBottomSheetContent's own SPEED_ONCHANGE_THROTTLE_MS. Those are the only sliders that
+  // also drive a continuously-*integrated* value (see onLiveValue's own comment): dropping frames of
+  // React-render work never shows up as a visible gap for the level sliders that don't set this
+  // (the pattern just is whatever it currently is, live, each frame — see index.tsx's own comment on
+  // why manual-drag level values already read as smooth without help), but on a platform with no
+  // separate UI thread to insulate the animation from render cost (react-native-web, see
+  // useFrameCallback's own reasoning elsewhere in this codebase), a full re-render on every single
+  // pixel of a fast drag can itself compete for the same thread the animation runs on and visibly
+  // stall it — throttling the expensive half while leaving the cheap half at full frequency is what
+  // this exists to fix.
+  onChangeThrottleMs?: number
 }
 
 // Deliberately not @react-native-community/slider. That component sizes its interactive track from
@@ -69,7 +101,7 @@ type SettingSliderProps = {
 //
 // This owns both: the track is laid out by flex (never measured-then-sized), and a touch on a
 // zero-width track is ignored rather than reported as the minimum.
-export function SettingSlider({ label, value, displayValue, minimumValue, maximumValue, step, disabled = false, icon, showTicks = false, tickStep = step, onChange }: SettingSliderProps) {
+export function SettingSlider({ label, value, displayValue, minimumValue, maximumValue, step, disabled = false, icon, showTicks = false, tickStep = step, snapToZero = false, onChange, onLiveValue, onChangeThrottleMs }: SettingSliderProps) {
   const { colors } = useTheme()
   const { settings } = useSwirlSettings()
   const [trackWidth, setTrackWidth] = useState(0)
@@ -92,16 +124,27 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
   // randomize, or a different pattern shrinking this slider's own min/max) — only the latter should
   // yank rawProgress back in sync outside of a gesture, since the former already manages it directly.
   const lastCommit = useSharedValue({ value, minimumValue, maximumValue })
+  // Plain ref, not a SharedValue: read/written only from this JS-thread function itself, never from
+  // a worklet closure, so there's no react-hooks/refs concern the way rawProgress/lastCommit have.
+  const lastOnChangeCommitMs = useRef(0)
 
-  const commitFromX = (x: number) => {
+  // `live` marks a call that's allowed to have its onChange half throttled (see onChangeThrottleMs's
+  // own prop comment) — only onUpdate passes true. onStart and the release/tap settle (settleAt)
+  // always pass false, so the very first touch and the final committed position are never delayed.
+  const commitFromX = (x: number, live = false) => {
     // Belt and suspenders with the gestures' own .enabled(!disabled) below: that stops the real
     // recognizer from claiming the touch at all, but tests drive the handlers directly without
     // going through gesture-handler's enabled/disabled machinery, so the guard has to live here too.
     if (disabled) return null
-    const next = positionToValue(x, trackWidth, minimumValue, maximumValue, step)
+    const next = positionToValue(x, trackWidth, minimumValue, maximumValue, step, snapToZero)
     if (next == null) return null
     if (next !== value) {
       lastCommit.value = { value: next, minimumValue, maximumValue }
+      onLiveValue?.(next)
+      if (live && onChangeThrottleMs != null && Date.now() - lastOnChangeCommitMs.current < onChangeThrottleMs) {
+        return next
+      }
+      lastOnChangeCommitMs.current = Date.now()
       onChange(next)
     }
     return next
@@ -140,7 +183,7 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
     .onUpdate((event) => {
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see comment above
       rawProgress.value = trackWidth > 0 ? Math.min(1, Math.max(0, event.x / trackWidth)) : progress
-      commitFromX(event.x)
+      commitFromX(event.x, true)
     })
     .onEnd((event) => settleAt(event.x))
 
@@ -186,6 +229,11 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
               // this app's seed at all).
               return <SliderTick key={index} rawProgress={rawProgress} tickProgress={tickProgress} reachedColor={contrastColor(colors.primary)} unreachedColor={colors.primary} />
             })}
+          {/* Independent of the showTicks loop above — a single fixed landmark at 0 for a slider
+          that's otherwise entirely free (no step grid, so no natural tick spacing to hang a mark on
+          in the first place), matching where positionToValue's own magnet actually pulls toward. See
+          snapToZero's own prop comment. */}
+          {snapToZero && minimumValue < 0 && maximumValue > 0 && <SliderTick rawProgress={rawProgress} tickProgress={valueToProgress(0, minimumValue, maximumValue)} reachedColor={contrastColor(colors.primary)} unreachedColor={colors.primary} />}
           {/* The icon rides on the thumb itself now rather than sitting beside the label — see
           THUMB_HALF above for how it stays fully on-screen at either end of the track. Bordered in
           contrastColor(primary) for the same reason as the fill bar above — the thumb's own fill is
@@ -194,7 +242,10 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
           color, so the border now always matches what's drawn on top of it, not just what happens to
           be legible against the icon by coincidence. */}
           <Animated.View testID='setting-slider-thumb' style={[styles.thumb, styles.thumbBorder, { backgroundColor: colors.primary, borderColor: contrastColor(colors.primary) }, thumbAnimatedStyle]}>
-            {icon ? <MdIcon name={icon} size={THUMB_ICON_SIZE} color={contrastColor(colors.primary)} /> : null}
+            {/* nudgeX/nudgeY=0: this thumb's own icon container already centers exactly (measured,
+            no rounding drift — see MdIcon's prop comment), so it skips MdIcon's FAB-calibrated
+            default nudge entirely rather than inheriting a correction sized for a much bigger icon. */}
+            {icon ? <MdIcon name={icon} size={THUMB_ICON_SIZE} color={contrastColor(colors.primary)} nudgeX={0} nudgeY={0} /> : null}
           </Animated.View>
         </View>
       </GestureDetector>

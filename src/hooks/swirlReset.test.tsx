@@ -6,15 +6,18 @@ describe('useSwirlReset', () => {
   it('calls whatever reset functions were most recently registered', async () => {
     const resetPattern = jest.fn()
     const resetMirror = jest.fn()
-    const { result } = await renderHook(() => ({ callers: useSwirlReset(), register: useRegisterSwirlReset(resetPattern, resetMirror) }), { wrapper: SwirlResetProvider })
+    const resetGravity = jest.fn()
+    const { result } = await renderHook(() => ({ callers: useSwirlReset(), register: useRegisterSwirlReset(resetPattern, resetMirror, resetGravity) }), { wrapper: SwirlResetProvider })
 
     await act(async () => {
       result.current.callers.resetPattern()
       result.current.callers.resetMirror()
+      result.current.callers.resetGravity()
     })
 
     expect(resetPattern).toHaveBeenCalledTimes(1)
     expect(resetMirror).toHaveBeenCalledTimes(1)
+    expect(resetGravity).toHaveBeenCalledTimes(1)
   })
 
   // The actual SharedValues only exist once SwirlScreen has mounted and registered — a reset button
@@ -27,6 +30,7 @@ describe('useSwirlReset', () => {
     await act(async () => {
       result.current.resetPattern()
       result.current.resetMirror()
+      result.current.resetGravity()
     })
   })
 })

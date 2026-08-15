@@ -1,78 +1,113 @@
 import { renderHook } from '@testing-library/react-native'
+import * as reanimatedModule from 'react-native-reanimated'
 
 import { useLoopingProgress } from '@/hooks/useLoopingProgress'
 
-const mockCancelAnimation = jest.fn()
-const mockWithTiming = jest.fn((value: number, _config: { duration: number; easing?: unknown }) => value)
-const mockWithSequence = jest.fn((...values: number[]) => values[values.length - 1])
-const mockWithRepeat = jest.fn((value: number, _count: number) => value)
+// The app-wide mock in jest.setup.ts already gives useSharedValue a persistent { value } (via a ref)
+// and a registry-backed useFrameCallback — exactly what this hook needs to be tested for real, the
+// same way the bounce physics in useDragPointPhysics.ts is driven in swirlScreen.gesture.test.tsx: grab
+// the registered callback and invoke it with a fabricated FrameInfo instead of racing a real clock.
+type FrameCallbackHandle = { callback: (frameInfo: { timestamp: number; timeSincePreviousFrame: number | null; timeSinceFirstFrame: number }) => void }
+const frameCallbackTestUtils = (reanimatedModule as typeof reanimatedModule & { __frameCallbackTestUtils: unknown }).__frameCallbackTestUtils as {
+  getLastFrameCallback: () => FrameCallbackHandle | null
+  reset: () => void
+}
 
-// A local mock rather than the app-wide one in jest.setup.ts: that mock's withTiming discards its
-// duration argument entirely (`passthrough = (value) => value`), and its useSharedValue returns a
-// fresh { value } on every call instead of persisting across re-renders. Both are fine for the
-// gesture tests that mock covers, but they make this hook's whole reason for existing — riding out
-// the remaining fraction of a lap when speed changes — untestable, since that only means anything if
-// .value survives from one render's effect into the next render's read of it.
-jest.mock('react-native-reanimated', () => ({
-  cancelAnimation: (...args: unknown[]) => mockCancelAnimation(...args),
-  Easing: { linear: (v: number) => v },
-  useSharedValue: (initial: number) => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { useRef } = require('react')
-    const ref = useRef({ value: initial })
-    return ref.current
-  },
-  withRepeat: (...args: [number, number]) => mockWithRepeat(...args),
-  withSequence: (...args: number[]) => mockWithSequence(...args),
-  withTiming: (...args: [number, { duration: number; easing?: unknown }]) => mockWithTiming(...args)
-}))
+function step(deltaMs: number | null) {
+  const frame = frameCallbackTestUtils.getLastFrameCallback()
+  frame?.callback({ timestamp: 0, timeSincePreviousFrame: deltaMs, timeSinceFirstFrame: 0 })
+}
 
 describe('useLoopingProgress', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    frameCallbackTestUtils.reset()
   })
 
-  it('schedules a full lap at baseDurationMs / speed on first render', async () => {
+  it('starts at 0 and does not move until a frame is stepped', async () => {
     const { result } = await renderHook(() => useLoopingProgress(6000, 2, false))
 
-    // The mocked chain resolves progress.value to 1 (withSequence returns its last argument).
-    expect(result.current.value).toBe(1)
-    // Every call this render shares the same duration, since progress started at 0 (remainder = 1).
-    expect(mockWithTiming.mock.calls.map((call) => call[1].duration)).toEqual([3000, 0, 3000])
+    expect(result.current.progress.value).toBe(0)
   })
 
-  it('cancels the animation while frozen instead of scheduling one', async () => {
-    await renderHook(() => useLoopingProgress(6000, 1, true))
+  // baseDurationMs 6000 at speed 2 is a 3000ms lap, i.e. 1/3000 of a lap per ms.
+  it('accumulates progress at baseDurationMs / speed per lap', async () => {
+    const { result } = await renderHook(() => useLoopingProgress(6000, 2, false))
 
-    expect(mockCancelAnimation).toHaveBeenCalled()
-    expect(mockWithTiming).not.toHaveBeenCalled()
+    step(300) // 1/10 of a 3000ms lap
+    expect(result.current.progress.value).toBeCloseTo(0.1, 5)
   })
 
-  it('resumes with a fresh lap once unfrozen', async () => {
-    const { rerender } = await renderHook(({ frozen }: { frozen: boolean }) => useLoopingProgress(6000, 1, frozen), { initialProps: { frozen: true } })
+  it('wraps cleanly from 1 back to 0 rather than overshooting past a full lap', async () => {
+    const { result } = await renderHook(() => useLoopingProgress(6000, 2, false))
 
-    expect(mockWithTiming).not.toHaveBeenCalled()
+    step(3000) // exactly one full lap
+    expect(result.current.progress.value).toBeCloseTo(0, 5)
+
+    step(3900) // 1.3 laps worth in one jump
+    expect(result.current.progress.value).toBeCloseTo(0.3, 5)
+  })
+
+  it('does not accumulate while frozen', async () => {
+    const { result } = await renderHook(() => useLoopingProgress(6000, 1, true))
+
+    step(1000)
+    expect(result.current.progress.value).toBe(0)
+  })
+
+  it('resumes accumulating once unfrozen, from wherever progress already sat', async () => {
+    const { result, rerender } = await renderHook(({ frozen }: { frozen: boolean }) => useLoopingProgress(6000, 1, frozen), { initialProps: { frozen: true } })
+
+    step(1000)
+    expect(result.current.progress.value).toBe(0)
 
     await rerender({ frozen: false })
-
-    expect(mockWithTiming).toHaveBeenCalled()
+    step(1000) // baseDurationMs 6000 at speed 1 is a 6000ms lap
+    expect(result.current.progress.value).toBeCloseTo(1000 / 6000, 5)
   })
 
-  // The property this hook exists for: a speed change mid-lap doesn't restart from 0, it finishes
-  // out whatever fraction of the current lap remains, so the visible pattern never jumps.
-  it('rides out the remaining fraction of the current lap before applying a new speed', async () => {
-    const { rerender } = await renderHook(({ speed }: { speed: number }) => useLoopingProgress(6000, speed, false), { initialProps: { speed: 1 } })
+  // The property this hook exists for: a speed change mid-lap takes effect immediately, from
+  // wherever progress already sits, at whatever rate is now current — no restarted animation, so
+  // there's nothing to snap or stutter on when it changes.
+  it('applies a new speed immediately from wherever progress already sits, with no jump', async () => {
+    const { result, rerender } = await renderHook(({ speed }: { speed: number }) => useLoopingProgress(6000, speed, false), { initialProps: { speed: 1 } })
 
-    // First render leaves progress.value at 1 (per the mocked chain above).
-    mockWithTiming.mockClear()
-    await rerender({ speed: 3 })
+    step(1500) // a quarter of the way through a 6000ms lap at speed 1
+    expect(result.current.progress.value).toBeCloseTo(0.25, 5)
 
-    const newDuration = 6000 / 3
-    const durations = mockWithTiming.mock.calls.map((call) => call[1].duration)
-    // Remainder is duration * (1 - 1) = 0 for the first (ride-out) call...
-    expect(durations[0]).toBe(0)
-    // ...but the steady-state lap inside withRepeat is never multiplied by the remainder, so it
-    // always reflects the new speed exactly.
-    expect(durations[2]).toBe(newDuration)
+    await rerender({ speed: 3 }) // now a 2000ms lap; no jump — progress stays exactly where it was
+    expect(result.current.progress.value).toBeCloseTo(0.25, 5)
+
+    step(500) // a quarter of a 2000ms lap at the new speed
+    expect(result.current.progress.value).toBeCloseTo(0.25 + 0.25, 5)
+  })
+
+  it('ignores a null timeSincePreviousFrame (the first frame after mount) instead of treating it as 0', async () => {
+    const { result } = await renderHook(() => useLoopingProgress(6000, 1, false))
+
+    step(null)
+    expect(result.current.progress.value).toBe(0)
+  })
+
+  it('stays paused while `paused` is set, even at a nonzero rate', async () => {
+    const { result } = await renderHook(() => useLoopingProgress(6000, 1, false))
+
+    result.current.paused.value = true
+    step(1000)
+    expect(result.current.progress.value).toBe(0)
+
+    result.current.paused.value = false
+    step(1000)
+    expect(result.current.progress.value).toBeCloseTo(1000 / 6000, 5)
+  })
+
+  // The property the speed-rate bridge (see speedRateBridge.tsx) depends on: `rate` is the same
+  // SharedValue the frame callback reads every frame, so a caller outside this hook can write straight
+  // to it for an immediate effect on the very next frame, bypassing speed/baseDurationMs entirely.
+  it('exposes its own rate SharedValue, writable directly for an immediate effect on the next frame', async () => {
+    const { result } = await renderHook(() => useLoopingProgress(6000, 1, false))
+
+    result.current.rate.value = 2 / 6000 // simulate a fast-path write, as if speed had jumped to 2
+    step(1000)
+    expect(result.current.progress.value).toBeCloseTo(2000 / 6000, 5)
   })
 })

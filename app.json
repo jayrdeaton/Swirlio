@@ -28,6 +28,8 @@
       "package": "com.jayrdeaton.Swirlio",
       "permissions": [
         "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
@@ -69,6 +71,9 @@
         "projectId": "c1efdb14-4a4f-4615-88ad-139c325abc7e"
       }
     },
-    "owner": "jayrdeaton"
+    "owner": "jayrdeaton",
+    "updates": {
+      "url": "https://u.expo.dev/c1efdb14-4a4f-4615-88ad-139c325abc7e"
+    }
   }
 }

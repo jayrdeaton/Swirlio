@@ -8,6 +8,7 @@ import { PATTERN_ORDER, PatternType } from '@/constants/patterns'
 import { DASH_STYLE_ORDER, DashStyle } from '@/constants/strokeDash'
 
 import { loadSkiaWeb } from './loadSkiaWeb'
+import { GESTURE_TARGET_ORDER, GestureTarget } from './useEpicenter'
 
 export type SwirlSettings = {
   audioReactiveEnabled: boolean
@@ -36,14 +37,32 @@ export type SwirlSettings = {
   fixedSpacing: boolean
   foregroundColors: string[]
   foregroundCycleSpeed: number
+  // Which point the one-finger drag/two-finger twist targets — pattern/mirror/gravity/speed, see
+  // useEpicenter.ts's GestureTarget. Only ever read once, as the seed for index.tsx's own activeTargets
+  // state at mount — index.tsx owns the field from there on (both the live UI state and writing back
+  // here via setGestureTarget), rather than this being the single source of truth on every render, the
+  // way every other field in this type is. That split is what lets this persist without also making the
+  // gesture-target switch itself round-trip through this context on every tap.
+  gestureTarget: GestureTarget
+  // How quickly the pattern epicentre/mirror anchor/gravity handle ease toward wherever you're
+  // touching, and spring home on a release-near-center or recenter (see useDragPointPhysics.ts's own
+  // glideTo/recenter) — one shared feel for both, not a separate tuning for each: a slow, floaty catch
+  // -up on the way to your finger reading as sluggish on the way back home (or vice versa) would be a
+  // more jarring inconsistency than sharing a single knob ever is. 1 is the original, un-tunable feel
+  // this app always had before this setting existed.
+  followSpeed: number
   // A spring-like pull toward wherever the gravity center currently sits (see
-  // useDragPointPhysics.ts's frame callback) — the true center at rest, or nudged toward whichever
-  // edge the device is tilted toward when tiltEnabled is on (see useTiltGravityCenter.ts). 0 leaves
-  // the epicentre bouncing freely with nothing pulling it anywhere (off the edges forever, or until
-  // friction alone kills the velocity); turning it up gives it a "gravity well" it rolls toward and
-  // settles into — ambiently, not just after a release, so this is also what makes tilt actually move
-  // the epicentre at all. Nonzero by default specifically so "Tilt to roll" does something the moment
-  // it's turned on, without also needing this slider raised first.
+  // useDragPointPhysics.ts's frame callback) — the true center at rest, or wherever gravity mode's own
+  // handle has been dragged or tilted to (see index.tsx's effectiveGravityCenterX/Y and gravityHandle).
+  // 0 leaves the epicentre/mirror anchor bouncing freely with nothing pulling either toward the gravity
+  // center at all (off the edges forever, or until friction alone kills the velocity); turning it up
+  // gives each a "gravity well" it rolls toward and settles into — ambiently, not just after a release.
+  // Independent of tilt actually moving anything, though: when 'pattern' or 'mirror' is the active
+  // gesture target, tilt drives that point directly regardless of this setting (see
+  // useEpicenter.ts's own patternManualControl/mirrorManualControl) — this only governs the *separate*,
+  // always-on ambient pull toward wherever gravity's own center happens to be sitting. Nonzero by
+  // default so gravity mode itself (and that ambient pull) does something the moment it's turned on,
+  // without also needing this slider raised first.
   gravity: number
   // A second, inner cutoff carved out of the crop circle — a fraction *of* cropRadius (not of the
   // pattern's own radius), so the hole can never reach or exceed the crop no matter how it's dragged:
@@ -55,6 +74,16 @@ export type SwirlSettings = {
   // shaped outer crop can still have a plain circular hole punched out of it (or vice versa). See
   // Spiral.tsx's cropClip.
   holeShaped: boolean
+  // A linear gain applied to the raw mic RMS before useAudioReactive's own dB normalization (see
+  // rmsToUnit there) — shifts the whole quiet-to-loud window rather than just clipping harder at the
+  // top the way a post-hoc multiply on the already-normalized 0..1 reading would. 1 is unity gain,
+  // i.e. exactly rmsToUnit's existing calibration with nothing added; below 1 dampens a loud room,
+  // above 1 makes a quiet mic read as more responsive. Only has any visible effect while
+  // audioReactiveEnabled (the mic FAB) is on — left draggable either way rather than disabled while
+  // off, same as every other slider in the Settings group, since audioReactiveEnabled is its own
+  // separate on/off switch already (see MIN_MIC_SENSITIVITY's own comment for why this doesn't
+  // duplicate that switch by also going down to 0).
+  micSensitivity: number
   mirrorAlternateColors: boolean
   // How much of each wedge's own angle opens up as empty canvas between it and its neighbors — 0 (the
   // default) is the original edge-to-edge kaleidoscope, no gap at all. A fraction of the wedge's own
@@ -71,20 +100,17 @@ export type SwirlSettings = {
   polygonSides: number
   rotationSpeed: number
   shakeEnabled: boolean
-  // Whether Spiral draws the gravity marker at all (see Spiral.tsx's GravityRingMarker) — even when
-  // this is on, the marker itself still only actually appears while gravity is visibly doing
-  // something (see useEpicenter.ts's gravityActive), never as a permanent overlay. A TEMPORARY knob:
-  // once gravity is promoted to its own touch-draggable gestureTarget (see the deferred work noted in
-  // useEpicenter.ts's own GestureTarget comment), showing/hiding its marker belongs with that mode
-  // the same way showMirrorMarker already follows gestureTarget, and this standalone toggle should be
-  // removed in favor of that.
-  showGravityMarker: boolean
   // Compact by default (icon-only FABs, no slider labels) — turning this on trades that density for
   // legibility: bigger FAB captions and slider labels, see SettingSlider/LabeledFab.
   showLabels: boolean
   strokeWidth: number
   tightness: number
   tiltEnabled: boolean
+  // Whether the on-screen trigger stack's group triggers (cog + mirror/colors/pattern/line — see
+  // OnScreenControls' own siblingsVisible) are showing, or tucked away behind the collapse chevron.
+  // Persisted like any other chrome-density preference (showLabels is the closest analog) rather than
+  // always reopening on launch, so a user who declutters the screen can leave it that way.
+  triggerStackExpanded: boolean
   zoomSpeed: number
 }
 
@@ -98,11 +124,14 @@ type SwirlSettingsContextValue = {
   setCropShaped: (shaped: boolean) => void
   setDashStyle: (dashStyle: DashStyle) => void
   setFixedSpacing: (enabled: boolean) => void
+  setFollowSpeed: (speed: number) => void
   setForegroundColors: (colors: string[]) => void
   setForegroundCycleSpeed: (speed: number) => void
+  setGestureTarget: (target: GestureTarget) => void
   setGravity: (gravity: number) => void
   setHoleRadius: (holeRadius: number) => void
   setHoleShaped: (shaped: boolean) => void
+  setMicSensitivity: (sensitivity: number) => void
   setMirrorAlternateColors: (enabled: boolean) => void
   setMirrorGap: (gap: number) => void
   setMirrorLines: (lines: number) => void
@@ -111,11 +140,11 @@ type SwirlSettingsContextValue = {
   setPolygonSides: (sides: number) => void
   setRotationSpeed: (speed: number) => void
   setShakeEnabled: (enabled: boolean) => void
-  setShowGravityMarker: (enabled: boolean) => void
   setShowLabels: (enabled: boolean) => void
   setStrokeWidth: (strokeWidth: number) => void
   setTightness: (tightness: number) => void
   setTiltEnabled: (enabled: boolean) => void
+  setTriggerStackExpanded: (expanded: boolean) => void
   setZoomSpeed: (speed: number) => void
   resetSettings: () => void
 }
@@ -165,15 +194,44 @@ export const MAX_HOLE_RADIUS = 1
 // nearly all velocity within a second, reading as barely a bounce at all before it comes to rest.
 export const MIN_BOUNCE_FRICTION = 0
 export const MAX_BOUNCE_FRICTION = 5
+export const DEFAULT_BOUNCE_FRICTION = 1
 // A spring constant (acceleration = -gravity * (position - gravityCenter), both in fraction-of-window
-// units) applied every frame gravity is active, not just alongside a release-driven bounce — see
+// units) applied every frame gravity is nonzero, not just alongside a release-driven bounce — see
 // useDragPointPhysics.ts's frame callback and its ambient-activation reaction. 0 leaves the epicentre
-// with no pull toward the gravity center at all (the original behavior, back when that center could
-// only ever be the true center); 5 pulls it back firmly enough to noticeably overshoot past the
-// gravity center before friction and further pulls settle it there. Nonzero by default (see
-// defaultSettings.gravity) so tilt has something to actually roll the epicentre with out of the box.
-export const MIN_GRAVITY = 0
+// with no pull toward the gravity center at all; 5 pulls it back firmly enough to noticeably overshoot
+// past the gravity center before friction and further pulls settle it there. Nonzero by default (see
+// DEFAULT_GRAVITY) so tilt has something to actually roll the epicentre with out of the box.
+// MIN is -MAX_GRAVITY, not 0 — negative gravity is a repeller (the same spring constant, flipped into
+// pushing the epicentre away instead of pulling it in). This used to be pinned at 0 (repel tried and
+// pulled back out, not because anything about it was broken, just not worth keeping live at the time)
+// but the physics (useDragPointPhysics.ts's own gravity!==0 checks, not gravity>0) and the gravity
+// marker's magnitude-based sizing (Spiral.tsx's gravityWellHoleRadius) were always written to handle
+// a negative value correctly, so re-enabling it here was just reopening the range — see gravity mode's
+// own "reverse push/pull" transport button (OnScreenControls.tsx), which is what actually flips the
+// sign now that the slider (see ControlGroupBottomSheetContent's snapToZero) can reach it too.
 export const MAX_GRAVITY = 5
+export const MIN_GRAVITY = -MAX_GRAVITY
+export const DEFAULT_GRAVITY = 1
+// A linear multiplier on raw mic RMS, not a dB amount — see micSensitivity's own comment on
+// SwirlSettings above. 1 is unity/neutral (exactly useAudioReactive's existing calibration, unchanged
+// from before this setting existed), and 4 is loud enough to push even a quiet room's mic input toward
+// the top of rmsToUnit's own dB window. MIN deliberately stops short of 0 — audioReactiveEnabled (the
+// mic FAB) is already the on/off switch, so this only needs to cover "how sensitive," and a true 0
+// would multiply every reading to exactly 0 no matter how loud the room actually got, reading as a
+// second, redundant off switch (and a broken one at that, since nothing could ever push through it)
+// rather than an extreme end of "quiet."
+export const MIN_MIC_SENSITIVITY = 0.1
+export const MAX_MIC_SENSITIVITY = 4
+// A time-scale multiplier on the spring driving glideTo/recenter (see useDragPointPhysics.ts), not a
+// raw damping/stiffness value — 1 is the original feel (BASE_DAMPING/BASE_STIFFNESS, unscaled), 3 is
+// noticeably snappier, and 0.25 is slow and floaty enough to watch the catch-up happen frame by frame.
+// Scaling stiffness by speed^2 and damping by speed (rather than moving either alone) is what keeps
+// the spring's own damping *ratio* — how bouncy versus dead-stop it looks — constant across the whole
+// range: only how fast it gets there changes, not its character. MIN stops short of 0 — a speed of
+// exactly 0 would leave the spring with zero stiffness at all, meaning glideTo would never move
+// anything, which isn't a useful "slow" extreme, just broken.
+export const MIN_FOLLOW_SPEED = 0.25
+export const MAX_FOLLOW_SPEED = 3
 
 function clamp(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min
@@ -246,6 +304,10 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.foregroundCycleSpeed === 'number' ? { foregroundCycleSpeed: clamp(persisted.foregroundCycleSpeed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : legacyCycleSpeed != null ? { foregroundCycleSpeed: legacyCycleSpeed } : null),
       ...(typeof persisted.backgroundCycleSpeed === 'number' ? { backgroundCycleSpeed: clamp(persisted.backgroundCycleSpeed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : legacyCycleSpeed != null ? { backgroundCycleSpeed: legacyCycleSpeed } : null),
       ...(typeof persisted.bounceFriction === 'number' ? { bounceFriction: clamp(persisted.bounceFriction, MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION) } : null),
+      // Checked against GESTURE_TARGET_ORDER, same general-fallback approach as pattern/dashStyle
+      // below — a retired target (or garbage) falls through to defaultSettings.gestureTarget ('pattern')
+      // instead of needing its own migration.
+      ...(typeof persisted.gestureTarget === 'string' && GESTURE_TARGET_ORDER.includes(persisted.gestureTarget) ? { gestureTarget: persisted.gestureTarget } : null),
       ...(typeof persisted.gravity === 'number' ? { gravity: clamp(persisted.gravity, MIN_GRAVITY, MAX_GRAVITY) } : null),
       ...(typeof persisted.holeRadius === 'number' ? { holeRadius: clamp(persisted.holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : null),
       // Checked against PATTERN_ORDER itself rather than an enumerated list of literals: this is
@@ -263,7 +325,9 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.cropShaped === 'boolean' ? { cropShaped: persisted.cropShaped } : null),
       ...(typeof persisted.holeShaped === 'boolean' ? { holeShaped: persisted.holeShaped } : null),
       ...(typeof persisted.fixedSpacing === 'boolean' ? { fixedSpacing: persisted.fixedSpacing } : null),
+      ...(typeof persisted.followSpeed === 'number' ? { followSpeed: clamp(persisted.followSpeed, MIN_FOLLOW_SPEED, MAX_FOLLOW_SPEED) } : null),
       ...(typeof persisted.audioReactiveEnabled === 'boolean' ? { audioReactiveEnabled: persisted.audioReactiveEnabled } : null),
+      ...(typeof persisted.micSensitivity === 'number' ? { micSensitivity: clamp(persisted.micSensitivity, MIN_MIC_SENSITIVITY, MAX_MIC_SENSITIVITY) } : null),
       ...(typeof persisted.mirrorAlternateColors === 'boolean' ? { mirrorAlternateColors: persisted.mirrorAlternateColors } : null),
       ...(typeof persisted.mirrorGap === 'number' ? { mirrorGap: clamp(persisted.mirrorGap, MIN_MIRROR_GAP, MAX_MIRROR_GAP) } : null),
       ...(typeof persisted.mirrorLines === 'number' ? { mirrorLines: clampInt(persisted.mirrorLines, MIN_MIRROR_LINES, MAX_MIRROR_LINES) } : legacyMirrorLines != null ? { mirrorLines: legacyMirrorLines } : null),
@@ -274,11 +338,11 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       // unused, the same as any other field a returning user's version predates.
       ...(typeof persisted.rotationSpeed === 'number' ? { rotationSpeed: clamp(persisted.rotationSpeed, MIN_ROTATION_SPEED, MAX_ROTATION_SPEED) } : null),
       ...(typeof persisted.shakeEnabled === 'boolean' ? { shakeEnabled: persisted.shakeEnabled } : null),
-      ...(typeof persisted.showGravityMarker === 'boolean' ? { showGravityMarker: persisted.showGravityMarker } : null),
       ...(typeof persisted.showLabels === 'boolean' ? { showLabels: persisted.showLabels } : null),
       ...(typeof persisted.strokeWidth === 'number' ? { strokeWidth: clamp(persisted.strokeWidth, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH) } : null),
       ...(typeof persisted.tightness === 'number' ? { tightness: clamp(persisted.tightness, MIN_TIGHTNESS, MAX_TIGHTNESS) } : null),
       ...(typeof persisted.tiltEnabled === 'boolean' ? { tiltEnabled: persisted.tiltEnabled } : null),
+      ...(typeof persisted.triggerStackExpanded === 'boolean' ? { triggerStackExpanded: persisted.triggerStackExpanded } : null),
       // Renamed from the old `speed` field (which secretly meant "rotation speed" for spiral/
       // starburst and "zoom speed" for everything else) — a persisted blob from before this split
       // simply has no `zoomSpeed` key, so it falls through to defaultSettings.zoomSpeed like any
@@ -292,38 +356,62 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
 
 export const DEFAULT_BACKGROUND_COLORS = ['#000000']
 export const DEFAULT_FOREGROUND_COLORS = ['#FFFFFF']
+// Line's own four fields (dashStyle/fixedSpacing/strokeWidth/tightness) — exported the same way the
+// two color lists above are, so the Line group's own Reset button (see ControlGroupTopSheetContent)
+// can set each one back to exactly this value from outside this file, instead of either duplicating
+// the literal here (drifting silently if this default ever changes) or going through resetSettings'
+// flat whole-settings replacement, which resets every *other* group's fields too.
+export const DEFAULT_DASH_STYLE: DashStyle = 'solid'
+export const DEFAULT_FIXED_SPACING = false
+// Dead center of each one's own slider (MIN_STROKE_WIDTH/MAX_STROKE_WIDTH, MIN_TIGHTNESS/
+// MAX_TIGHTNESS above) rather than some other "looks reasonable" point off to one side — a centered
+// thumb reads as "here's the middle of the range" on sight, and leaves equal room to explore in
+// either direction from a first launch or a Reset, instead of nudging toward whichever end the old
+// off-center default happened to sit closer to.
+export const DEFAULT_STROKE_WIDTH = (MIN_STROKE_WIDTH + MAX_STROKE_WIDTH) / 2
+export const DEFAULT_TIGHTNESS = (MIN_TIGHTNESS + MAX_TIGHTNESS) / 2
+// Mirror's own four fields — exported the same way Line's own four above are, so the Mirror group's
+// Reset button (see ControlGroupTopSheetContent) can set each one back to exactly this value from
+// outside this file, rather than resetMirror's own gesture-state reset (rotation angle, anchor
+// position) trying to also stand in for the persisted settings underneath it.
+export const DEFAULT_MIRROR_ALTERNATE_COLORS = false
+export const DEFAULT_MIRROR_GAP = 0
+export const DEFAULT_MIRROR_LINES = 0
+export const DEFAULT_MIRROR_ROTATION_SPEED = 0
 
 const defaultSettings: SwirlSettings = {
   audioReactiveEnabled: false,
   backgroundColors: DEFAULT_BACKGROUND_COLORS,
   backgroundCycleSpeed: 1,
-  bounceFriction: 1,
+  bounceFriction: DEFAULT_BOUNCE_FRICTION,
   cropRadius: 1,
   cropShaped: true,
-  dashStyle: 'solid',
-  fixedSpacing: false,
+  dashStyle: DEFAULT_DASH_STYLE,
+  fixedSpacing: DEFAULT_FIXED_SPACING,
+  followSpeed: 1,
   foregroundColors: DEFAULT_FOREGROUND_COLORS,
   foregroundCycleSpeed: 1,
-  gravity: 1,
+  gestureTarget: 'pattern',
+  gravity: DEFAULT_GRAVITY,
   holeRadius: 0,
   holeShaped: true,
-  mirrorAlternateColors: false,
-  mirrorGap: 0,
-  mirrorLines: 0,
-  mirrorRotationSpeed: 0,
+  micSensitivity: 1,
+  mirrorAlternateColors: DEFAULT_MIRROR_ALTERNATE_COLORS,
+  mirrorGap: DEFAULT_MIRROR_GAP,
+  mirrorLines: DEFAULT_MIRROR_LINES,
+  mirrorRotationSpeed: DEFAULT_MIRROR_ROTATION_SPEED,
   pattern: 'spiral',
   polygonSides: 4,
-  // 2, not the more obviously "normal-speed" 1 — the Rotation/Zoom speed sliders now drag/snap (and
-  // tick) in steps of 2 (see ROTATION_SPEED_SLIDER_STEP/ZOOM_SPEED_SLIDER_STEP in
-  // ControlGroupBottomSheetContent), and 1 would start the thumb sitting between two ticks on first
-  // load rather than resting on one the way every other default value on this screen does.
+  // 2, not the more obviously "normal-speed" 1 — matches zoomSpeed's own default below, and there's
+  // no scale-derived reason to prefer either number now that both sliders drag freely (see FREE_STEP
+  // in ControlGroupBottomSheetContent) rather than snapping to a step grid.
   rotationSpeed: 2,
   shakeEnabled: true,
-  showGravityMarker: true,
   showLabels: false,
-  strokeWidth: 6,
-  tightness: 1,
+  strokeWidth: DEFAULT_STROKE_WIDTH,
+  tightness: DEFAULT_TIGHTNESS,
   tiltEnabled: true,
+  triggerStackExpanded: true,
   zoomSpeed: 2
 }
 
@@ -404,11 +492,14 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setCropShaped: (shaped) => setSettings((prev) => ({ ...prev, cropShaped: shaped })),
       setDashStyle: (dashStyle) => setSettings((prev) => ({ ...prev, dashStyle })),
       setFixedSpacing: (enabled) => setSettings((prev) => ({ ...prev, fixedSpacing: enabled })),
+      setFollowSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, followSpeed: clamp(speed, MIN_FOLLOW_SPEED, MAX_FOLLOW_SPEED) } : prev)),
       setForegroundColors: (colors) => setSettings((prev) => (colors.length > 0 ? { ...prev, foregroundColors: colors } : prev)),
       setForegroundCycleSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, foregroundCycleSpeed: clamp(speed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : prev)),
+      setGestureTarget: (target) => setSettings((prev) => ({ ...prev, gestureTarget: target })),
       setGravity: (gravity) => setSettings((prev) => (Number.isFinite(gravity) ? { ...prev, gravity: clamp(gravity, MIN_GRAVITY, MAX_GRAVITY) } : prev)),
       setHoleRadius: (holeRadius) => setSettings((prev) => (Number.isFinite(holeRadius) ? { ...prev, holeRadius: clamp(holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : prev)),
       setHoleShaped: (shaped) => setSettings((prev) => ({ ...prev, holeShaped: shaped })),
+      setMicSensitivity: (sensitivity) => setSettings((prev) => (Number.isFinite(sensitivity) ? { ...prev, micSensitivity: clamp(sensitivity, MIN_MIC_SENSITIVITY, MAX_MIC_SENSITIVITY) } : prev)),
       setMirrorAlternateColors: (enabled) => setSettings((prev) => ({ ...prev, mirrorAlternateColors: enabled })),
       setMirrorGap: (gap) => setSettings((prev) => (Number.isFinite(gap) ? { ...prev, mirrorGap: clamp(gap, MIN_MIRROR_GAP, MAX_MIRROR_GAP) } : prev)),
       setMirrorLines: (lines) => setSettings((prev) => (Number.isFinite(lines) ? { ...prev, mirrorLines: clampInt(lines, MIN_MIRROR_LINES, MAX_MIRROR_LINES) } : prev)),
@@ -417,30 +508,32 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setPolygonSides: (sides) => setSettings((prev) => (Number.isFinite(sides) ? { ...prev, polygonSides: clampInt(sides, MIN_POLYGON_SIDES, MAX_POLYGON_SIDES) } : prev)),
       setRotationSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, rotationSpeed: clamp(speed, MIN_ROTATION_SPEED, MAX_ROTATION_SPEED) } : prev)),
       setShakeEnabled: (enabled) => setSettings((prev) => ({ ...prev, shakeEnabled: enabled })),
-      setShowGravityMarker: (enabled) => setSettings((prev) => ({ ...prev, showGravityMarker: enabled })),
       setShowLabels: (enabled) => setSettings((prev) => ({ ...prev, showLabels: enabled })),
       setStrokeWidth: (strokeWidth) => setSettings((prev) => (Number.isFinite(strokeWidth) ? { ...prev, strokeWidth: clamp(strokeWidth, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH) } : prev)),
       setTightness: (tightness) => setSettings((prev) => (Number.isFinite(tightness) ? { ...prev, tightness: clamp(tightness, MIN_TIGHTNESS, MAX_TIGHTNESS) } : prev)),
       setTiltEnabled: (enabled) => setSettings((prev) => ({ ...prev, tiltEnabled: enabled })),
+      setTriggerStackExpanded: (expanded) => setSettings((prev) => ({ ...prev, triggerStackExpanded: expanded })),
       setZoomSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, zoomSpeed: clamp(speed, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED) } : prev)),
       // A flat, one-shot replacement rather than looping every individual setter — there's no
       // per-field validation to run since defaultSettings is already known-valid, and going through
       // each setter would also mean this drifts out of sync the moment a new field's setter gains its
       // own extra branching (e.g. the empty-list guards on colors) that a plain reset should ignore
-      // anyway. audioReactiveEnabled, shakeEnabled, and tiltEnabled are all carried over from whatever
-      // they already were, not reset to their defaults — they're device-capability toggles (is the mic
-      // feeding this, does a shake randomize, does tilting the device warp it), not look/tuning
+      // anyway. audioReactiveEnabled, gestureTarget, shakeEnabled, showLabels, and tiltEnabled are all
+      // carried over from whatever they already were, not reset to their defaults — they're
+      // device-capability toggles (is the mic feeding this, does a shake randomize, does tilting the
+      // device warp it), chrome-density preferences (showLabels), or a tool mode (gestureTarget — which
+      // point a drag targets has no bearing on what the art itself looks like), not look/tuning
       // preferences like everything else this button touches. audioReactiveEnabled is live session
-      // state tied to a mic the user just granted; shakeEnabled/tiltEnabled are explicit opt-outs the
-      // user made — either way, a flat reset shouldn't silently switch them back on/off underneath
-      // someone. showGravityMarker joins them for the same reason, plus it's a temporary debug knob
-      // (see its own comment) that a "Reset all" shouldn't silently flip back on/off either.
+      // state tied to a mic the user just granted; shakeEnabled/tiltEnabled/showLabels/gestureTarget are
+      // explicit choices the user made — either way, a flat reset shouldn't silently switch them back
+      // on/off (or back to 'pattern') underneath someone.
       resetSettings: () =>
         setSettings((prev) => ({
           ...defaultSettings,
           audioReactiveEnabled: prev.audioReactiveEnabled,
+          gestureTarget: prev.gestureTarget,
           shakeEnabled: prev.shakeEnabled,
-          showGravityMarker: prev.showGravityMarker,
+          showLabels: prev.showLabels,
           tiltEnabled: prev.tiltEnabled
         }))
     }),

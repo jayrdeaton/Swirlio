@@ -6,6 +6,14 @@ type MdIconProps = {
   name: string
   color: string
   size: number
+  // Overrides GLOBAL_NUDGE_X/Y below for this one instance — that constant was calibrated by eye at
+  // FAB scale (40-56px), where a 1px shift is a small fraction of the glyph's own size. At SettingSlider
+  // thumb's much smaller THUMB_ICON_SIZE (15px), the exact same 1px carries over as a much bigger
+  // fraction of the glyph and reads as visibly off-center — measuring the thumb's own layout in the
+  // browser confirmed its icon container centers at an exact fractional pixel with zero rounding drift,
+  // so the offset there isn't a container/rounding bug, just this nudge being oversized for it.
+  nudgeX?: number
+  nudgeY?: number
 }
 
 // react-native-paper's own icon renderer (MaterialCommunityIcon.tsx) pairs every glyph with
@@ -21,9 +29,9 @@ type MdIconProps = {
 export const GLOBAL_NUDGE_X = -1
 export const GLOBAL_NUDGE_Y = -1
 
-export function MdIcon({ name, color, size }: MdIconProps) {
+export function MdIcon({ name, color, size, nudgeX = GLOBAL_NUDGE_X, nudgeY = GLOBAL_NUDGE_Y }: MdIconProps) {
   const containerStyle = { height: size, width: size, alignItems: 'center' as const, justifyContent: 'center' as const }
-  const iconWrapperStyle = { transform: [{ translateX: GLOBAL_NUDGE_X }, { translateY: GLOBAL_NUDGE_Y }] }
+  const iconWrapperStyle = { transform: [{ translateX: nudgeX }, { translateY: nudgeY }] }
 
   return (
     <View style={containerStyle}>
@@ -64,3 +72,18 @@ export function resolveIcon(icon: IconOrRenderFn): (props: { size: number; color
   }
   return icon
 }
+
+// resolveIcon's own fix above only covers the *string* half of this bug class. The other half: a
+// render function built inline in JSX (e.g. `icon={({ size, color }) => <PatternIcon
+// pattern={settings.pattern} .../>}`) is a fresh closure every render regardless of whether
+// settings.pattern itself changed, same "new identity every render" problem, just for icons whose
+// glyph actually depends on live app state rather than being a fixed, module-level constant (module
+// constants — GROUP_TRIGGERS' icons, GESTURE_TARGET_ICONS — already get identity stability for free
+// from being created once at module load, no fix needed there). There's no equivalent shared helper
+// for this half: eslint-plugin-react-hooks' own use-memo rule requires useMemo's dependency array to
+// be a literal at the call site to statically verify it, which a generic `useDynamicIcon(render,
+// deps)`-style wrapper forwarding `deps` through defeats — so wrap the icon in a plain
+// `useMemo(() => (({ size, color }) => <Whatever .../>), [theValueItActuallyDependsOn])` directly at
+// the call site instead (see OnScreenControls' cycleLineTypeIcon/cycleShapeIcon for the pattern) —
+// called unconditionally at the top of the component (Rules of Hooks), even if the FAB it feeds only
+// renders conditionally.

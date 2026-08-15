@@ -6,6 +6,7 @@ import { Text } from 'react-native'
 import { MAX_MIRROR_LINES } from '@/constants/kaleidoscope'
 import { PATTERN_ORDER } from '@/constants/patterns'
 import { DashStyle } from '@/constants/strokeDash'
+import { GestureTarget } from '@/hooks/useEpicenter'
 import { SwirlSettings, SwirlSettingsProvider, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 type TestApi = {
@@ -18,11 +19,14 @@ type TestApi = {
   setCropShaped: (shaped: boolean) => void
   setDashStyle: (dashStyle: DashStyle) => void
   setFixedSpacing: (enabled: boolean) => void
+  setFollowSpeed: (speed: number) => void
   setForegroundColors: (colors: string[]) => void
   setForegroundCycleSpeed: (speed: number) => void
+  setGestureTarget: (target: GestureTarget) => void
   setGravity: (gravity: number) => void
   setHoleRadius: (holeRadius: number) => void
   setHoleShaped: (shaped: boolean) => void
+  setMicSensitivity: (sensitivity: number) => void
   setMirrorAlternateColors: (enabled: boolean) => void
   setMirrorGap: (gap: number) => void
   setMirrorLines: (lines: number) => void
@@ -30,7 +34,7 @@ type TestApi = {
   setPolygonSides: (sides: number) => void
   setRotationSpeed: (speed: number) => void
   setShakeEnabled: (enabled: boolean) => void
-  setShowGravityMarker: (enabled: boolean) => void
+  setShowLabels: (enabled: boolean) => void
   setStrokeWidth: (strokeWidth: number) => void
   setTiltEnabled: (enabled: boolean) => void
   setZoomSpeed: (speed: number) => void
@@ -45,11 +49,11 @@ function requireApi(value: TestApi | null): TestApi {
 }
 
 function Probe({ onUpdate }: { onUpdate: (api: TestApi) => void }) {
-  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowGravityMarker, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings } = useSwirlSettings()
+  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings } = useSwirlSettings()
 
   useEffect(() => {
-    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowGravityMarker, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings })
-  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowGravityMarker, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings, settings])
+    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings })
+  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings, settings])
 
   return <Text testID='stroke'>{String(settings.strokeWidth)}</Text>
 }
@@ -85,7 +89,6 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.tiltEnabled).toBe(true)
     expect(getApi().settings.mirrorLines).toBe(0)
     expect(getApi().settings.showLabels).toBe(false)
-    expect(getApi().settings.showGravityMarker).toBe(true)
   })
 
   it('hydrates persisted settings from storage', async () => {
@@ -97,7 +100,6 @@ describe('useSwirlSettings', () => {
         shakeEnabled: false,
         tiltEnabled: false,
         showLabels: true,
-        showGravityMarker: false,
         foregroundColors: ['#111111', '#222222'],
         backgroundColors: ['#333333'],
         foregroundCycleSpeed: 2.5,
@@ -112,7 +114,6 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.shakeEnabled).toBe(false)
     expect(getApi().settings.tiltEnabled).toBe(false)
     expect(getApi().settings.showLabels).toBe(true)
-    expect(getApi().settings.showGravityMarker).toBe(false)
     expect(getApi().settings.foregroundColors).toEqual(['#111111', '#222222'])
     expect(getApi().settings.backgroundColors).toEqual(['#333333'])
     expect(getApi().settings.foregroundCycleSpeed).toBe(2.5)
@@ -145,6 +146,46 @@ describe('useSwirlSettings', () => {
 
     expect(getApi().settings.pattern).toBe('spiral')
     expect(getApi().settings.dashStyle).toBe('solid')
+  })
+
+  it('defaults gestureTarget to pattern and lets it be changed', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.gestureTarget).toBe('pattern')
+
+    await act(async () => {
+      getApi().setGestureTarget('gravity')
+    })
+
+    await waitFor(() => expect(getApi().settings.gestureTarget).toBe('gravity'))
+  })
+
+  it.each(['mirror', 'gravity', 'speed'] as const)('hydrates a persisted gestureTarget value (%s)', async (gestureTarget) => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ gestureTarget }))
+
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.gestureTarget).toBe(gestureTarget)
+  })
+
+  it('falls back to the default gestureTarget for an unrecognized value', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ gestureTarget: 'not-a-real-target' }))
+
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.gestureTarget).toBe('pattern')
+  })
+
+  it('persists gestureTarget across a reload', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setGestureTarget('mirror')
+    })
+    await waitFor(() => expect(getApi().settings.gestureTarget).toBe('mirror'))
+    await waitFor(() => expect(AsyncStorage.setItem).toHaveBeenCalledWith('swirlio.settings.v1', expect.stringContaining('"gestureTarget":"mirror"')))
   })
 
   it('defaults dashStyle to solid and lets it be changed', async () => {
@@ -558,15 +599,86 @@ describe('useSwirlSettings', () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
+    // Negative gravity is a valid repeller value now, not clamped away — only values past
+    // -MAX_GRAVITY get clamped.
     await act(async () => {
       getApi().setGravity(-1)
     })
-    await waitFor(() => expect(getApi().settings.gravity).toBe(0))
+    await waitFor(() => expect(getApi().settings.gravity).toBe(-1))
+
+    await act(async () => {
+      getApi().setGravity(-999)
+    })
+    await waitFor(() => expect(getApi().settings.gravity).toBe(-5))
 
     await act(async () => {
       getApi().setGravity(999)
     })
     await waitFor(() => expect(getApi().settings.gravity).toBe(5))
+  })
+
+  it('defaults followSpeed to 1 (the original, un-tunable feel) and lets it be changed', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.followSpeed).toBe(1)
+
+    await act(async () => {
+      getApi().setFollowSpeed(2)
+    })
+
+    await waitFor(() => expect(getApi().settings.followSpeed).toBe(2))
+  })
+
+  it('clamps followSpeed setter and hydration values to their valid range', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ followSpeed: 999 }))
+    const { getApi: getHydratedApi } = await renderProbe()
+    expect(getHydratedApi().settings.followSpeed).toBe(3)
+
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setFollowSpeed(-1)
+    })
+    await waitFor(() => expect(getApi().settings.followSpeed).toBe(0.25))
+
+    await act(async () => {
+      getApi().setFollowSpeed(999)
+    })
+    await waitFor(() => expect(getApi().settings.followSpeed).toBe(3))
+  })
+
+  it("defaults micSensitivity to 1 (unity gain, matching rmsToUnit's existing calibration) and lets it be changed", async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.micSensitivity).toBe(1)
+
+    await act(async () => {
+      getApi().setMicSensitivity(2.5)
+    })
+
+    await waitFor(() => expect(getApi().settings.micSensitivity).toBe(2.5))
+  })
+
+  it('clamps micSensitivity setter and hydration values to their valid range', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ micSensitivity: 999 }))
+    const { getApi: getHydratedApi } = await renderProbe()
+    expect(getHydratedApi().settings.micSensitivity).toBe(4)
+
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setMicSensitivity(-1)
+    })
+    await waitFor(() => expect(getApi().settings.micSensitivity).toBe(0.1))
+
+    await act(async () => {
+      getApi().setMicSensitivity(999)
+    })
+    await waitFor(() => expect(getApi().settings.micSensitivity).toBe(4))
   })
 
   it('defaults mirrorRotationSpeed to 0 and lets it be changed, including negative', async () => {
@@ -829,7 +941,7 @@ describe('useSwirlSettings', () => {
     })
 
     await waitFor(() => {
-      expect(getApi().settings.strokeWidth).toBe(6)
+      expect(getApi().settings.strokeWidth).toBe(18.5)
       expect(getApi().settings.pattern).toBe('spiral')
       expect(getApi().settings.foregroundColors).toEqual(['#FFFFFF'])
       expect(getApi().settings.zoomSpeed).toBe(2)
@@ -854,23 +966,22 @@ describe('useSwirlSettings', () => {
       getApi().resetSettings()
     })
 
-    await waitFor(() => expect(getApi().settings.strokeWidth).toBe(6))
+    await waitFor(() => expect(getApi().settings.strokeWidth).toBe(18.5))
     expect(getApi().settings.audioReactiveEnabled).toBe(true)
   })
 
   // shakeEnabled/tiltEnabled are opt-outs, not look/tuning knobs — someone who's turned off shake-to-
   // randomize or tilt warp shouldn't have Reset all silently switch them back on, mirroring
-  // audioReactiveEnabled's carve-out above. showGravityMarker joins them for the same reason, plus
-  // it's a temporary debug toggle (see its own comment in useSwirlSettings.tsx) that a "Reset all"
-  // shouldn't silently flip either. See resetSettings's own comment in useSwirlSettings.tsx.
-  it('resetSettings leaves shakeEnabled, tiltEnabled, and showGravityMarker exactly as they were, on or off', async () => {
+  // audioReactiveEnabled's carve-out above. showLabels is a chrome-density preference, not a
+  // look/tuning knob either. See resetSettings's own comment in useSwirlSettings.tsx.
+  it('resetSettings leaves shakeEnabled, tiltEnabled, and showLabels exactly as they were, on or off', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
     await act(async () => {
       getApi().setShakeEnabled(false)
       getApi().setTiltEnabled(false)
-      getApi().setShowGravityMarker(false)
+      getApi().setShowLabels(true)
     })
     await waitFor(() => expect(getApi().settings.shakeEnabled).toBe(false))
 
@@ -878,9 +989,29 @@ describe('useSwirlSettings', () => {
       getApi().resetSettings()
     })
 
-    await waitFor(() => expect(getApi().settings.strokeWidth).toBe(6))
+    await waitFor(() => expect(getApi().settings.strokeWidth).toBe(18.5))
     expect(getApi().settings.shakeEnabled).toBe(false)
     expect(getApi().settings.tiltEnabled).toBe(false)
-    expect(getApi().settings.showGravityMarker).toBe(false)
+    expect(getApi().settings.showLabels).toBe(true)
+  })
+
+  // gestureTarget is a tool mode (which point a drag targets), not a look/tuning knob either — same
+  // carve-out as shakeEnabled/tiltEnabled/showLabels above. See resetSettings's own comment in
+  // useSwirlSettings.tsx.
+  it('resetSettings leaves gestureTarget exactly as it was', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setGestureTarget('gravity')
+    })
+    await waitFor(() => expect(getApi().settings.gestureTarget).toBe('gravity'))
+
+    await act(async () => {
+      getApi().resetSettings()
+    })
+
+    await waitFor(() => expect(getApi().settings.strokeWidth).toBe(18.5))
+    expect(getApi().settings.gestureTarget).toBe('gravity')
   })
 })

@@ -76,9 +76,28 @@ export function wedgePath(centerX: number, centerY: number, radius: number, star
 // removed between two neighboring wedges is gapFraction * wedgeAngleDeg, split half-and-half onto each
 // of their facing edges — MAX_MIRROR_GAP stops short of 1 so that split can never meet in the middle
 // and collapse a wedge to nothing.
-export function wedgeClipPath(centerX: number, centerY: number, radius: number, copyIndex: number, wedgeAngleDeg: number, gapFraction: number): string {
+//
+// `overlapDeg` (default 0, so every caller above — and every existing test — sees the exact geometric
+// tiling this function has always produced) exists purely to paper over a Skia rendering artifact, not
+// to change the wedge geometry itself: two neighboring KaleidoscopeCopy elements are two *separate*
+// <Group clip> draws (see Spiral.tsx), each with its own antialiased clip edge. When those two edges
+// land exactly on top of each other (gapFraction 0, or any gap small enough that AA still touches both
+// sides), each contributes only partial coverage at the shared boundary pixels, and — because the second
+// draw alpha-blends over the first rather than adding to it — the two partial-coverage passes combine to
+// *less* than full opacity there. On a light stroke over a dark background that reads as a faint gray
+// seam running the length of the mirror axis, exactly where a user would look for a clean, invisible
+// join. Nudging both edges outward by a small, fixed amount (subtracted from insetDeg, so it can push
+// insetDeg negative — a deliberate overlap) makes the boundary pixels fall solidly inside one wedge's
+// opaque interior instead of on both wedges' soft edges at once: whichever copy draws second simply
+// paints over the first at full opacity there, so the seam disappears. A fixed degree amount (not scaled
+// by wedgeAngleDeg the way the gap itself is) is deliberate here too, for the opposite reason gapFraction
+// avoids one: the artifact's size is a constant ~1px of screen-space antialiasing, not a fraction of the
+// wedge, so undoing it takes a constant angular nudge — see Spiral.tsx's WEDGE_SEAM_OVERLAP_DEG for the
+// exact value and its own trade-off (too small and the seam survives near the epicenter where wedges are
+// narrowest in screen space; too large and it visibly eats into a small intentional mirrorGap setting).
+export function wedgeClipPath(centerX: number, centerY: number, radius: number, copyIndex: number, wedgeAngleDeg: number, gapFraction: number, overlapDeg = 0): string {
   'worklet'
-  const insetDeg = (gapFraction * wedgeAngleDeg) / 2
+  const insetDeg = (gapFraction * wedgeAngleDeg) / 2 - overlapDeg
   const start = copyIndex * wedgeAngleDeg + insetDeg
   const end = (copyIndex + 1) * wedgeAngleDeg - insetDeg
   return wedgePath(centerX, centerY, radius, start, end)

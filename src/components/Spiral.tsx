@@ -4,13 +4,14 @@ import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { SharedValue, useDerivedValue } from 'react-native-reanimated'
 
 import { buildFlowerPoints } from '@/constants/flowerMath'
+import { gravityHoleRadius, gravityParticleAngleRad, gravityParticleDotRadius, gravityParticleOpacity, gravityParticlePhase, gravityParticleRadius, gravityParticleSizeScale } from '@/constants/gravityWellMath'
 import { AffineMatrix, copyCountForMirrorLines, rotationMatrix, translateRotateMatrix, wedgeAngleDegrees, wedgeClipPath, wedgeContentTransform } from '@/constants/kaleidoscope'
 import { hasPolygonSides, PatternType } from '@/constants/patterns'
 import { buildPolygonPoints } from '@/constants/polygonMath'
 import { buildStarPoints } from '@/constants/starMath'
 import { DashStyle } from '@/constants/strokeDash'
 import { useCyclingColor } from '@/hooks/useCyclingColor'
-import { MAX_GRAVITY, MIN_GRAVITY } from '@/hooks/useSwirlSettings'
+import { MAX_CROP_RADIUS, MAX_GRAVITY } from '@/hooks/useSwirlSettings'
 
 import { FlowerPattern } from './patterns/FlowerPattern'
 import { PolygonPattern } from './patterns/PolygonPattern'
@@ -23,26 +24,70 @@ import { StarPattern } from './patterns/StarPattern'
 // epicenter/window combination could ever produce, so a wedge's straight edges never fall short of
 // the screen's actual corners — see wedgePath/wedgeClipPath.
 const MASK_EXTENT = 100000
+// A small fixed angular overlap fed to wedgeClipPath's own overlapDeg — see that function's comment
+// for the actual Skia-rendering reason this exists (two adjacent wedges' own antialiased clip edges
+// under-covering where they meet, read as a faint seam along the mirror axis). Tuned by eye, and
+// deliberately small: this overlap widens every copy's wedge by the same fixed angle regardless of
+// radius, so nearer the epicenter — where the pattern's own rings/petals are packed tightest — the
+// same angular overlap covers a much bigger *share* of what little content is there. Overshoot this
+// (0.5° measurably did, across MAX_MIRROR_LINES's narrowest 30° wedge) and the overlap stops being a
+// hairline: enough neighboring copies' content piles up right at the epicenter that it paints over the
+// background entirely, replacing the seam with a solid blob blocking the pattern's own center — a worse
+// defect than the seam it was meant to hide. 0.15° is the largest value that stayed clean there in
+// testing (flower pattern, mirrorLines 4 and 6, gapFraction 0) while still hiding the seam a ring or two
+// out. Small enough relative to a real mirrorGap setting to stay unnoticeable there too (well under a 1%
+// gap step even on the narrowest wedge, since gapFraction's own insetDeg is halved before this is
+// subtracted from it — see wedgeClipPath).
+//
+// Deliberately leaves the epicenter point itself unfixed — every copy's wedge is a pie slice with its
+// apex pinned to that exact shared point (see wedgePath in kaleidoscope.ts), so however this angle is
+// tuned, the sliver of screen it actually covers there — radius × angle — goes to zero as radius does. A
+// second fix was tried (unioning a small radius-independent circle onto each copy's clip, so every copy
+// claims the epicenter fully instead of racing over a shrinking sliver of it) and it does eliminate the
+// residual seam — but it swaps a sub-pixel artifact for a *bigger*, more visible one on any pattern whose
+// content near the epicenter is a large flat fill rather than a thin stroke (e.g. starburst with
+// mirrorAlternateColors on): the "flat spot" that circle guarantees is one copy's own solid fill colour
+// standing in for the kaleidoscope there, which reads as a small but obvious bump of the wrong colour
+// poking into the neighbouring copy's region — worse than the seam it replaced. Left as the plain
+// angular-only overlap instead: a residual seam confined to a couple of screen pixels at the pattern's
+// own rotational anchor, present regardless of pattern/colour settings but never worse than that.
+const WEDGE_SEAM_OVERLAP_DEG = 0.15
 // See `radius`'s own comment below for why this needs to be a whole grid of pixels, not just one.
 const RADIUS_QUANTUM_PX = 6
-// GravityRingMarker's own sizing — the only marker Spiral draws anymore (pattern's and the mirror
-// anchor's were both removed) — deliberately not scaled by zoom/tightness/anything else the pattern
-// itself animates, the same way a map pin stays a constant size regardless of what the map underneath
-// it is doing. Two thin (stroked, not filled) rings rather than a solid dot — see GravityRingMarker's
-// own comment for why that's a deliberately lighter touch. Radius scales with how strong gravity
-// currently is (see gravityMarkerOuterRadius below): MIN_GRAVITY maps to the smaller radius,
-// MAX_GRAVITY to the larger one, so a stronger pull visibly reads as a bigger ring.
-const GRAVITY_MARKER_MIN_RADIUS_PX = 14
-const GRAVITY_MARKER_MAX_RADIUS_PX = 50
-// How much smaller the inner (black) ring is than the outer (white) one — the two need daylight
-// between them to read as two distinct rings rather than one thick blob.
-const GRAVITY_MARKER_RING_GAP_PX = 6
-const GRAVITY_MARKER_STROKE_WIDTH_PX = 1.5
+// GravityWell's own sizing — the only marker Spiral draws anymore (pattern's and the mirror anchor's
+// were both removed) — deliberately not scaled by zoom/tightness/anything else the pattern itself
+// animates, the same way a map pin stays a constant size regardless of what the map underneath it is
+// doing. The hole's radius scales with how strong gravity currently is (see gravityWellHoleRadius
+// below): 0 maps to the smaller radius, either extreme (MIN_GRAVITY or MAX_GRAVITY — a pull and a
+// push of the same strength) maps to the larger one, so a more intense effect visibly reads as a
+// bigger hole regardless of which direction it's acting in.
+const GRAVITY_HOLE_MIN_RADIUS_PX = 14
+const GRAVITY_HOLE_MAX_RADIUS_PX = 50
+// How many particles orbit the well — see GravityParticle. Spread across the whole hole via
+// gravityParticleAngleRad's golden-angle placement, so this many is enough to read as a field rather
+// than a scattering of individual dots without looking crowded.
+const GRAVITY_PARTICLE_COUNT = 14
+const GRAVITY_PARTICLE_INDICES = Array.from({ length: GRAVITY_PARTICLE_COUNT }, (_, index) => index)
+// A particle's own rendered size shrinks toward the well's center and grows back out toward the
+// hole's edge (see gravityParticleDotRadius) — depth cue, not physics: sitting closer to the center
+// already reads as "further into the well," and shrinking there too is what actually sells that
+// rather than just a flat field of same-size dots sliding around.
+const GRAVITY_PARTICLE_MIN_DOT_RADIUS_PX = 0.75
+const GRAVITY_PARTICLE_MAX_DOT_RADIUS_PX = 3
 // A harmless placeholder for KaleidoscopeCopy's wedge-placement matrix when inactive (mirrorLines ===
 // 0) — every hook below still has to run unconditionally, but the value it produces here is never
 // actually rendered (see the `!active` early return in KaleidoscopeCopy), so its exact contents don't
 // matter beyond being a valid 3x3 affine matrix.
 const IDENTITY_MATRIX: AffineMatrix = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+// How much further out the "no crop requested" clip reaches than the plain reach-the-farthest-corner
+// radius every other clip size is based on — see cropClip's own comment for why a shaped (or even
+// circular) clip sized to exactly that radius still visibly cuts into a concave pattern's own content
+// at cropRadius's max. 2 is the minimum that works for every currently shaped pattern (Polygon's
+// inradius/circumradius ratio bottoms out at cos(60°) = 0.5 for a triangle, matching
+// FLOWER_INNER_RATIO/STAR_INNER_RATIO exactly) — the extra headroom past that exact 2 covers the ring
+// pool's own sampling granularity (see FlowerPattern/StarPattern/PolygonPattern's ripple spacing)
+// landing a little short of a perfect 2x reach in between two pool instances.
+const NO_CROP_CLIP_RADIUS_MULTIPLIER = 2.5
 
 // The closed vertex list to trace a "shaped" crop/hole contour at the given radius for whichever
 // pattern is active, or null to fall back to a plain circle — Rings/Spiral/Starburst have no closed
@@ -134,21 +179,35 @@ export type SpiralProps = {
   // pulling toward, including whenever nothing is currently gestureTarget-ed by it.
   gravityCenterX: SharedValue<number>
   gravityCenterY: SharedValue<number>
-  // How strong gravity currently is — purely to size GravityRingMarker's rings below, see
-  // GRAVITY_MARKER_MIN/MAX_RADIUS_PX's own comment. The physics itself already gets this value
-  // independently (useEpicenter.ts's own gravity SharedValue); this is a second, render-only use.
+  // How strong gravity currently is — sizes GravityWell's hole (see GRAVITY_HOLE_MIN/MAX_RADIUS_PX's
+  // own comment) and, via its sign, sets whether GravityParticle falls inward or emanates outward. The
+  // physics itself already gets this value independently (useEpicenter.ts's own gravity SharedValue);
+  // this is a second, render-only use.
   gravity: SharedValue<number>
-  // Gates the gravity marker's own visibility (see gravityMarkerOpacity below) — true only while
-  // gravity is visibly doing something (something is actively rolling/settling because of it), not
-  // just "gravity is turned on." A permanently-on marker read as clutter over the art itself — this
-  // is meant to surface rarely, exactly when there's something worth watching, the same way it was
-  // designed to work once it's promoted to its own touch-draggable gesture target later. See
-  // useEpicenter.ts's own gravityActive comment for the exact definition.
+  // Drives GravityParticle's own fall/emanate cycle — a 0..1 loop from useLoopingProgress in index.tsx
+  // (same pre-frozen-upstream treatment as pulse/foregroundCycleProgress/backgroundCycleProgress: a
+  // bespoke clock here in Spiral wouldn't know about the app's freeze/pause state, since Spiral itself
+  // receives no `frozen` prop). Its rate already tracks |gravity| upstream, so this only needs to
+  // supply the clock itself, not gravity's magnitude a second time.
+  gravityParticleProgress: SharedValue<number>
+  // Not read by this component anymore — the marker's own visibility is now purely
+  // showGravityMarker below, independent of whether gravity is actively doing anything. Kept as a
+  // prop (rather than dropped from SpiralProps/useEpicenter entirely) since it's still a real,
+  // correct "is gravity's bounce physics currently settling" signal other code (this file's own test
+  // suite) observes through Spiral's props; nothing here destructures it.
   gravityActive: SharedValue<boolean>
-  // A temporary settings-drawer toggle (see useSwirlSettings.tsx's own showGravityMarker comment) —
-  // combined with gravityActive above via a plain JS `&&`, not inside a worklet: reading a plain,
-  // non-SharedValue prop from inside a worklet risks exactly the stale-closure bug already fixed once
-  // in useDragPointPhysics.ts (see frozenShared's own comment there) for the same underlying reason.
+  // Whether the gravity marker should mount at all — index.tsx passes gravityMarkerVisible here (the
+  // toggle in the gravity group's own top sheet — see ControlGroupTopSheetContent), so the marker
+  // shows on every gesture mode while it's on, and stays hidden even while actively controlling
+  // gravity once it's off. Deliberately not also gated on gravity !== 0 — see index.tsx's own
+  // gravityMarkerVisible comment for why an earlier version's "hide at gravity 0" made the well pop
+  // in and out of existence while dragging the Gravity slider, and why gravityParticleFrictionSpeed
+  // fixes the actual frozen-particles problem that was meant to solve instead. A plain JS conditional,
+  // not a worklet: reading a plain, non-SharedValue prop from inside a worklet risks exactly the
+  // stale-closure bug already fixed once in useDragPointPhysics.ts (see frozenShared's own comment
+  // there) for the same underlying reason — but this only ever changes from a deliberate toggle press,
+  // which already re-renders this component, so there's nothing here that needs UI-thread reactivity
+  // anyway.
   showGravityMarker: boolean
   strokeWidth: SharedValue<number>
   dashStyle: SharedValue<DashStyle>
@@ -181,18 +240,72 @@ type KaleidoscopeCopyProps = {
   geometry: PatternGeometry
 }
 
-// Gravity's own marker — the only marker Spiral draws anymore. Two thin, stroked (not filled) rings
-// rather than a solid dot, so this reads as a much lighter touch: a hint of where gravity's pulling
-// toward, not a solid shape competing with the art itself. White outer ring, black inner ring keeps
-// it legible over any foreground/background color combination this app can produce, the same
-// contrast reasoning a solid white-behind-black marker would use, just as two concentric rings
-// instead of two concentric fills. outerRadius/innerRadius are driven by how strong gravity currently
-// is — see gravityMarkerOuterRadius in Spiral below.
-function GravityRingMarker({ x, y, outerRadius, innerRadius }: { x: SharedValue<number>; y: SharedValue<number>; outerRadius: SharedValue<number>; innerRadius: SharedValue<number> }) {
+type GravityParticleProps = {
+  index: number
+  x: SharedValue<number>
+  y: SharedValue<number>
+  gravity: SharedValue<number>
+  gravityParticleProgress: SharedValue<number>
+  holeRadius: SharedValue<number>
+  foreground: SharedValue<string>
+}
+
+// One particle orbiting the gravity well — a fixed-size array of these (see GRAVITY_PARTICLE_INDICES)
+// is what GravityWell actually renders, the same "component per instance, hooks can't be called in a
+// loop" reasoning KaleidoscopeCopy's own comment lays out for its own variable-count copies. angleRad
+// is a plain per-index constant (golden-angle spread, see gravityParticleAngleRad) rather than a
+// SharedValue — it never changes once a particle exists, so there's nothing here for it to react to.
+function GravityParticle({ index, x, y, gravity, gravityParticleProgress, holeRadius, foreground }: GravityParticleProps) {
+  const angleRad = gravityParticleAngleRad(index)
+  const phase = useDerivedValue(() => gravityParticlePhase(gravityParticleProgress.value, index, GRAVITY_PARTICLE_COUNT))
+  // Bounded by the hole's own edge, not some larger field beyond it — particles stay contained inside
+  // the well itself (0 at the center, holeRadius.value at its edge), never spilling into the pattern
+  // around it. gravity.value >= 0 (pull) counts this particle down from the hole's edge to its center —
+  // falling in. Negative (push/repel) counts it up from the center to the hole's edge — emanating out.
+  // Reading gravity.value directly here (rather than some pre-computed "pulling" prop) is what makes a
+  // sign flip (the reverse-gravity control) take effect on the very next frame, live.
+  const orbitRadius = useDerivedValue(() => gravityParticleRadius(phase.value, 0, holeRadius.value, gravity.value >= 0))
+  const cx = useDerivedValue(() => x.value + Math.cos(angleRad) * orbitRadius.value)
+  const cy = useDerivedValue(() => y.value + Math.sin(angleRad) * orbitRadius.value)
+  const opacity = useDerivedValue(() => gravityParticleOpacity(phase.value))
+  // Depth (gravityParticleDotRadius, center-to-edge within THIS particle's own hole) times overall
+  // scale (gravityParticleSizeScale, how big that whole range gets given how strong gravity currently
+  // is) — a weak, small well should carry noticeably smaller dust than a wide-open one, not the same
+  // size chunks just packed into less room.
+  const dotRadius = useDerivedValue(() => {
+    const depthRadius = gravityParticleDotRadius(orbitRadius.value, holeRadius.value, GRAVITY_PARTICLE_MIN_DOT_RADIUS_PX, GRAVITY_PARTICLE_MAX_DOT_RADIUS_PX)
+    const sizeScale = gravityParticleSizeScale(holeRadius.value, GRAVITY_HOLE_MAX_RADIUS_PX)
+    return depthRadius * sizeScale
+  })
+  return <Circle cx={cx} cy={cy} r={dotRadius} color={foreground} opacity={opacity} />
+}
+
+type GravityWellProps = {
+  x: SharedValue<number>
+  y: SharedValue<number>
+  holeRadius: SharedValue<number>
+  gravity: SharedValue<number>
+  gravityParticleProgress: SharedValue<number>
+  foreground: SharedValue<string>
+  background: SharedValue<string>
+}
+
+// Gravity's own marker — the only marker Spiral draws anymore. A filled hole in the current background
+// color, sized by how strong gravity currently is, plus foreground-colored particles either falling
+// toward its center or emanating out toward its edge depending on gravity's sign — see GravityParticle.
+// Contained entirely within the hole itself (see gravityParticleRadius's own 0..holeRadius bound), the
+// way matter stays inside a black hole's event horizon rather than drifting into the pattern beyond it.
+// The hole is drawn in the exact same `background` value the full canvas already uses (see Spiral's own
+// `background`), so it reads as a genuine hole punched through whatever pattern content sits under it,
+// not a shape trying to contrast against the canvas — filled, not stroked, unlike the old two-ring
+// placeholder this replaced.
+function GravityWell({ x, y, holeRadius, gravity, gravityParticleProgress, foreground, background }: GravityWellProps) {
   return (
     <Group>
-      <Circle cx={x} cy={y} r={outerRadius} color='white' style='stroke' strokeWidth={GRAVITY_MARKER_STROKE_WIDTH_PX} />
-      <Circle cx={x} cy={y} r={innerRadius} color='black' style='stroke' strokeWidth={GRAVITY_MARKER_STROKE_WIDTH_PX} />
+      <Circle cx={x} cy={y} r={holeRadius} color={background} />
+      {GRAVITY_PARTICLE_INDICES.map((index) => (
+        <GravityParticle key={index} index={index} x={x} y={y} gravity={gravity} gravityParticleProgress={gravityParticleProgress} holeRadius={holeRadius} foreground={foreground} />
+      ))}
     </Group>
   )
 }
@@ -216,7 +329,7 @@ function KaleidoscopeCopy({ copyIndex, wedgeAngleDeg, mirrorGap, active, mirrorO
   const wedgeClip = useDerivedValue(() => {
     const x = mirrorOriginX.value
     const y = mirrorOriginY.value
-    return active ? wedgeClipPath(x, y, MASK_EXTENT, copyIndex, wedgeAngleDeg, mirrorGap.value) : `M ${x - MASK_EXTENT} ${y - MASK_EXTENT} H ${x + MASK_EXTENT} V ${y + MASK_EXTENT} H ${x - MASK_EXTENT} Z`
+    return active ? wedgeClipPath(x, y, MASK_EXTENT, copyIndex, wedgeAngleDeg, mirrorGap.value, WEDGE_SEAM_OVERLAP_DEG) : `M ${x - MASK_EXTENT} ${y - MASK_EXTENT} H ${x + MASK_EXTENT} V ${y + MASK_EXTENT} H ${x - MASK_EXTENT} Z`
   })
   const wedgeTransform = useDerivedValue(() => (active ? wedgeContentTransform(mirrorOriginX.value, mirrorOriginY.value, copyIndex, wedgeAngleDeg) : IDENTITY_MATRIX))
   const backgroundFillX = useDerivedValue(() => mirrorOriginX.value - MASK_EXTENT)
@@ -229,8 +342,18 @@ function KaleidoscopeCopy({ copyIndex, wedgeAngleDeg, mirrorGap, active, mirrorO
       starburst's open curves either — but every pattern's own dashed style needs it: a near-zero-
       length dash with the default butt cap renders as essentially nothing, and round is what turns it
       into a visible dot. Uniform across every pattern now that they all hand back one shared Path
-      instead of each rendering their own — see PatternGeometry's own comment. */}
-      <Path path={geometry.path} style='stroke' strokeWidth={geometry.width} strokeCap='round' color={strokeColor}>
+      instead of each rendering their own — see PatternGeometry's own comment.
+      strokeJoin similarly has no visible effect on spiral/rings/starburst (no vertices — a circle or a
+      continuous curve has nothing for a join to happen at) and barely one on polygon (a square/
+      pentagon/etc.'s interior angles are wide enough that Skia's default miter join already draws a
+      clean point there) — but star and flower's inward notches (see starMath's STAR_INNER_RATIO/
+      flowerMath's FLOWER_INNER_RATIO) are sharp enough to exceed Skia's own miter limit, at which
+      point it silently substitutes a bevel: a short flat line cutting straight across the point
+      instead of meeting at it, which reads as a blocky little notch right where the curve should
+      pinch in cleanly. 'round' sidesteps the miter-limit cutover entirely — every join, however sharp,
+      just gets a small rounded cap — rather than raising the limit instead, which only pushes the same
+      cutover to an even sharper (but still reachable) angle. */}
+      <Path path={geometry.path} style='stroke' strokeWidth={geometry.width} strokeCap='round' strokeJoin='round' color={strokeColor}>
         <DashPathEffect intervals={geometry.intervals} />
       </Path>
     </Group>
@@ -268,7 +391,7 @@ function KaleidoscopeCopy({ copyIndex, wedgeAngleDeg, mirrorGap, active, mirrorO
 // elements, one per mirror copy — see PatternGeometry's own comment for why that no longer scales
 // with pool size too) on every committed step, purely because SwirlScreen's own `settings` object
 // (and therefore its render) changed for an unrelated field.
-export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, backgroundColors, foregroundCycleProgress, backgroundCycleProgress, rotation, mirrorRotation, tightness, pulse, sides, reversed, cropRadius, cropShaped, holeRadius, holeShaped, fixedSpacing, mirrorLines, mirrorAlternateColors, mirrorGap, epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityCenterX, gravityCenterY, gravity, gravityActive, showGravityMarker, strokeWidth, dashStyle }: SpiralProps) {
+export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, backgroundColors, foregroundCycleProgress, backgroundCycleProgress, rotation, mirrorRotation, tightness, pulse, sides, reversed, cropRadius, cropShaped, holeRadius, holeShaped, fixedSpacing, mirrorLines, mirrorAlternateColors, mirrorGap, epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityCenterX, gravityCenterY, gravity, gravityParticleProgress, showGravityMarker, strokeWidth, dashStyle }: SpiralProps) {
   const { width, height } = useWindowDimensions()
   const centerX = width / 2
   const centerY = height / 2
@@ -297,24 +420,11 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
   // own prop comment.
   const gravityOriginX = useDerivedValue(() => centerX + gravityCenterX.value * width)
   const gravityOriginY = useDerivedValue(() => centerY + gravityCenterY.value * height)
-  // 0/1, not a plain boolean: Group's opacity prop wants a number, and this has to react to
-  // gravityActive flipping on the UI thread without index.tsx re-rendering (see the gravityActive
-  // prop's own comment above). showGravityMarker (the settings toggle) is a plain JS conditional
-  // around the whole marker instead — see its own prop comment for why that one deliberately isn't
-  // folded in here.
-  const gravityMarkerOpacity = useDerivedValue(() => (gravityActive.value ? 1 : 0))
-  // Maps gravity.value from [MIN_GRAVITY, MAX_GRAVITY] onto [GRAVITY_MARKER_MIN_RADIUS_PX,
-  // GRAVITY_MARKER_MAX_RADIUS_PX] by hand rather than reaching for Reanimated's own interpolate —
-  // this codebase's test mock for interpolate is a plain passthrough (see jest.setup.ts), so a real
-  // interpolate call here would silently return the wrong number under test. Clamped since gravity
-  // itself is already clamped to that same range by its own setter (see useSwirlSettings.tsx), but
-  // nothing stops some future caller from handing this a value outside it.
-  const gravityMarkerOuterRadius = useDerivedValue(() => {
-    const t = (gravity.value - MIN_GRAVITY) / (MAX_GRAVITY - MIN_GRAVITY)
-    const clampedT = Math.min(Math.max(t, 0), 1)
-    return GRAVITY_MARKER_MIN_RADIUS_PX + clampedT * (GRAVITY_MARKER_MAX_RADIUS_PX - GRAVITY_MARKER_MIN_RADIUS_PX)
-  })
-  const gravityMarkerInnerRadius = useDerivedValue(() => gravityMarkerOuterRadius.value - GRAVITY_MARKER_RING_GAP_PX)
+  // Maps |gravity.value| onto [GRAVITY_HOLE_MIN_RADIUS_PX, GRAVITY_HOLE_MAX_RADIUS_PX] — see
+  // gravityHoleRadius's own comment in gravityWellMath.ts for why this is magnitude-based and
+  // hand-rolled rather than Reanimated's own interpolate. Named `gravityWellHoleRadius`, not just
+  // `holeRadius`, since that name is already taken by the unrelated pattern crop-hole prop above.
+  const gravityWellHoleRadius = useDerivedValue(() => gravityHoleRadius(gravity.value, MAX_GRAVITY, GRAVITY_HOLE_MIN_RADIUS_PX, GRAVITY_HOLE_MAX_RADIUS_PX))
 
   // Distance to the furthest corner from wherever the epicentre currently sits — a fixed
   // half-diagonal would leave a bare wedge of screen once the swirl is dragged off-centre.
@@ -382,9 +492,24 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
   // a circle on its own whenever shapedClipPoints has no boundary to offer (Rings/Spiral/Starburst, or
   // the shaped toggle simply being off) — the EvenOdd donut math above doesn't care which kind of
   // contour either one actually is.
+  //
+  // cropRadius sitting at its own max is "no crop requested," not just a very light one — the outer
+  // contour should have nothing left to do at that point, not shrink-wrap to the exact radius every
+  // pattern already draws up to. A shaped (or even plain circular) contour sized to that exact radius
+  // still visibly slices into Polygon/Star/Flower's own content there: those patterns are concave
+  // (each one dips inward between vertices/points/petals — see PolygonPattern/StarPattern/
+  // FlowerPattern's own inradius/STAR_INNER_RATIO/FLOWER_INNER_RATIO), so between two vertices/petals
+  // the pool already draws rings that bulge back out past that radius before curving back in — real
+  // content the ripple pool intentionally keeps around as off-screen buffer (see rippleMath's
+  // RIPPLE_OFFSCREEN_COUNT), not overflow to be trimmed. NO_CROP_CLIP_RADIUS_MULTIPLIER's own comment
+  // has the sizing math; a plain circle rather than cropShaped's own shape both because there's nothing
+  // being cropped *to* at this setting (shaping only matters once something's actually being cut) and
+  // because a circle is the one contour guaranteed not to reintroduce the exact problem this is solving.
   const cropClip = useDerivedValue(() => {
-    const outerRadius = (fixedSpacing ? referenceRadius : radius.value) * cropRadius.value
-    const outerShape = cropShaped ? shapedClipPoints(pattern, sides.value, outerRadius) : null
+    const baseRadius = fixedSpacing ? referenceRadius : radius.value
+    const noCropRequested = cropRadius.value >= MAX_CROP_RADIUS
+    const outerRadius = noCropRequested ? baseRadius * NO_CROP_CLIP_RADIUS_MULTIPLIER : baseRadius * cropRadius.value
+    const outerShape = cropShaped && !noCropRequested ? shapedClipPoints(pattern, sides.value, outerRadius) : null
     if (holeRadius.value <= 0) {
       return outerShape ? Skia.PathBuilder.Make().addPoly(outerShape, true).detach() : Skia.Path.Circle(0, 0, outerRadius)
     }
@@ -486,15 +611,10 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
           </FlowerPattern>
         )}
         {/* Drawn last, on top of every pattern copy, so it's always legible regardless of what's
-        underneath. gravityActive has to react on the UI thread without waiting for index.tsx to
-        re-render, hence the opacity SharedValue rather than unmounting/remounting the marker —
-        showGravityMarker (the settings toggle) is a plain JS conditional instead, since it only ever
-        changes via a settings update, which already re-renders this component. */}
-        {showGravityMarker && (
-          <Group opacity={gravityMarkerOpacity}>
-            <GravityRingMarker x={gravityOriginX} y={gravityOriginY} outerRadius={gravityMarkerOuterRadius} innerRadius={gravityMarkerInnerRadius} />
-          </Group>
-        )}
+        underneath. showGravityMarker is a plain JS conditional (not a worklet-reactive opacity) —
+        it only ever changes from a deliberate toggle press (see its own prop comment), which already
+        re-renders this component, so there's nothing here that needs to react on the UI thread. */}
+        {showGravityMarker && <GravityWell x={gravityOriginX} y={gravityOriginY} holeRadius={gravityWellHoleRadius} gravity={gravity} gravityParticleProgress={gravityParticleProgress} foreground={foreground} background={background} />}
       </Canvas>
     </View>
   )

@@ -53,7 +53,7 @@ function layout(screen: any, width = TRACK_WIDTH) {
   })
 }
 
-function Host({ initial, min = 1, max = 30, step = 0.5, tickStep, disabled = false, icon, showTicks = false, onEach }: { initial: number; min?: number; max?: number; step?: number; tickStep?: number; disabled?: boolean; icon?: string; showTicks?: boolean; onEach?: (v: number) => void }) {
+function Host({ initial, min = 1, max = 30, step = 0.5, tickStep, disabled = false, icon, showTicks = false, snapToZero = false, onEach, onLive }: { initial: number; min?: number; max?: number; step?: number; tickStep?: number; disabled?: boolean; icon?: string; showTicks?: boolean; snapToZero?: boolean; onEach?: (v: number) => void; onLive?: (v: number) => void }) {
   const [value, setValue] = useState(initial)
   return (
     <SettingSlider
@@ -67,10 +67,12 @@ function Host({ initial, min = 1, max = 30, step = 0.5, tickStep, disabled = fal
       disabled={disabled}
       icon={icon}
       showTicks={showTicks}
+      snapToZero={snapToZero}
       onChange={(next) => {
         onEach?.(next)
         setValue(next)
       }}
+      onLiveValue={onLive}
     />
   )
 }
@@ -194,6 +196,57 @@ describe('SettingSlider', () => {
     expect(seen).toEqual([])
   })
 
+  // onLiveValue (see its own prop comment) is a low-latency fast path a caller can pass alongside
+  // onChange — used by the speed sliders to write straight to a UI-thread rate SharedValue, but from
+  // this component's own perspective it's just "another thing commitFromX calls, same gate as onChange."
+  it('calls onLiveValue alongside onChange on every committed drag update', async () => {
+    const seen: number[] = []
+    const live: number[] = []
+    const screen = await render(<Host initial={6} onEach={(v) => seen.push(v)} onLive={(v) => live.push(v)} />)
+    await layout(screen)
+
+    const pan = gestureTestUtils.getLastGesture('Pan')
+    await act(async () => {
+      pan.__handlers.start?.({ x: 0 })
+      pan.__handlers.update?.({ x: TRACK_WIDTH / 2 })
+      pan.__handlers.update?.({ x: TRACK_WIDTH })
+    })
+
+    expect(live).toEqual(seen)
+    expect(live).toEqual([1, 15.5, 30])
+  })
+
+  it('does not call onLiveValue while disabled', async () => {
+    const live: number[] = []
+    const screen = await render(<Host initial={6} disabled onLive={(v) => live.push(v)} />)
+    await layout(screen)
+
+    const pan = gestureTestUtils.getLastGesture('Pan')
+    await act(async () => {
+      pan.__handlers.start?.({ x: 0 })
+      pan.__handlers.update?.({ x: TRACK_WIDTH })
+    })
+
+    expect(live).toEqual([])
+  })
+
+  it('does not call onLiveValue when the drag has not moved the value', async () => {
+    const live: number[] = []
+    const screen = await render(<Host initial={6} onLive={(v) => live.push(v)} />)
+    await layout(screen)
+
+    // 6 is already exactly where a start at x=0...TRACK_WIDTH*(6-1)/(30-1) would land — commit at that
+    // same position twice, the second landing on the identical value commitFromX already holds.
+    const startX = (TRACK_WIDTH * (6 - 1)) / (30 - 1)
+    const pan = gestureTestUtils.getLastGesture('Pan')
+    await act(async () => {
+      pan.__handlers.start?.({ x: startX })
+      pan.__handlers.update?.({ x: startX })
+    })
+
+    expect(live).toEqual([])
+  })
+
   it('marks the track disabled for assistive tech and mutes it visually', async () => {
     const screen = await render(<Host initial={6} disabled />)
     await layout(screen)
@@ -246,6 +299,24 @@ describe('SettingSlider', () => {
 
     const ticks = screen.getAllByTestId('setting-slider-tick')
     expect(ticks).toHaveLength(6)
+  })
+
+  // The three ±speed sliders (Rotation/Zoom/Mirror rotation): entirely free (step 0, no showTicks),
+  // but still draw exactly one landmark — at 0, where snapToZero's own magnet pulls toward — not the
+  // whole-range tick ladder showTicks would give a stepped slider.
+  it('draws a single tick at 0 when snapToZero is set, independent of showTicks', async () => {
+    const screen = await render(<Host initial={0} min={-10} max={10} step={0} snapToZero />)
+
+    const ticks = screen.getAllByTestId('setting-slider-tick')
+    expect(ticks).toHaveLength(1)
+    const flatten = (style: unknown) => (Array.isArray(style) ? Object.assign({}, ...style) : style)
+    expect(flatten(ticks[0].props.style).left).toBe('50%')
+  })
+
+  it('draws no zero tick when snapToZero is set but the range never crosses 0', async () => {
+    const screen = await render(<Host initial={0} min={0} max={10} step={0} snapToZero />)
+
+    expect(screen.queryAllByTestId('setting-slider-tick')).toHaveLength(0)
   })
 
   // The bug this replaced: the thumb was positioned straight from the stepped `value`, so a
@@ -312,6 +383,36 @@ describe('SettingSlider', () => {
     })
 
     expect(flatten(thumb.props.style).left).toBe('100%')
+  })
+
+  // -10..10 puts 0's own position at 50% of the track — see sliderMath.test.ts's own snapToZero
+  // suite for the underlying magnet-distance math this exercises through the full component.
+  it('commits exactly 0 once a free (step 0) drag lands near its own magnet, snapping mid-drag not just on release', async () => {
+    const seen: number[] = []
+    // Starts away from 0 (5, not 0) so landing back on it via the drag is an actual reported change —
+    // commitFromX only calls onChange when the next value differs from the current one.
+    const screen = await render(<Host initial={5} min={-10} max={10} step={0} snapToZero onEach={(v) => seen.push(v)} />)
+    await layout(screen)
+
+    const pan = gestureTestUtils.getLastGesture('Pan')
+    await act(async () => {
+      pan.__handlers.start?.({ x: TRACK_WIDTH * 0.5 + 3 })
+    })
+
+    expect(seen).toEqual([0])
+  })
+
+  it('leaves a free (step 0) drag unsnapped once it is far enough from 0', async () => {
+    const seen: number[] = []
+    const screen = await render(<Host initial={0} min={-10} max={10} step={0} snapToZero onEach={(v) => seen.push(v)} />)
+    await layout(screen)
+
+    const pan = gestureTestUtils.getLastGesture('Pan')
+    await act(async () => {
+      pan.__handlers.start?.({ x: TRACK_WIDTH * 0.8 })
+    })
+
+    expect(seen).toEqual([6])
   })
 
   // The bug: a tick's "reached" color used to be driven off the committed step, which rounds to the
