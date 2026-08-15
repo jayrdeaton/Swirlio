@@ -64,6 +64,11 @@ export type SwirlSettings = {
   // default so gravity mode itself (and that ambient pull) does something the moment it's turned on,
   // without also needing this slider raised first.
   gravity: number
+  // Gates the shared HapticSettingsContext flag every haptic call site in the app already reads
+  // through — see _layout.tsx's HapticsSettingsBridge for how this value gets pushed into
+  // @rific/haptic-press's own runtime context. True by default, matching that package's own
+  // initialValue={{ vibrate: true }} before this setting existed.
+  hapticsEnabled: boolean
   // A second, inner cutoff carved out of the crop circle — a fraction *of* cropRadius (not of the
   // pattern's own radius), so the hole can never reach or exceed the crop no matter how it's dragged:
   // 0 is no hole at all (the default), 1 hollows out the entire crop circle, leaving nothing visible
@@ -129,6 +134,7 @@ type SwirlSettingsContextValue = {
   setForegroundCycleSpeed: (speed: number) => void
   setGestureTarget: (target: GestureTarget) => void
   setGravity: (gravity: number) => void
+  setHapticsEnabled: (enabled: boolean) => void
   setHoleRadius: (holeRadius: number) => void
   setHoleShaped: (shaped: boolean) => void
   setMicSensitivity: (sensitivity: number) => void
@@ -309,6 +315,7 @@ function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       // instead of needing its own migration.
       ...(typeof persisted.gestureTarget === 'string' && GESTURE_TARGET_ORDER.includes(persisted.gestureTarget) ? { gestureTarget: persisted.gestureTarget } : null),
       ...(typeof persisted.gravity === 'number' ? { gravity: clamp(persisted.gravity, MIN_GRAVITY, MAX_GRAVITY) } : null),
+      ...(typeof persisted.hapticsEnabled === 'boolean' ? { hapticsEnabled: persisted.hapticsEnabled } : null),
       ...(typeof persisted.holeRadius === 'number' ? { holeRadius: clamp(persisted.holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : null),
       // Checked against PATTERN_ORDER itself rather than an enumerated list of literals: this is
       // what makes retiring a pattern safe later, not just adding one. Whatever's persisted — a
@@ -393,6 +400,7 @@ const defaultSettings: SwirlSettings = {
   foregroundCycleSpeed: 1,
   gestureTarget: 'pattern',
   gravity: DEFAULT_GRAVITY,
+  hapticsEnabled: true,
   holeRadius: 0,
   holeShaped: true,
   micSensitivity: 1,
@@ -497,6 +505,7 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setForegroundCycleSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, foregroundCycleSpeed: clamp(speed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : prev)),
       setGestureTarget: (target) => setSettings((prev) => ({ ...prev, gestureTarget: target })),
       setGravity: (gravity) => setSettings((prev) => (Number.isFinite(gravity) ? { ...prev, gravity: clamp(gravity, MIN_GRAVITY, MAX_GRAVITY) } : prev)),
+      setHapticsEnabled: (enabled) => setSettings((prev) => ({ ...prev, hapticsEnabled: enabled })),
       setHoleRadius: (holeRadius) => setSettings((prev) => (Number.isFinite(holeRadius) ? { ...prev, holeRadius: clamp(holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : prev)),
       setHoleShaped: (shaped) => setSettings((prev) => ({ ...prev, holeShaped: shaped })),
       setMicSensitivity: (sensitivity) => setSettings((prev) => (Number.isFinite(sensitivity) ? { ...prev, micSensitivity: clamp(sensitivity, MIN_MIC_SENSITIVITY, MAX_MIC_SENSITIVITY) } : prev)),
@@ -518,20 +527,22 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       // per-field validation to run since defaultSettings is already known-valid, and going through
       // each setter would also mean this drifts out of sync the moment a new field's setter gains its
       // own extra branching (e.g. the empty-list guards on colors) that a plain reset should ignore
-      // anyway. audioReactiveEnabled, gestureTarget, shakeEnabled, showLabels, and tiltEnabled are all
-      // carried over from whatever they already were, not reset to their defaults — they're
-      // device-capability toggles (is the mic feeding this, does a shake randomize, does tilting the
-      // device warp it), chrome-density preferences (showLabels), or a tool mode (gestureTarget — which
-      // point a drag targets has no bearing on what the art itself looks like), not look/tuning
-      // preferences like everything else this button touches. audioReactiveEnabled is live session
-      // state tied to a mic the user just granted; shakeEnabled/tiltEnabled/showLabels/gestureTarget are
-      // explicit choices the user made — either way, a flat reset shouldn't silently switch them back
-      // on/off (or back to 'pattern') underneath someone.
+      // anyway. audioReactiveEnabled, gestureTarget, hapticsEnabled, shakeEnabled, showLabels, and
+      // tiltEnabled are all carried over from whatever they already were, not reset to their
+      // defaults — they're device-capability toggles (is the mic feeding this, does a shake
+      // randomize, does tilting the device warp it, do presses buzz), chrome-density preferences
+      // (showLabels), or a tool mode (gestureTarget — which point a drag targets has no bearing on
+      // what the art itself looks like), not look/tuning preferences like everything else this
+      // button touches. audioReactiveEnabled is live session state tied to a mic the user just
+      // granted; shakeEnabled/tiltEnabled/showLabels/gestureTarget/hapticsEnabled are explicit
+      // choices the user made — either way, a flat reset shouldn't silently switch them back on/off
+      // (or back to 'pattern') underneath someone.
       resetSettings: () =>
         setSettings((prev) => ({
           ...defaultSettings,
           audioReactiveEnabled: prev.audioReactiveEnabled,
           gestureTarget: prev.gestureTarget,
+          hapticsEnabled: prev.hapticsEnabled,
           shakeEnabled: prev.shakeEnabled,
           showLabels: prev.showLabels,
           tiltEnabled: prev.tiltEnabled

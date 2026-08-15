@@ -3,7 +3,7 @@ import 'react-native-reanimated'
 import * as AutoPaper from '@rific/auto-paper'
 import { Provider as AutoPaperProvider, useThemeSettings } from '@rific/auto-paper'
 import { DrawerProvider } from '@rific/drawer'
-import { HapticPressProvider } from '@rific/haptic-press'
+import { HapticPressProvider, useHapticSettings } from '@rific/haptic-press'
 import { useUpdater } from '@rific/updater'
 import * as ExpoBlur from 'expo-blur'
 import { Stack } from 'expo-router'
@@ -23,7 +23,7 @@ import { GravityMarkerVisibilityProvider } from '@/hooks/gravityMarkerVisibility
 import { SpeedRateBridgeProvider } from '@/hooks/speedRateBridge'
 import { SwirlRandomizeProvider } from '@/hooks/swirlRandomize'
 import { SwirlResetProvider } from '@/hooks/swirlReset'
-import { SwirlSettingsProvider } from '@/hooks/useSwirlSettings'
+import { SwirlSettingsProvider, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 // Held open until SwirlSettingsProvider finishes loading saved settings from AsyncStorage, so the
 // first frame we ever paint is the real one instead of defaults-then-a-sudden-jump.
@@ -50,6 +50,22 @@ function MonochromeThemeBridge() {
   useEffect(() => {
     set({ color: isDark ? MONOCHROME_WHITE : MONOCHROME_BLACK })
   }, [isDark, set])
+
+  return null
+}
+
+// Bridges the persisted hapticsEnabled setting into @rific/haptic-press's own runtime context —
+// every haptic call site in the app (manual useVibration() calls and every auto-haptic FAB/button)
+// already gates on HapticSettingsContext.settings.vibrate, so this is the only place the toggle
+// needs to be wired in. Same shape as MonochromeThemeBridge above: read one context, push into
+// another's setter in an effect.
+function HapticsSettingsBridge() {
+  const { settings } = useSwirlSettings()
+  const { set } = useHapticSettings()
+
+  useEffect(() => {
+    set({ vibrate: settings.hapticsEnabled })
+  }, [settings.hapticsEnabled, set])
 
   return null
 }
@@ -96,6 +112,7 @@ export default function RootLayout() {
           ancestor (paper is a static import, not read from AutoPaper's own context), so this reorder
           is free. */}
           <HapticPressProvider initialValue={{ vibrate: true }} paper={RNPaper}>
+            <HapticsSettingsBridge />
             <AutoPaperProvider initialValue={{ appearance: 'system', color: initialScheme === 'dark' ? MONOCHROME_WHITE : MONOCHROME_BLACK }} expoBlur={ExpoBlur}>
               <MonochromeThemeBridge />
               <DrawerProvider autoPaper={AutoPaper}>

@@ -320,6 +320,7 @@ const defaultMockSettings = {
   foregroundCycleSpeed: 1,
   gestureTarget: 'pattern' as GestureTarget,
   gravity: 0,
+  hapticsEnabled: true,
   holeRadius: 0,
   holeShaped: true,
   micSensitivity: 1,
@@ -355,6 +356,7 @@ function mockSettings(overrides: Partial<typeof defaultMockSettings> = {}) {
     setForegroundCycleSpeed,
     setGestureTarget: jest.fn(),
     setGravity,
+    setHapticsEnabled: jest.fn(),
     setHoleRadius,
     setHoleShaped,
     setMicSensitivity: jest.fn(),
@@ -386,7 +388,7 @@ describe('SwirlScreen gestures', () => {
     mockSettings()
 
     mockedUseVibration.mockReturnValue({ medium, notification: jest.fn(), selection } as any)
-    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
     mockedUseAudioReactive.mockReturnValue({ bass: { value: 0 } as any, mid: 0, treble: 0, loudness: 0 })
     mockedUseShakeToRandomize.mockImplementation(() => undefined)
     mockedUseControlGroupSheetDrawer.mockReturnValue({ close: jest.fn(), isOpen: false, isVisible: false, open: jest.fn() })
@@ -489,7 +491,7 @@ describe('SwirlScreen gestures', () => {
     // (useDragPointPhysics.ts, the same one that resumes gravity after unfreezing) runs its first
     // check, immediately flipping gravityActive true on its own. This test wants the quiet-at-rest
     // case specifically; the "gravity marker turns on" behavior has its own tests further down.
-    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
     mockSettings({ gravity: 2 })
     await renderScreen()
 
@@ -963,7 +965,7 @@ describe('SwirlScreen gestures', () => {
 
   it('rolls the epicenter toward wherever tilt is pulling gravity, with no drag or release at all', async () => {
     mockSettings({ gravity: 4, bounceFriction: 0.5 })
-    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
     await renderScreen()
     // 'gravity', not the default 'pattern' — pattern being the active gesture target now means tilt
     // drives it directly (see useEpicenter.ts's own patternManualControl), which would resolve
@@ -999,7 +1001,7 @@ describe('SwirlScreen gestures', () => {
 
   it('turns the gravity marker back off once the pull settles, landing the epicenter within GRAVITY_SETTLE_DISTANCE of the gravity center', async () => {
     mockSettings({ gravity: 4, bounceFriction: 0.5 })
-    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
     await renderScreen()
     // See the previous test's own comment — isolates the ambient-gravity-pull mechanism this test
     // means to exercise from tilt's own new, much faster direct drive of whichever target is active.
@@ -1042,7 +1044,7 @@ describe('SwirlScreen gestures', () => {
 
   it('reflects off the boundary — and fires the bounce haptic — when tilt pulls the gravity center out to the edge', async () => {
     mockSettings({ gravity: 4, bounceFriction: 0.2 })
-    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.49 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+    mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.49 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
     await renderScreen()
     // See the first ambient-gravity test's own comment — isolates the ambient pull from tilt's own new,
     // much faster direct drive of whichever target is active.
@@ -2700,7 +2702,7 @@ describe('SwirlScreen gestures', () => {
     // default.
     it("in 'mirror' mode, tilt's gravity center rolls the mirror anchor and leaves the pattern epicentre untouched", async () => {
       mockSettings({ mirrorLines: 4, gravity: 4, bounceFriction: 0.5 })
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.2 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.2 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
       await renderScreen()
       await selectGestureTarget('mirror')
 
@@ -2727,7 +2729,7 @@ describe('SwirlScreen gestures', () => {
     // targetsPattern/targetsMirror (the drag-exclusivity ones) rather than reusing them directly.
     it("in 'gravity' mode, tilt's gravity center rolls both the pattern epicentre and the mirror anchor", async () => {
       mockSettings({ mirrorLines: 4, gravity: 4, bounceFriction: 0.5 })
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.2 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.2 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
       await renderScreen()
       await selectGestureTarget('gravity')
 
@@ -2961,13 +2963,12 @@ describe('SwirlScreen gestures', () => {
       expect(getLastSpiralProps().gravityParticleProgress.value).not.toBe(before)
     })
 
-    // The actual bug this whole redesign fixes: releasing away from center used to hand control
-    // straight back to tilt the instant the finger lifted, regardless of how far away or how fast —
-    // with tilt's own (mocked, fixed-at-origin) reading, that read as "gravity always snaps back to
-    // center." Tilt is on here (the default), unlike the two throw tests above — the point is proving
-    // gravityManualControl keeps tilt locked out through a whole throw, not just that gravityHandle's
-    // own position holds still.
-    it("in 'gravity' mode, releasing away from center does not hand control back to tilt, even though tilt is on", async () => {
+    // Dragging the gravity well by hand is only a temporary override for precise placement, not a
+    // standing claim that outlives the touch — the instant a finger lifts, tilt reclaims the well
+    // regardless of how far away or how fast it was released. Tilt is on here (the default, mocked at
+    // the origin), unlike the two throw tests above — the point is proving release clears
+    // gravityManualControl immediately, not just that gravityHandle's own position holds still.
+    it("in 'gravity' mode, releasing away from center hands control straight back to tilt", async () => {
       const { width, height } = Dimensions.get('window')
       mockSettings({ bounceFriction: 1 })
       await renderScreen()
@@ -2976,20 +2977,22 @@ describe('SwirlScreen gestures', () => {
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
         panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
-        panGesture.__handlers.end?.({ velocityX: 0, velocityY: 0 })
       })
-
-      // Immediately after release: still at the drop point, not reclaimed by tilt's fixed-at-origin
-      // reading — the old bug would have shown 0 here.
+      // Still under the finger while the touch is down — manual control temporarily overrides tilt.
       expect(getLastSpiralProps().gravityCenterX.value).toBeCloseTo(0.3, 5)
 
-      // Let plenty of (settled, since velocity was 0) time pass — tilt still never takes it back on its
-      // own, only the center-well snap or an explicit reset can (see the next test and resetSwirl's own
-      // coverage further down).
+      await act(async () => {
+        panGesture.__handlers.end?.({ velocityX: 0, velocityY: 0 })
+      })
+      // The instant the finger lifts, tilt's own (mocked, origin) reading takes back over — no need to
+      // wait for anything to settle, and no explicit reset required.
+      expect(getLastSpiralProps().gravityCenterX.value).toBeCloseTo(0, 5)
+
+      // Stays handed back to tilt — nothing left over from the throw drifts it away again.
       await act(async () => {
         stepGravityBounce(5000)
       })
-      expect(getLastSpiralProps().gravityCenterX.value).toBeCloseTo(0.3, 5)
+      expect(getLastSpiralProps().gravityCenterX.value).toBeCloseTo(0, 5)
     })
 
     // The other half of the handoff: snapping home at the center well does give tilt control back, not
@@ -2998,7 +3001,7 @@ describe('SwirlScreen gestures', () => {
     // be masked by both sides agreeing on (0, 0).
     it("in 'gravity' mode, releasing close to center snaps home and hands control back to tilt", async () => {
       const { width, height } = Dimensions.get('window')
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.2 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.2 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
       await renderScreen()
       await selectGestureTarget('gravity')
 
@@ -3208,6 +3211,50 @@ describe('SwirlScreen gestures', () => {
       expect(setMirrorLines).toHaveBeenLastCalledWith(3)
     })
 
+    // Unlike the two tests above (one continuous hold, fingers never lift), this is a release followed
+    // by a fresh regrab — the actual bug: the gesture used to always reset its own "which side of zero"
+    // bookkeeping to false at onStart, regardless of mirrorAlternateColors' own real value, so a second
+    // gesture continuing the same direction misread itself as starting fresh above zero and spuriously
+    // flipped alternate colors back off almost immediately instead of continuing deeper into the region
+    // it was already in.
+    it("in 'mirror' mode, releasing and re-twisting the same direction keeps dialing deeper instead of spuriously flipping alternateColors back off", async () => {
+      mockSettings({ mirrorLines: 2, mirrorAlternateColors: false })
+      const { rerender } = await renderScreen()
+      await selectGestureTarget('mirror')
+
+      const firstTwist = gestureTestUtils.getLastGesture('Rotation')
+      await act(async () => {
+        firstTwist.__handlers.start?.()
+        // Same first gesture as the test above: crosses zero, mirrorAlternateColors on, mirrorLines 1.
+        firstTwist.__handlers.update?.({ rotation: -Math.PI / 2 })
+        firstTwist.__handlers.end?.({ rotation: -Math.PI / 2 })
+      })
+      expect(setMirrorAlternateColors).toHaveBeenCalledWith(true)
+      expect(setMirrorLines).toHaveBeenLastCalledWith(1)
+      ;(setMirrorAlternateColors as jest.Mock).mockClear()
+      ;(setMirrorLines as jest.Mock).mockClear()
+
+      // Settings now reflect what that first gesture actually committed — same "the mocked store now
+      // holds what the setters last wrote" round-trip the mode-switch tilt tests above use.
+      mockSettings({ mirrorLines: 1, mirrorAlternateColors: true })
+      await act(async () => {
+        rerender(<SwirlScreen />)
+      })
+
+      const secondTwist = gestureTestUtils.getLastGesture('Rotation')
+      await act(async () => {
+        secondTwist.__handlers.start?.()
+        // A brand new gesture, twisting -60° (2 more steps) further in the exact same direction the
+        // first one ended on.
+        secondTwist.__handlers.update?.({ rotation: -Math.PI / 3 })
+      })
+
+      // Keeps dialing deeper (mirrorLines 1 -> 3) with alternateColors left alone — the old bug would
+      // have misread this as a fresh crossing and flipped it back to false around here instead.
+      expect(setMirrorAlternateColors).not.toHaveBeenCalled()
+      expect(setMirrorLines).toHaveBeenLastCalledWith(3)
+    })
+
     it("in 'mirror' mode, a two-finger long press flips mirrorRotationSpeed instead of rotationSpeed/zoomSpeed", async () => {
       mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 2 })
       await renderScreen()
@@ -3412,13 +3459,14 @@ describe('SwirlScreen gestures', () => {
       expect(getLastSpiralProps().epicenterX.value).toBe(0)
     })
 
-    // Gravity is the newer, sticky-position exception to "put it all back": once a throw or drag has
-    // parked it somewhere, only the center-well snap or an explicit reset (this one) hands it back —
-    // see the "does not hand control back to tilt" test above. resetSwirl has to be one of the things
-    // that still unconditionally covers it, same as pattern/mirror, even though gestureTarget itself is
-    // 'mirror' by the time this fires (mirroring the mode-independence the test above already proves
-    // for mirror/pattern).
-    it('resetSwirl also recentres a manually-thrown gravity handle and hands control back to tilt', async () => {
+    // With tilt unavailable, gravity is the sticky-position exception to "put it all back": once a
+    // throw or drag has parked it somewhere, nothing else moves it again until resetSwirl explicitly
+    // recentres it (with tilt on instead, releasing alone already hands it back — see the "hands
+    // control straight back to tilt" test above). resetSwirl has to be one of the things that still
+    // unconditionally covers it, same as pattern/mirror, even though gestureTarget itself is 'mirror'
+    // by the time this fires (mirroring the mode-independence the test above already proves for
+    // mirror/pattern).
+    it('resetSwirl also recentres a manually-thrown gravity handle when tilt is unavailable to do it on its own', async () => {
       const { width, height } = Dimensions.get('window')
       mockSettings({ tiltEnabled: false })
       await renderScreen()
@@ -3712,7 +3760,7 @@ describe('SwirlScreen gestures', () => {
         expect(getLastSpiralProps().rotation.value).toBe(initialRotation)
       })
 
-      it("in 'speed' mode, a pinch adjusts zoomSpeed's magnitude live, preserving whatever sign was already current, then commits on release", async () => {
+      it("in 'speed' mode, a pinch adjusts zoomSpeed linearly from its current value, live, then commits on release", async () => {
         mockSettings({ zoomSpeed: 2 })
         await renderScreen()
         await selectGestureTarget('speed')
@@ -3734,19 +3782,26 @@ describe('SwirlScreen gestures', () => {
         expect(committedZoomSpeed).toBeCloseTo(3, 5)
       })
 
-      it("in 'speed' mode, a pinch never crosses zero into the opposite polarity on its own", async () => {
-        mockSettings({ zoomSpeed: -2 })
+      // The fix: unlike gravity's own strength pinch (still magnitude-only, sign fixed for the whole
+      // gesture — see PINCH_SCALE_TO_GRAVITY_SCALE), zoom speed's pinch is a direct linear offset from
+      // its own current value, the same full-range mapping the Zoom speed slider already uses — so
+      // pinching far enough carries it straight through zero into the opposite direction instead of
+      // sticking at 0.
+      it("in 'speed' mode, a pinch can cross zero into the opposite direction, following the same linear mapping the Zoom speed slider uses", async () => {
+        mockSettings({ zoomSpeed: -1 })
         await renderScreen()
         await selectGestureTarget('speed')
 
         const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
         await act(async () => {
           pinchGesture.__handlers.start?.()
-          pinchGesture.__handlers.update?.({ scale: 1.15 })
+          // PINCH_SCALE_TO_ZOOM_SPEED_SCALE is MAX_ZOOM_SPEED / 1.5 ≈ 6.667, so (1.3 - 1) * 6.667 ≈ 2 —
+          // enough above the mocked zoomSpeed of -1 to cross zero into positive.
+          pinchGesture.__handlers.update?.({ scale: 1.3 })
         })
 
         const [liveZoomSpeed] = setZoomSpeed.mock.calls[setZoomSpeed.mock.calls.length - 1]
-        expect(liveZoomSpeed).toBeCloseTo(-3, 5)
+        expect(liveZoomSpeed).toBeCloseTo(1, 5)
       })
 
       // "Both together" — a single twist moves foreground and background cycle speed by the same
@@ -3787,7 +3842,7 @@ describe('SwirlScreen gestures', () => {
       // ambient pull, the older gravity-mode tests' own mechanism. Tilt pulls pattern through the exact
       // same kind of frame-stepped physics instead (see useEpicenter.ts's own patternTiltStrength), not
       // an instant position set, so this steps a frame rather than asserting an immediate jump.
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
       await renderScreen()
 
       await act(async () => {
@@ -3801,7 +3856,7 @@ describe('SwirlScreen gestures', () => {
     })
 
     it("in 'pattern' mode, tilt leaves the gravity well exactly where it rests — only 'gravity' mode itself moves it", async () => {
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
       await renderScreen()
 
       await act(async () => {
@@ -3827,7 +3882,7 @@ describe('SwirlScreen gestures', () => {
     // pulled measurably back toward the parked well, not at either target exactly.
     it('gravity still tugs at whatever tilt is controlling, even though the well itself stays put', async () => {
       mockSettings({ gravity: 4 })
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.4 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.4 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
       await renderScreen()
 
       await act(async () => {
@@ -3854,7 +3909,7 @@ describe('SwirlScreen gestures', () => {
 
     it("in 'mirror' mode, tilt rolls the mirror anchor directly and leaves the pattern epicentre untouched", async () => {
       mockSettings({ mirrorLines: 4 })
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.3 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
       await renderScreen()
       await act(async () => {
         getLastControlsProps().onSelectGestureTarget('mirror')
@@ -3880,7 +3935,7 @@ describe('SwirlScreen gestures', () => {
     // uses. Letting go should hand straight back to tilt's own pull, not freeze there indefinitely.
     it('a touch grab overrides tilt while held, and releasing (even away from where tilt is) lets tilt resume pulling right away', async () => {
       const { width, height } = Dimensions.get('window')
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.1 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.1 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
       await renderScreen()
       await act(async () => {
         animatedReactionTestUtils.runAll()
@@ -3911,7 +3966,7 @@ describe('SwirlScreen gestures', () => {
 
     it('an explicit recenter springs the pattern epicentre back to true center, and tilt keeps pulling on it from there', async () => {
       const { width, height } = Dimensions.get('window')
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.1 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0.1 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0 } as any })
       await renderScreen()
 
       const panGesture = gestureTestUtils.getLastGesture('Pan')
@@ -3940,10 +3995,17 @@ describe('SwirlScreen gestures', () => {
       expect(getLastSpiralProps().epicenterX.value).toBeGreaterThan(0)
     })
 
-    it("in 'speed' mode, tilt live-throttles rotationSpeed by its own left/right angle, without touching the persisted setting", async () => {
-      mockSettings({ rotationSpeed: 0 })
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0.6 } as any })
-      const { rerender } = await renderScreen()
+    // Commits straight into the real settings now (the same "commit on every update" shape the zoom
+    // pinch already uses), not a local override — so unlike the old single-target, ephemeral throttle,
+    // this persists past a mode switch. Tilt drives whichever of rotationSpeed/mirrorRotationSpeed
+    // speedTargetsMirror already has selected — the same target, same direction, the manual pan-drag/
+    // flick gestures already use — rather than driving both at once. Rings has a zoom dimension, so
+    // rawTiltY (left at 0 here) stays out of the rotation ratio entirely — see the zoomless-pattern
+    // test below for the fold-in case.
+    it("in 'speed' mode, tilting left/right spins the pattern (the default speed target) and persists into rotationSpeed, leaving mirrorRotationSpeed untouched", async () => {
+      mockSettings({ pattern: 'rings' })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0.6 } as any, rawTiltY: { value: 0 } as any })
+      await renderScreen()
       await act(async () => {
         getLastControlsProps().onSelectGestureTarget('speed')
       })
@@ -3952,35 +4014,19 @@ describe('SwirlScreen gestures', () => {
         animatedReactionTestUtils.runAll()
       })
 
-      // rotationSpeed itself (the persisted setting) is still 0 — this is a live override, not a write.
-      expect(setRotationSpeed).not.toHaveBeenCalled()
-      await act(async () => {
-        stepBaseRotation(1000)
-      })
-      // 0.6 * MAX_ROTATION_SPEED is a forward spin — a still-zeroed rotationSpeed would never move this.
-      expect(getLastSpiralProps().rotation.value).toBeGreaterThan(0)
-
-      const afterPositiveTilt = getLastSpiralProps().rotation.value
-      // Tilting the other way reverses direction live, the same as the sign of any other tilt-driven
-      // value would. A re-render is needed (not just runAll()) since the mocked hook's own return value
-      // — including the rawTiltX SharedValue reference the reaction closure reads — only changes on the
-      // next render, the same way the audio-reactive mid-mode-switch tests above already rerender().
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: -0.6 } as any })
-      await act(async () => {
-        rerender(<SwirlScreen />)
-      })
-      await act(async () => {
-        animatedReactionTestUtils.runAll()
-      })
-      await act(async () => {
-        stepBaseRotation(1000)
-      })
-      expect(getLastSpiralProps().rotation.value).toBeLessThan(afterPositiveTilt)
+      // MAX_ROTATION_SPEED is 10 — 0.6 tilt lands at 6.
+      const [rotation] = setRotationSpeed.mock.calls[setRotationSpeed.mock.calls.length - 1]
+      expect(rotation).toBeCloseTo(6, 5)
+      expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
+      // Rings has a zoom dimension, so zoomSpeed is still live-written every reaction (same "commit on
+      // every update" shape as the rest) — just at 0, since no up/down tilt was applied.
+      const [zoom] = setZoomSpeed.mock.calls[setZoomSpeed.mock.calls.length - 1]
+      expect(zoom).toBeCloseTo(0, 5)
     })
 
-    it("in 'speed' mode, tilt throttles mirrorRotationSpeed instead once Mirror speed is selected, leaving the pattern's own rotation untouched", async () => {
-      mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 0, rotationSpeed: 0 })
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0.6 } as any })
+    it("in 'speed' mode, tilting left/right spins the mirror instead once Mirror speed is selected — same direction as it would drive the pattern, not reversed — leaving rotationSpeed untouched", async () => {
+      mockSettings({ pattern: 'rings' })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0.6 } as any, rawTiltY: { value: 0 } as any })
       await renderScreen()
       await act(async () => {
         getLastControlsProps().onSelectGestureTarget('speed')
@@ -3991,14 +4037,68 @@ describe('SwirlScreen gestures', () => {
         animatedReactionTestUtils.runAll()
       })
 
-      expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
+      // Same 0.6 tilt as the pattern-target test above, same MAX_MIRROR_ROTATION_SPEED of 10, same
+      // sign — 6, not -6: tilt is just another way of driving whichever target speedTargetsMirror
+      // already selected, not an independent control of both at once.
+      const [mirrorRotation] = setMirrorRotationSpeed.mock.calls[setMirrorRotationSpeed.mock.calls.length - 1]
+      expect(mirrorRotation).toBeCloseTo(6, 5)
+      expect(setRotationSpeed).not.toHaveBeenCalled()
+    })
+
+    it("in 'speed' mode, tilting up/down drives zoom speed on a zoom-capable pattern, and always also drives color-transition speed", async () => {
+      mockSettings({ pattern: 'rings' })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0.4 } as any })
+      await renderScreen()
       await act(async () => {
-        stepMirrorProgress(1000)
-        stepBaseRotation(1000)
+        getLastControlsProps().onSelectGestureTarget('speed')
       })
-      expect(getLastSpiralProps().mirrorRotation.value).not.toBe(0)
-      // Pattern speed wasn't selected — its own rotation should still read as stopped.
-      expect(getLastSpiralProps().rotation.value).toBe(0)
+
+      await act(async () => {
+        animatedReactionTestUtils.runAll()
+      })
+
+      // MAX_ZOOM_SPEED is 10 — 0.4 tilt lands at 4.
+      const [zoom] = setZoomSpeed.mock.calls[setZoomSpeed.mock.calls.length - 1]
+      expect(zoom).toBeCloseTo(4, 5)
+
+      // Color-transition speed has no direction of its own (see MIN/MAX_CYCLE_SPEED), so only the
+      // magnitude matters — MAX_CYCLE_SPEED is 5, so 0.4 tilt lands at 2, well above the 0.1 floor.
+      const [foreground] = setForegroundCycleSpeed.mock.calls[setForegroundCycleSpeed.mock.calls.length - 1]
+      const [background] = setBackgroundCycleSpeed.mock.calls[setBackgroundCycleSpeed.mock.calls.length - 1]
+      expect(foreground).toBeCloseTo(2, 5)
+      expect(background).toBeCloseTo(2, 5)
+
+      // No left/right tilt — the selected (default, Pattern speed) target still gets a live 0 write,
+      // and Mirror speed was never selected, so mirrorRotationSpeed is never touched at all.
+      const [rotation] = setRotationSpeed.mock.calls[setRotationSpeed.mock.calls.length - 1]
+      expect(rotation).toBeCloseTo(0, 5)
+      expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
+    })
+
+    it("in 'speed' mode, on a zoomless pattern up/down folds into the same rotation pull left/right already applies to whichever target is selected, leaving zoomSpeed alone", async () => {
+      mockSettings({ pattern: 'spiral' })
+      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0.3 } as any, rawTiltY: { value: 0.2 } as any })
+      await renderScreen()
+      await act(async () => {
+        getLastControlsProps().onSelectGestureTarget('speed')
+      })
+
+      await act(async () => {
+        animatedReactionTestUtils.runAll()
+      })
+
+      // Spiral has no zoom dimension (see isZoomlessPattern) — x and y combine into one rotation ratio
+      // instead (0.3 + 0.2 = 0.5 of MAX_ROTATION_SPEED's 10 = 5), applied to the selected (default,
+      // Pattern speed) target only; zoomSpeed is left alone entirely.
+      const [rotation] = setRotationSpeed.mock.calls[setRotationSpeed.mock.calls.length - 1]
+      expect(rotation).toBeCloseTo(5, 5)
+      expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
+      expect(setZoomSpeed).not.toHaveBeenCalled()
+
+      // Up/down still always drives color-transition speed regardless of pattern — MAX_CYCLE_SPEED is
+      // 5, so 0.2 tilt lands at 1.
+      const [foreground] = setForegroundCycleSpeed.mock.calls[setForegroundCycleSpeed.mock.calls.length - 1]
+      expect(foreground).toBeCloseTo(1, 5)
     })
   })
 

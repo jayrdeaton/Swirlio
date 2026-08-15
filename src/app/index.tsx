@@ -14,7 +14,7 @@ import { mapAudioBand } from '@/constants/audioMapping'
 import { clamp } from '@/constants/clamp'
 import { gravityParticleFrictionSpeed } from '@/constants/gravityWellMath'
 import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
-import { hasPolygonSides, PATTERN_ORDER } from '@/constants/patterns'
+import { hasPolygonSides, isZoomlessPattern, PATTERN_ORDER } from '@/constants/patterns'
 import { randomHexColor } from '@/constants/randomColor'
 import { MAX_RADIUS_TO_REFERENCE_RATIO, RIPPLE_BASE_COUNT, rippleModulus, rippleSpacing } from '@/constants/rippleMath'
 import { DASH_STYLE_ORDER } from '@/constants/strokeDash'
@@ -29,7 +29,7 @@ import { GestureTarget, useEpicenter } from '@/hooks/useEpicenter'
 import { PAUSE_EASE_DURATION_MS, useLoopingProgress } from '@/hooks/useLoopingProgress'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { useSwapColors } from '@/hooks/useSwapColors'
-import { DEFAULT_DASH_STYLE, MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIRROR_GAP, MIN_POLYGON_SIDES, MIN_STROKE_WIDTH, MIN_TIGHTNESS, SwirlSettings, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { DEFAULT_DASH_STYLE, MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIRROR_GAP, MIN_POLYGON_SIDES, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED, SwirlSettings, useSwirlSettings } from '@/hooks/useSwirlSettings'
 import { useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const BASE_ROTATION_DURATION_MS = 12000
@@ -173,11 +173,12 @@ const ROTATION_DEGREES_TO_TIGHTNESS_SCALE = (MAX_TIGHTNESS - MIN_TIGHTNESS) / 18
 // Dialing past 0 doesn't dead-end at the boundary either — see rotationGesture's own
 // mirrorLinesBelowZero comment for the "bonus gear" that keeps counting from there.
 const ROTATION_DEGREES_PER_MIRROR_LINE = 30
-// Speed mode's own pinch — see targetsSpeedPinch below. Magnitude only, sign preserved from whichever
-// direction zoomSpeed was already running at gesture-start, the exact same shape
-// PINCH_SCALE_TO_GRAVITY_SCALE already uses for gravity's own strength (a pinch never crosses zero into
-// the opposite polarity on its own). Same calibration convention too: a full, arm's-length pinch spread
-// sweeps close to the whole [0, MAX_ZOOM_SPEED] magnitude range.
+// Speed mode's own pinch — see targetsSpeedPinch below. A direct linear offset from zoomSpeed's own
+// value at gesture-start, the same full-range mapping the Zoom speed slider already uses — unlike
+// PINCH_SCALE_TO_GRAVITY_SCALE's magnitude-only shape for gravity's own strength, this one *can* cross
+// zero into the opposite direction, so pinching all the way in (or out) reverses zoom instead of just
+// stopping at 0. Same calibration convention either way: a full, arm's-length pinch spread sweeps close
+// to the whole [MIN_ZOOM_SPEED, MAX_ZOOM_SPEED] range.
 const PINCH_SCALE_TO_ZOOM_SPEED_SCALE = MAX_ZOOM_SPEED / 1.5
 // Speed mode's own twist/Focus — see targetsSpeedRotation below. Nudges foreground and background cycle
 // speed together, by the same delta (preserving whatever difference already existed between the two,
@@ -461,10 +462,10 @@ export default function SwirlScreen() {
   // tiltX/tiltY through useEpicenter's own tiltStrength (a real physics pull, friction-decayed the same
   // way gravity's own pull already is — see useDragPointPhysics.ts and useEpicenter.ts's own
   // TILT_PULL_STRENGTH), gravity combines the same pair with its own touch drag below (see
-  // effectiveGravityCenterX/Y), and speed reads rawTiltX as a live throttle instead (see
-  // speedTiltRotationRatio further down) — a spin rate should track the phone's actual angle
-  // immediately, not through a position-easing spring tuned for something rolling around on screen.
-  const { gravityCenterX: tiltX, gravityCenterY: tiltY, rawTiltX } = useTiltGravityCenter(SCREEN_EDGE_OFFSET, settings.tiltEnabled)
+  // effectiveGravityCenterX/Y), and speed reads rawTiltX/rawTiltY as a live throttle instead (see the
+  // tilt-driven speed reaction further down) — a spin/zoom/color rate should track the phone's actual
+  // angle immediately, not through a position-easing spring tuned for something rolling around on screen.
+  const { gravityCenterX: tiltX, gravityCenterY: tiltY, rawTiltX, rawTiltY } = useTiltGravityCenter(SCREEN_EDGE_OFFSET, settings.tiltEnabled)
   // isVisible (not isOpen): stays true for the full close animation too, not just until something
   // asks to close — see OnScreenControls for why the row this gates needs to track that same window.
   // isOpen (not isVisible) for the tap-to-dismiss check in handleCanvasTap below: isOpen flips the
@@ -614,20 +615,53 @@ export default function SwirlScreen() {
   useEffect(() => {
     speedTiltActiveShared.value = speedTiltActive
   }, [speedTiltActive, speedTiltActiveShared])
-  // The live throttle reading itself — tilt's raw, unsprung left/right ratio (rawTiltX, -1..1 — see
-  // useTiltGravityCenter.ts's own comment for why this skips the position-easing spring every other
-  // tilt-driven target rides), only actually synced down to this plain state while speedTiltActive says
-  // it should be (the reaction below no-ops otherwise, so this is free to sit stale and unread the rest
-  // of the time). runOnJS crosses back from the UI thread on every tilt sample (~every 100ms, see
-  // UPDATE_INTERVAL_MS in useTiltGravityCenter.ts) while active — the same rough cadence
-  // BAND_STATE_THROTTLE_MS already re-renders this screen at for audio-reactive mode's own live speed
-  // override, so this isn't adding a new class of update frequency to the component.
-  const [speedTiltRotationRatio, setSpeedTiltRotationRatio] = useState(0)
+  // Same reasoning as speedTiltActiveShared, for speedTargetsMirror: the reaction below runs on the UI
+  // thread, so it needs a SharedValue mirror of this flag too rather than a stale-capturable plain
+  // boolean read out of the closure.
+  const speedTargetsMirrorShared = useSharedValue(speedTargetsMirror)
+  useEffect(() => {
+    speedTargetsMirrorShared.value = speedTargetsMirror
+  }, [speedTargetsMirror, speedTargetsMirrorShared])
+  // Whether the current pattern actually has a zoom dimension for tilt-Y to drive (see
+  // isZoomlessPattern's own comment in constants/patterns.ts — Spiral/Starburst reshape a single
+  // curve/fan with nothing for zoom to pulse) — mirrored into a SharedValue for the same "worklet
+  // needs a SharedValue, not a stale-capturable plain prop" reasoning as tiltEnabledShared.
+  const patternSupportsZoomShared = useSharedValue(!isZoomlessPattern(settings.pattern))
+  useEffect(() => {
+    patternSupportsZoomShared.value = !isZoomlessPattern(settings.pattern)
+  }, [settings.pattern, patternSupportsZoomShared])
+
+  // Speed mode's own live tilt throttle — commits straight into the real settings on every tilt sample
+  // (the same "commit straight to the real setting on every update" shape the zoom pinch already uses,
+  // see pinchGesture's own onUpdate comment further down) rather than through a local, ephemeral
+  // override, so a rate tilt sets keeps going after switching away from Speed mode instead of resetting
+  // back to whatever the slider said. rawTiltX (left/right) drives whichever of rotationSpeed/
+  // mirrorRotationSpeed speedTargetsMirror currently selects — the same target, and the same direction
+  // (no sign flip), the manual pan-drag/flick gestures already use (see applySpeedRelease and
+  // useEpicenter.ts's own panGesture onUpdate) — tilt is just another way of driving that one target,
+  // not a second, independent control of both at once. rawTiltY (up/down) drives zoomSpeed when the
+  // pattern has a zoom dimension, and otherwise folds into that same selected target's rotation ratio
+  // (summed and clamped, since a zoomless pattern has nothing else for it to do) — and always also
+  // drives color-transition speed regardless of pattern, since cycle speed has no direction of its own
+  // to conflict with (see MIN_CYCLE_SPEED/MAX_CYCLE_SPEED's own comment) and up/down would otherwise
+  // have no further use for it on a zoom-capable pattern.
   useAnimatedReaction(
-    () => rawTiltX.value,
-    (ratio) => {
+    () => ({ x: rawTiltX.value, y: rawTiltY.value }),
+    ({ x, y }) => {
       if (!speedTiltActiveShared.value) return
-      runOnJS(setSpeedTiltRotationRatio)(ratio)
+      const zoomless = !patternSupportsZoomShared.value
+      const rotationRatio = zoomless ? clamp(x + y, -1, 1) : x
+      if (speedTargetsMirrorShared.value) {
+        runOnJS(setMirrorRotationSpeed)(rotationRatio * MAX_MIRROR_ROTATION_SPEED)
+      } else {
+        runOnJS(setRotationSpeed)(rotationRatio * MAX_ROTATION_SPEED)
+      }
+      if (!zoomless) {
+        runOnJS(setZoomSpeed)(y * MAX_ZOOM_SPEED)
+      }
+      const colorSpeed = clamp(Math.abs(y) * MAX_CYCLE_SPEED, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED)
+      runOnJS(setForegroundCycleSpeed)(colorSpeed)
+      runOnJS(setBackgroundCycleSpeed)(colorSpeed)
     }
   )
 
@@ -698,13 +732,12 @@ export default function SwirlScreen() {
   // own mapAudioBand output is always non-negative, so without it there'd be nothing for flipDirections
   // to act on while the mic is driving rotation instead of the rotationSpeed slider. Quantized first,
   // then signed, so the sign flip itself never lands mid-step and isn't part of what gets quantized.
-  // speedTiltActive's own branch sits below audio-reactive's (which still wins if somehow both are
-  // active at once — see speedTiltActive's own comment) and above the plain slider value, the same
-  // "live override, nothing persisted" shape audio-reactive's own branch already has: leaving speed
-  // mode, or leveling the phone back out, means this stops being read on the very next render rather
-  // than needing its own explicit hand-back.
-  const effectiveRotationSpeed = audioReactiveEnabled ? (audioRotationReversed ? -1 : 1) * quantizeAudioSpeed(mapAudioBand(treble, 0, MAX_ROTATION_SPEED), 0, MAX_ROTATION_SPEED) : speedTiltActive && !speedTargetsMirror ? speedTiltRotationRatio * MAX_ROTATION_SPEED : settings.rotationSpeed
-  const effectiveMirrorRotationSpeed = audioReactiveEnabled ? -effectiveRotationSpeed : speedTiltActive && speedTargetsMirror ? speedTiltRotationRatio * MAX_MIRROR_ROTATION_SPEED : settings.mirrorRotationSpeed
+  // Speed-mode tilt no longer has a branch of its own here — it now commits straight into
+  // settings.rotationSpeed/mirrorRotationSpeed/zoomSpeed as it happens (see the tilt reaction above),
+  // so those settings are already correct while tilting and this only ever needs to choose between
+  // audio-reactive's own override and the plain persisted value, same as effectiveZoomSpeed already did.
+  const effectiveRotationSpeed = audioReactiveEnabled ? (audioRotationReversed ? -1 : 1) * quantizeAudioSpeed(mapAudioBand(treble, 0, MAX_ROTATION_SPEED), 0, MAX_ROTATION_SPEED) : settings.rotationSpeed
+  const effectiveMirrorRotationSpeed = audioReactiveEnabled ? -effectiveRotationSpeed : settings.mirrorRotationSpeed
   const effectiveZoomSpeed = audioReactiveEnabled ? quantizeAudioSpeed(mapAudioBand(mid, 0, MAX_ZOOM_SPEED), 0, MAX_ZOOM_SPEED) : settings.zoomSpeed
   // Paired with zoom/pulse speed above rather than off on its own: tightness and zoom speed already
   // feed the exact same ripple-spacing formula below (pulse's own duration is
@@ -929,13 +962,21 @@ export default function SwirlScreen() {
   const startMirrorLines = useSharedValue(0)
   const mirrorLinesLive = useSharedValue(0)
   // Whether continuing to dial mirrorLines down past 0 has crossed into the "bonus gear" — see
-  // rotationGesture's own comment. Reset to false every gesture (the raw, unclamped step count always
-  // starts at startMirrorLines, which is never negative), then flipped each time the raw count crosses
-  // the zero line in either direction, live during the hold. mirrorAlternateColorsLive is the
-  // mirrorAlternateColors value being flipped — mirrored into a SharedValue for the same reason
-  // mirrorLinesLive is: the gesture needs to flip it repeatedly within one hold without waiting on a
-  // re-render to see its own previous flip.
+  // rotationGesture's own comment. Seeded from mirrorAlternateColors' own current value every gesture
+  // (not hardcoded false) via startMirrorLinesBelowZero below, so a fresh twist that starts already
+  // past zero picks up exactly where the last one left off instead of assuming it's starting fresh
+  // above zero — otherwise continuing to twist the same direction across a release-and-regrab would
+  // immediately read as a brand new crossing and flip alternate colors straight back off. Flipped each
+  // time the raw count crosses the zero line in either direction, live during the hold.
+  // mirrorAlternateColorsLive is the mirrorAlternateColors value being flipped — mirrored into a
+  // SharedValue for the same reason mirrorLinesLive is: the gesture needs to flip it repeatedly within
+  // one hold without waiting on a re-render to see its own previous flip.
   const mirrorLinesBelowZero = useSharedValue(false)
+  // Snapshot of mirrorLinesBelowZero's own starting value, captured once at onStart and never mutated
+  // again during the gesture (unlike mirrorLinesBelowZero itself, which flips live) — onUpdate needs
+  // this fixed reference point to reconstruct a *signed* starting mirrorLines count (see its own
+  // comment below), since mirrorLinesBelowZero flipping mid-gesture is exactly the event being detected.
+  const startMirrorLinesBelowZero = useSharedValue(false)
   const mirrorAlternateColorsLive = useSharedValue(false)
   // Zoom direction only — rotation direction is handled entirely within the rotation effect below,
   // it doesn't need a shared value since nothing reads it inside a pattern's own render/worklet code.
@@ -1833,21 +1874,21 @@ export default function SwirlScreen() {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         gravity.value = gravitySign * magnitude
       }
-      // Same magnitude-only, sign-preserved shape as gravity's own strength above, just against
-      // zoomSpeed instead. Unlike every other pinch-driven value in this file, zoomSpeed has no live
-      // SharedValue of its own that Spiral reads directly — it only ever reaches the screen through
-      // useLoopingProgress's own effectiveZoomSpeed, a plain settings number — so this commits straight
-      // to the real setting on every update rather than writing a SharedValue first and folding it in on
-      // release the way mirrorGap/strokeWidth do. No heavier than an ordinary slider drag already is:
-      // effectiveZoomSpeed's own comment already documents that a rapid run of intermediate values (like
-      // a dragged slider) has nothing to visibly stutter or snap on, and that's exactly what this is.
+      // A direct linear offset from zoomSpeed's own value at gesture-start, the same full-range mapping
+      // the Zoom speed slider itself uses — unlike gravity's own magnitude-only strength above, this can
+      // cross zero into the opposite direction (see PINCH_SCALE_TO_ZOOM_SPEED_SCALE's own comment).
+      // Unlike every other pinch-driven value in this file, zoomSpeed has no live SharedValue of its own
+      // that Spiral reads directly — it only ever reaches the screen through useLoopingProgress's own
+      // effectiveZoomSpeed, a plain settings number — so this commits straight to the real setting on
+      // every update rather than writing a SharedValue first and folding it in on release the way
+      // mirrorGap/strokeWidth do. No heavier than an ordinary slider drag already is: effectiveZoomSpeed's
+      // own comment already documents that a rapid run of intermediate values (like a dragged slider) has
+      // nothing to visibly stutter or snap on, and that's exactly what this is.
       // "Spread = grow" here, same sign as every other pinch-driven magnitude in this file — a real
       // touch pinch has no equivalent of the wheel's own natural-scrolling sign flip (see the web wheel
       // effect's own targetsSpeedPinch branch further down), so it's left unflipped.
       if (targetsSpeedPinch) {
-        const zoomSpeedSign = startZoomSpeed.value < 0 ? -1 : 1
-        const magnitude = clamp(Math.abs(startZoomSpeed.value) + (event.scale - 1) * PINCH_SCALE_TO_ZOOM_SPEED_SCALE, 0, MAX_ZOOM_SPEED)
-        runOnJS(setZoomSpeed)(zoomSpeedSign * magnitude)
+        runOnJS(setZoomSpeed)(clamp(startZoomSpeed.value + (event.scale - 1) * PINCH_SCALE_TO_ZOOM_SPEED_SCALE, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED))
       }
     })
     .onEnd((event) => {
@@ -1900,8 +1941,7 @@ export default function SwirlScreen() {
         // Recomputed from event.scale rather than trusting the last onUpdate already committed it —
         // same "onEnd's own event is authoritative" reasoning as gravity's own commit above, covering a
         // pinch too quick to generate any onUpdate at all.
-        const zoomSpeedSign = startZoomSpeed.value < 0 ? -1 : 1
-        const nextZoomSpeed = zoomSpeedSign * clamp(Math.abs(startZoomSpeed.value) + (event.scale - 1) * PINCH_SCALE_TO_ZOOM_SPEED_SCALE, 0, MAX_ZOOM_SPEED)
+        const nextZoomSpeed = clamp(startZoomSpeed.value + (event.scale - 1) * PINCH_SCALE_TO_ZOOM_SPEED_SCALE, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED)
         runOnJS(setZoomSpeed)(nextZoomSpeed)
       }
       // Fired again on release (not just on start) so the on-screen controls get a full,
@@ -1992,9 +2032,9 @@ export default function SwirlScreen() {
         // already assumes), so scrolling up read as "decrease" instead of the "up = more" every wheel-
         // as-a-dial control (volume, zoom) normally means. Isolated to this one property rather than
         // flipping `scale` itself, which would also flip mirrorGap/pulse/gravity above — none of which
-        // were reported as backwards, so there's no reason to disturb them to fix this one.
-        const zoomSpeedSign = startZoomSpeed.value < 0 ? -1 : 1
-        setZoomSpeed(zoomSpeedSign * clamp(Math.abs(startZoomSpeed.value) + (1 - scale) * PINCH_SCALE_TO_ZOOM_SPEED_SCALE, 0, MAX_ZOOM_SPEED))
+        // were reported as backwards, so there's no reason to disturb them to fix this one. Linear, not
+        // magnitude-only (see PINCH_SCALE_TO_ZOOM_SPEED_SCALE's own comment) — this can cross zero.
+        setZoomSpeed(clamp(startZoomSpeed.value + (1 - scale) * PINCH_SCALE_TO_ZOOM_SPEED_SCALE, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED))
       }
       idleTimer = setTimeout(endGesture, WHEEL_PINCH_IDLE_MS)
     }
@@ -2004,7 +2044,7 @@ export default function SwirlScreen() {
       node.removeEventListener?.('wheel', onWheel)
       if (idleTimer !== null) clearTimeout(idleTimer)
     }
-  }, [targetsMirrorPinch, targetsPatternZoom, targetsGravityPinch, targetsSpeedPinch, hideControls, setMirrorGap, setStrokeWidth, setGravity, setZoomSpeed, basePulse, manualPulseOffset, mirrorGap, gravity, reversed.value, startMirrorGap, startPulseOffset, startStrokeWidth, startGravity, startZoomSpeed, strokeWidth, settings.zoomSpeed])
+  }, [targetsMirrorPinch, targetsPatternZoom, targetsGravityPinch, targetsSpeedPinch, hideControls, setMirrorGap, setStrokeWidth, setGravity, setZoomSpeed, basePulse, manualPulseOffset, mirrorGap, gravity, reversed, startMirrorGap, startPulseOffset, startStrokeWidth, startGravity, startZoomSpeed, strokeWidth, settings.zoomSpeed])
 
   // The twist/rotation gesture's job is Focus now, not "spin the pattern": rotationSpeed/
   // mirrorRotationSpeed have their own dedicated gesture mode instead (see targetsSpeedRotation below —
@@ -2017,7 +2057,11 @@ export default function SwirlScreen() {
       startTightness.value = tightness.value
       startMirrorLines.value = settings.mirrorLines
       mirrorLinesLive.value = settings.mirrorLines
-      mirrorLinesBelowZero.value = false
+      // Seeded from the real, current mirrorAlternateColors — not hardcoded false — so a gesture that
+      // starts while alternate colors is already on correctly treats itself as starting past zero (see
+      // startMirrorLinesBelowZero's own comment, read below in onUpdate).
+      mirrorLinesBelowZero.value = settings.mirrorAlternateColors
+      startMirrorLinesBelowZero.value = settings.mirrorAlternateColors
       mirrorAlternateColorsLive.value = settings.mirrorAlternateColors
       startForegroundCycleSpeed.value = settings.foregroundCycleSpeed
       startBackgroundCycleSpeed.value = settings.backgroundCycleSpeed
@@ -2042,7 +2086,14 @@ export default function SwirlScreen() {
         // Unclamped on purpose: dialing past 0 keeps counting into negative territory rather than
         // stopping dead at the boundary the way the positive side's own MAX_MIRROR_LINES clamp does —
         // that's what lets continuing past 0 mean something (see below) instead of just going numb.
-        const rawSteps = startMirrorLines.value + Math.round(degrees / ROTATION_DEGREES_PER_MIRROR_LINE)
+        // startMirrorLines is always a plain, non-negative magnitude (it's read straight from
+        // settings.mirrorLines), so it has to be re-signed here using where *this* gesture actually
+        // started (startMirrorLinesBelowZero) before degrees can be added to it — otherwise a gesture
+        // that starts already past zero would have its magnitude misread as a positive count sitting
+        // just above zero, instead of a negative one sitting just below it, and continuing to twist the
+        // same direction would immediately misread as a fresh crossing back the other way.
+        const signedStartMirrorLines = startMirrorLinesBelowZero.value ? -startMirrorLines.value : startMirrorLines.value
+        const rawSteps = signedStartMirrorLines + Math.round(degrees / ROTATION_DEGREES_PER_MIRROR_LINE)
         const belowZero = rawSteps < 0
         // Crossing the zero line itself, either direction, is a little "bonus gear" on the dial:
         // flips mirrorAlternateColors live, the same one-tap toggle the Mirror sheet's own Alternate

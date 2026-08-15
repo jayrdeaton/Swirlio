@@ -21,14 +21,15 @@ const NORMALIZE_RADIANS = Math.PI / 4
 // useDragPointPhysics.ts's own tiltStrength/tiltCenterX/Y, which is): pattern/mirror are pulled toward
 // this eased target through the exact same velocity/friction physics gravity already uses, so a coarser
 // or finer spring here would just change how quickly the sensor's own jitter gets smoothed out, not how
-// heavy the roll itself feels. rawTiltX is the same left/right reading before the screen-edge scale or
-// this easing — speed mode's own live throttle reads this directly instead (see index.tsx's
-// speedTiltRotationRatio), since a spin rate should track the phone's actual angle immediately, the way
-// an instrument reading would, not ease toward it.
+// heavy the roll itself feels. rawTiltX/rawTiltY are the same left/right and up/down readings before the
+// screen-edge scale or this easing — speed mode's own live throttle reads these directly instead (see
+// index.tsx's tilt-driven speed reaction), since a spin/zoom/color rate should track the phone's actual
+// angle immediately, the way an instrument reading would, not ease toward it.
 export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
   const rawX = useSharedValue(0)
   const rawY = useSharedValue(0)
   const rawTiltX = useSharedValue(0)
+  const rawTiltY = useSharedValue(0)
   const gravityCenterX = useSharedValue(0)
   const gravityCenterY = useSharedValue(0)
 
@@ -39,6 +40,7 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
       rawX.value = 0
       rawY.value = 0
       rawTiltX.value = 0
+      rawTiltY.value = 0
       return
     }
     if (Platform.OS === 'web') return
@@ -63,9 +65,11 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
           // makes was the bug, not a real screen rotation to compensate for.
           const screenTilt = tiltToScreenAxes(rotation.gamma, rotation.beta, 0)
           const ratioX = clamp(screenTilt.x / NORMALIZE_RADIANS, -1, 1)
+          const ratioY = clamp(screenTilt.y / NORMALIZE_RADIANS, -1, 1)
           rawX.value = ratioX * maxOffset
-          rawY.value = clamp(screenTilt.y / NORMALIZE_RADIANS, -1, 1) * maxOffset
+          rawY.value = ratioY * maxOffset
           rawTiltX.value = ratioX
+          rawTiltY.value = ratioY
         })
       })
       .catch(() => {
@@ -74,7 +78,7 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
       })
 
     return () => subscription?.remove()
-  }, [enabled, maxOffset, rawTiltX, rawX, rawY])
+  }, [enabled, maxOffset, rawTiltX, rawTiltY, rawX, rawY])
 
   useAnimatedReaction(
     () => rawX.value,
@@ -89,5 +93,5 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
     }
   )
 
-  return { gravityCenterX, gravityCenterY, rawTiltX }
+  return { gravityCenterX, gravityCenterY, rawTiltX, rawTiltY }
 }

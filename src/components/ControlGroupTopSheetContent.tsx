@@ -28,10 +28,10 @@ const PATTERN_OPTIONS = PATTERN_ORDER.map((pattern) => ({
   renderIcon: ({ color, size }: { color: string; size: number }) => <PatternIcon pattern={pattern} color={color} size={size} />
 }))
 
-// Shake (Accelerometer) and tilt (DeviceMotion) both no-op on web already (see useShakeToRandomize.ts
-// and useTiltGravityCenter.ts's own Platform.OS checks) — hiding their toggles here too rather than
-// leaving them visible-but-inert avoids the "why doesn't this do anything" confusion of a control with
-// nothing behind it to control.
+// Shake (Accelerometer), tilt (DeviceMotion), audio-reactive (mic capture), and haptics all no-op (or
+// worse — see Audio reactive's own comment below) on web already — hiding their toggles here too
+// rather than leaving them visible-but-inert avoids the "why doesn't this do anything" confusion of a
+// control with nothing behind it to control.
 const isWeb = Platform.OS === 'web'
 
 const DASH_STYLE_OPTIONS = DASH_STYLE_ORDER.map((dashStyle) => ({
@@ -48,7 +48,7 @@ const DASH_STYLE_OPTIONS = DASH_STYLE_ORDER.map((dashStyle) => ({
 export function ControlGroupTopSheetContent() {
   const insets = useSafeAreaInsets()
   const { activeGroup } = useControlGroups()
-  const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setGravity, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTightness } = useSwirlSettings()
+  const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setGravity, setHapticsEnabled, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTightness } = useSwirlSettings()
   const { swapColors } = useSwapColors()
   const { resetGravity, resetMirror, resetPattern } = useSwirlReset()
   const { randomizeGroup } = useSwirlRandomize()
@@ -300,8 +300,30 @@ export function ControlGroupTopSheetContent() {
               transport row's contextual slots are mode-specific (see OnScreenControls' own slotA/slotB)
               — joins Mic sensitivity, which already lived in this same group's bottom sheet, so every
               mic-related control is reachable from one trigger. Same on/off toggle it always was, just
-              relocated. */}
-              <SettingToggleFab icon='microphone' label='Audio reactive' value={settings.audioReactiveEnabled} onValueChange={setAudioReactiveEnabled} />
+              relocated. Hidden on web: react-native-audio-api's web target has no microphone-capable
+              node at all (see useAudioReactive.ts's own comment), so mic capture bails out silently
+              there — worse, the toggle itself would still pin rotation/zoom/tightness/crop/hole/mirror
+              gap/stroke width to their zero-audio-input values the moment it's on, since those
+              `effective*` overrides in index.tsx only check audioReactiveEnabled, not platform. */}
+              {!isWeb && <SettingToggleFab icon='microphone' label='Audio reactive' value={settings.audioReactiveEnabled} onValueChange={setAudioReactiveEnabled} />}
+              {/* Governs the same shared HapticSettingsContext flag every haptic call site in the app
+              already gates on — see _layout.tsx's HapticsSettingsBridge — so this one toggle covers
+              both the manual useVibration() calls and every auto-haptic FAB/button with no per-call-site
+              changes needed. Hidden on web for the same reason Shake/Tilt are: expo-haptics is
+              native-only, and useVibration's own web fallback (RN Web's Vibration.vibrate, guarded
+              behind `'vibrate' in navigator`) is unsupported on iOS Safari and inert on desktop with no
+              vibration hardware — real haptics only, same bar every other toggle in this row is held
+              to. `gesture-tap` rather than a second vibrate-family glyph: sitting right next to Shake's
+              `vibrate` icon, a `vibrate`/`vibrate-off` pair read as near-duplicates at a glance despite
+              meaning unrelated things (a physical shake gesture vs. press feedback on every tap). */}
+              {!isWeb && <SettingToggleFab icon='gesture-tap' label='Haptics' value={settings.hapticsEnabled} onValueChange={setHapticsEnabled} />}
+              {/* Tilt (DeviceMotion) no-ops on web already (see useTiltGravityCenter.ts's own
+              Platform.OS check) — hidden here for the same reason every other web-inert toggle is
+              (see isWeb's own comment). Drives whichever gesture target is currently active (pattern/
+              mirror/gravity/speed — see useEpicenter.ts and index.tsx's own tilt wiring), not just
+              gravity, so it lives here as a global input-mode preference rather than under any one
+              mode-specific group. */}
+              {!isWeb && <SettingToggleFab icon='axis-arrow' label='Tilt control' value={settings.tiltEnabled} onValueChange={setTiltEnabled} />}
             </FabRow>
           </>
         )}
@@ -339,10 +361,6 @@ export function ControlGroupTopSheetContent() {
             gravityMarkerVisibility.tsx's own comment for why this reads from a dedicated
             sibling-shared context instead of useSwirlSettings. */}
             <SettingToggleFab icon='eye' label='Visible' value={gravityMarkerVisible} onValueChange={setGravityMarkerVisible} />
-            {/* Tilt (DeviceMotion) no-ops on web already (see useTiltGravityCenter.ts's own
-            Platform.OS check) — hidden here for the same reason every other web-inert toggle is (see
-            isWeb's own comment). */}
-            {!isWeb && <SettingToggleFab icon='axis-arrow' label='Tilt to roll' value={settings.tiltEnabled} onValueChange={setTiltEnabled} />}
           </FabRow>
         )}
       </View>

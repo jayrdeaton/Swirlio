@@ -106,11 +106,11 @@ export function useEpicenter(
   gravityHandle: DragPointPhysics,
   isDraggingGravity: SharedValue<boolean>,
   // Whether touch (rather than tilt) currently owns the gravity center — true from the moment a
-  // gravity drag starts until either the center-well snap or an explicit reset clears it (see
-  // index.tsx's own effectiveGravityCenterX/Y, which is what this actually gates). Unlike
-  // isDraggingGravity, this stays true for the whole thrown/settling stretch after a finger lifts,
-  // not just while it's actually down — that's the whole point: a release away from the well has to
-  // keep winning over tilt while it bounces and after it comes to rest, not just mid-touch.
+  // gravity drag starts, cleared the instant it ends (see releaseTargets below), regardless of
+  // where it was released or whether it's still bouncing (see index.tsx's own
+  // effectiveGravityCenterX/Y, which is what this actually gates and which already eases the
+  // handoff via withSpring rather than teleporting). A drag is a temporary override for precise
+  // placement, not a standing claim tilt has to be explicitly reset to win back.
   gravityManualControl: SharedValue<boolean>,
   // 'speed' mode's own two canvas actions — see longPressGesture/panGesture's own onEnd below for where
   // each fires. Both are plain index.tsx callbacks (session/settings state, JS-thread concerns), crossed
@@ -357,12 +357,16 @@ export function useEpicenter(
     if (targetsGravity) {
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       isDraggingGravity.value = false
+      // Cleared unconditionally on every release, not just a center-well snap — tilt reclaims the
+      // gravity center the instant a finger lifts, even mid-throw, rather than staying locked out
+      // until an explicit Reset. See effectiveGravityCenterX/Y's own comment in index.tsx for why
+      // this handoff is safe to do instantly: it eases via withSpring rather than teleporting.
+      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+      gravityManualControl.value = false
       const vx = velocityX / width
       const vy = velocityY / height
       if (Math.hypot(gravityHandle.x.value, gravityHandle.y.value) < SNAP_DISTANCE && Math.hypot(vx, vy) < SNAP_VELOCITY) {
         gravityHandle.recenter()
-        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
-        gravityManualControl.value = false
         anySnapped = true
       } else {
         gravityHandle.startBounce(vx, vy)

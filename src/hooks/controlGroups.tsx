@@ -20,9 +20,11 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 // reason behind it. Rotation/zoom speed moved into 'pattern' to match.
 //
 // 'gravity' is the newest split, out of the old 'settings' catch-all: Friction/Gravity (the physics
-// sliders) and Tilt to roll now live here instead, alongside gravity's own gestureTarget (see
-// useEpicenter.ts) — promoting the whole thing to a first-class mode, touch-drag and settings sheet
-// together, rather than two sliders buried in a generic drawer.
+// sliders) now live here instead, alongside gravity's own gestureTarget (see useEpicenter.ts) —
+// promoting the whole thing to a first-class mode, touch-drag and settings sheet together, rather
+// than two sliders buried in a generic drawer. Tilt control stayed behind in 'settings' — it drives
+// whichever gesture target is active (pattern/mirror/gravity/speed), not just gravity, so it reads
+// as a global input-mode preference rather than something scoped to this one group.
 export type ControlGroup = 'colors' | 'gravity' | 'line' | 'mirror' | 'pattern' | 'settings'
 
 // Pre-measurement placeholders only (see contentSize below) — used for the very first layout before
