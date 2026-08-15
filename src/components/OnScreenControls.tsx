@@ -18,7 +18,7 @@ import { DashStyleIcon } from './DashStyleIcon'
 import { FAB_ROW_GAP } from './FabRow'
 import { GlassToggleFab } from './GlassToggleFab'
 import { FAB_HEIGHT_MEDIUM, FAB_HEIGHT_SMALL } from './LabeledFab'
-import { MdIcon, resolveIcon } from './MdIcon'
+import { IconOrRenderFn, MdIcon, resolveIcon } from './MdIcon'
 import { PatternIcon } from './PatternIcon'
 
 const FAB_EDGE_MARGIN = 16
@@ -56,14 +56,13 @@ const SIBLINGS_COLLAPSE_OFFSET = 24
 // Pattern's own trigger renders the same spiral glyph as the Spiral option inside its own top sheet
 // (see PatternIcon) rather than a generic MaterialCommunityIcons stand-in ('shape') — the app's own
 // default pattern reads as a much clearer "this is the pattern group" mark than an arbitrary polygon.
-type GroupTriggerIcon = string | ((props: { size: number; color: string }) => React.ReactNode)
 // Every one of these — string or render-function alike — now goes through resolveIcon before it
 // reaches the real FAB (see MdIcon's own comment), so a plain string icon no longer gets a stable
 // per-trigger testID derived from itself the way it used to: resolveIcon wraps it in an anonymous
 // closure just like a render-function icon, indistinguishable from any other by the time the Jest FAB
 // mock sees it. Every entry here carries its own testID explicitly rather than relying on that
 // fallback (see the Jest FAB mock's own comment).
-const GROUP_TRIGGERS: { group: ControlGroup; icon: GroupTriggerIcon; testID?: string }[] = [
+const GROUP_TRIGGERS: { group: ControlGroup; icon: IconOrRenderFn; testID?: string }[] = [
   { group: 'mirror', icon: 'mirror', testID: 'fab-mirror' },
   { group: 'colors', icon: 'palette', testID: 'fab-palette' },
   { group: 'pattern', icon: ({ size, color }) => <PatternIcon pattern='spiral' color={color} size={size} />, testID: 'fab-pattern' },
@@ -82,7 +81,7 @@ const GROUP_TRIGGERS: { group: ControlGroup; icon: GroupTriggerIcon; testID?: st
 // below). 'mirror' and 'pattern' each reuse the same icon as their matching group trigger above:
 // different row, different context (this one's about what a drag/twist moves, not which sheet a tap
 // opens), but they're still the clearest available icons for "the mirror"/"the pattern" specifically.
-const GESTURE_TARGET_ICONS: Record<GestureTarget, GroupTriggerIcon> = {
+const GESTURE_TARGET_ICONS: Record<GestureTarget, IconOrRenderFn> = {
   pattern: ({ size, color }) => <PatternIcon pattern='spiral' color={color} size={size} />,
   mirror: 'mirror',
   // Same icon the gravity group trigger and its own Gravity slider use — one consistent "this is
@@ -110,7 +109,7 @@ function fanItemOffset(index: number, total: number) {
 }
 
 type GestureFanItemProps = {
-  icon: GroupTriggerIcon
+  icon: IconOrRenderFn
   testID: string
   active: boolean
   open: boolean
@@ -375,15 +374,14 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
   const fabOutlineStyle = { borderColor: solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH }
   const solidFabStyle = { backgroundColor: colors.primary, ...fabOutlineStyle }
   const disabledBackdropStyle = { borderRadius: 3 * (roundness ?? 4), overflow: 'hidden' as const }
-  const backFabStyle = { backgroundColor: backDisabled ? 'transparent' : colors.primary, borderColor: backDisabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' as const }
-  // Every other boundary-disabled small FAB (Add/Remove mirror below) needs this same conditional
-  // treatment backFabStyle already gives skip-previous, rather than plain solidFabStyle: react-native-
-  // paper's FAB reads a `customBackgroundColor` out of the raw `style` prop and correctly ignores it
-  // while disabled in favor of the theme's surfaceDisabled — but then re-spreads that same raw `style`
-  // prop again, last, over its own computed background (see FAB.tsx's own Surface style array), so an
-  // unconditional backgroundColor: colors.primary always wins right back over
-  // disabledOnCanvasFabTheme's intended transparent fill. Without this, the BlurView backdrop (and the
-  // disabled-tinted icon drawn on top of it) never actually shows — colors.primary paints over both.
+  // Every boundary-disabled small FAB (skip-previous, Add/Remove mirror below) needs this conditional
+  // treatment rather than plain solidFabStyle: react-native-paper's FAB reads a `customBackgroundColor`
+  // out of the raw `style` prop and correctly ignores it while disabled in favor of the theme's
+  // surfaceDisabled — but then re-spreads that same raw `style` prop again, last, over its own computed
+  // background (see FAB.tsx's own Surface style array), so an unconditional backgroundColor:
+  // colors.primary always wins right back over disabledOnCanvasFabTheme's intended transparent fill.
+  // Without this, the BlurView backdrop (and the disabled-tinted icon drawn on top of it) never
+  // actually shows — colors.primary paints over both.
   const disabledAwareFabStyle = (disabled: boolean) => ({ backgroundColor: disabled ? 'transparent' : colors.primary, borderColor: disabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' as const })
   // Without an explicit box-sizing, the border above grows a FAB's own intrinsic Surface box a couple
   // pixels past its true small/medium footprint (react-native-paper's FAB Surface has no size of its
@@ -614,7 +612,7 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
           <Animated.View testID='transport-row-flank-left' style={[styles.transportRowFlank, fanFlanksStyle]} pointerEvents={gestureFanOpen ? 'none' : 'auto'}>
             <View style={styles.disableableSmallFabWrapper}>
               {backDisabled && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, disabledBackdropStyle]} />}
-              <FAB testID='fab-skip-previous' icon={resolveIcon('skip-previous')} size='small' disabled={backDisabled} color={solidFabColor} style={backFabStyle} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onGoBack} onLongPress={onResetAllSettings} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
+              <FAB testID='fab-skip-previous' icon={resolveIcon('skip-previous')} size='small' disabled={backDisabled} color={solidFabColor} style={disabledAwareFabStyle(backDisabled)} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onGoBack} onLongPress={onResetAllSettings} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
             </View>
             {/* Slot A — see slotA/slotB's own comment above for the full mode table this renders from.
             Speed mode swaps this for Pause/Play instead (see showPauseFab's own comment) — slotA itself

@@ -3,6 +3,8 @@
 // rippleMath.ts is split out from RingsPattern.tsx: worklet-tagged math that's independently testable
 // without mounting a Skia canvas.
 
+import { clamp } from '@/constants/clamp'
+
 // The same hand-rolled linear interpolation the old marker used (not Reanimated's own `interpolate` —
 // this repo's test mock for it is a plain passthrough, see jest.setup.ts, so a real interpolate call
 // here would silently return the wrong number under test). Magnitude, not the raw signed value:
@@ -15,7 +17,7 @@
 export function gravityHoleRadius(gravityValue: number, maxGravity: number, minRadius: number, maxRadius: number): number {
   'worklet'
   const t = Math.abs(gravityValue) / maxGravity
-  const clampedT = Math.min(Math.max(t, 0), 1)
+  const clampedT = clamp(t, 0, 1)
   return minRadius + clampedT * (maxRadius - minRadius)
 }
 
@@ -33,7 +35,7 @@ export function gravityHoleRadius(gravityValue: number, maxGravity: number, minR
 export function gravityParticleFrictionSpeed(bounceFriction: number, maxBounceFriction: number, minSpeed: number, maxSpeed: number): number {
   'worklet'
   const t = bounceFriction / maxBounceFriction
-  const clampedT = Math.min(Math.max(t, 0), 1)
+  const clampedT = clamp(t, 0, 1)
   return maxSpeed - clampedT * (maxSpeed - minSpeed)
 }
 
@@ -82,7 +84,7 @@ export function gravityParticleRadius(phase: number, innerRadius: number, outerR
 export function gravityParticleDotRadius(orbitRadius: number, holeRadius: number, minDotRadius: number, maxDotRadius: number): number {
   'worklet'
   if (holeRadius <= 0) return minDotRadius
-  const t = Math.min(Math.max(orbitRadius / holeRadius, 0), 1)
+  const t = clamp(orbitRadius / holeRadius, 0, 1)
   return minDotRadius + t * (maxDotRadius - minDotRadius)
 }
 
@@ -97,7 +99,7 @@ export function gravityParticleDotRadius(orbitRadius: number, holeRadius: number
 export function gravityParticleSizeScale(holeRadius: number, maxHoleRadius: number): number {
   'worklet'
   if (maxHoleRadius <= 0) return 0
-  return Math.min(Math.max(holeRadius / maxHoleRadius, 0), 1)
+  return clamp(holeRadius / maxHoleRadius, 0, 1)
 }
 
 // How much of a lap, at each end, a particle spends fading rather than snapping in/out of existence —

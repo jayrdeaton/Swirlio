@@ -3,6 +3,7 @@ import * as SplashScreen from 'expo-splash-screen'
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { Platform } from 'react-native'
 
+import { clamp as clampRange } from '@/constants/clamp'
 import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
 import { PATTERN_ORDER, PatternType } from '@/constants/patterns'
 import { DASH_STYLE_ORDER, DashStyle } from '@/constants/strokeDash'
@@ -241,7 +242,7 @@ export const MAX_FOLLOW_SPEED = 3
 
 function clamp(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min
-  return Math.min(Math.max(value, min), max)
+  return clampRange(value, min, max)
 }
 
 // Rounding after clamping (not before) is what keeps the result in [min, max]: clamp bounds the
