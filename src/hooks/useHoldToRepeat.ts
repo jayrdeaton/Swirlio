@@ -43,3 +43,50 @@ export function useHoldToRepeat(action: () => void, repeatMs: number) {
 
   return { onLongPress: start, onPressOut: stop }
 }
+
+// Keyed sibling of useHoldToRepeat, for a set of independently-holdable targets that all funnel
+// through one action (e.g. randomizeGroup, keyed by which group's FAB is actually being held) rather
+// than a single fixed one. The plain hook above can't cover this: GROUP_TRIGGERS is rendered via
+// `.map()`, and calling useHoldToRepeat once per entry from inside that map would be a Rules of Hooks
+// violation even though the array itself is a fixed, module-level constant. One Map of timers keyed by
+// target stands in for the single ref above, so unrelated targets never share or clobber each other's
+// interval — holding one group's FAB while another was already released (or is being held
+// simultaneously, e.g. two-finger use) keeps each target's own repeat independent. Same
+// call-immediately-then-setInterval-until-released mechanics and the same stale-closure fix as above —
+// see that comment for why latestAction (rather than closing over `action` directly) matters.
+export function useHoldToRepeatByKey<K>(action: (key: K) => void, repeatMs: number) {
+  const timers = useRef<Map<K, ReturnType<typeof setInterval>>>(new Map())
+  const latestAction = useRef(action)
+  useEffect(() => {
+    latestAction.current = action
+  }, [action])
+
+  const stop = (key: K) => {
+    const timer = timers.current.get(key)
+    if (timer == null) return
+    clearInterval(timer)
+    timers.current.delete(key)
+  }
+  // Unmount-safe, same reasoning as above — stops every still-held target's own timer, not just
+  // whichever one happened to be most recently started.
+  useEffect(
+    () => () => {
+      timers.current.forEach((timer) => clearInterval(timer))
+      timers.current.clear()
+    },
+    []
+  )
+
+  const start = (key: K) => {
+    action(key)
+    timers.current.set(
+      key,
+      setInterval(() => latestAction.current(key), repeatMs)
+    )
+  }
+
+  return {
+    onLongPress: (key: K) => () => start(key),
+    onPressOut: (key: K) => () => stop(key)
+  }
+}

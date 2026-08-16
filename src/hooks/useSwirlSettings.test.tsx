@@ -6,6 +6,7 @@ import { Text } from 'react-native'
 import { MAX_MIRROR_LINES } from '@/constants/kaleidoscope'
 import { PATTERN_ORDER } from '@/constants/patterns'
 import { DashStyle } from '@/constants/strokeDash'
+import { controlsAutoHideDelayMs } from '@/constants/swirlSettingsRanges'
 import { GestureTarget } from '@/hooks/useEpicenter'
 import { SwirlSettings, SwirlSettingsProvider, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
@@ -15,6 +16,7 @@ type TestApi = {
   setBackgroundColors: (colors: string[]) => void
   setBackgroundCycleSpeed: (speed: number) => void
   setBounceFriction: (friction: number) => void
+  setControlsAutoHideSpeed: (speed: number) => void
   setCropRadius: (cropRadius: number) => void
   setCropShaped: (shaped: boolean) => void
   setDashStyle: (dashStyle: DashStyle) => void
@@ -49,11 +51,11 @@ function requireApi(value: TestApi | null): TestApi {
 }
 
 function Probe({ onUpdate }: { onUpdate: (api: TestApi) => void }) {
-  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings } = useSwirlSettings()
+  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings } = useSwirlSettings()
 
   useEffect(() => {
-    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings })
-  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings, settings])
+    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings })
+  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings, settings])
 
   return <Text testID='stroke'>{String(settings.strokeWidth)}</Text>
 }
@@ -161,7 +163,7 @@ describe('useSwirlSettings', () => {
     await waitFor(() => expect(getApi().settings.gestureTarget).toBe('gravity'))
   })
 
-  it.each(['mirror', 'gravity', 'speed'] as const)('hydrates a persisted gestureTarget value (%s)', async (gestureTarget) => {
+  it.each(['mirror', 'gravity'] as const)('hydrates a persisted gestureTarget value (%s)', async (gestureTarget) => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ gestureTarget }))
 
     const { getApi } = await renderProbe()
@@ -578,6 +580,51 @@ describe('useSwirlSettings', () => {
     await waitFor(() => expect(getApi().settings.bounceFriction).toBe(5))
   })
 
+  // A rate dial, the same shape as bounceFriction above, not a raw delay — see controlsAutoHideSpeed's
+  // own comment in useSwirlSettings.tsx and controlsAutoHideDelayMs in swirlSettingsRanges.ts. Default
+  // of 1 is chosen specifically to reproduce this app's original fixed 5-second idle-fade delay.
+  it('defaults controlsAutoHideSpeed to 1 (reproducing the original fixed 5s idle-fade delay) and lets it be changed', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.controlsAutoHideSpeed).toBe(1)
+    expect(controlsAutoHideDelayMs(getApi().settings.controlsAutoHideSpeed)).toBe(5000)
+
+    await act(async () => {
+      getApi().setControlsAutoHideSpeed(2.5)
+    })
+
+    await waitFor(() => expect(getApi().settings.controlsAutoHideSpeed).toBe(2.5))
+  })
+
+  it('clamps controlsAutoHideSpeed setter and hydration values to their valid range', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ controlsAutoHideSpeed: 999 }))
+    const { getApi: getHydratedApi } = await renderProbe()
+    expect(getHydratedApi().settings.controlsAutoHideSpeed).toBe(5)
+
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setControlsAutoHideSpeed(-1)
+    })
+    await waitFor(() => expect(getApi().settings.controlsAutoHideSpeed).toBe(0))
+
+    await act(async () => {
+      getApi().setControlsAutoHideSpeed(999)
+    })
+    await waitFor(() => expect(getApi().settings.controlsAutoHideSpeed).toBe(5))
+  })
+
+  // 0 is the speed dial's own "off" extreme — controlsAutoHideDelayMs returns null rather than some
+  // enormous finite number, which is what index.tsx's idle-fade effect actually checks to skip
+  // scheduling the timer at all (see its own comment).
+  it('controlsAutoHideDelayMs converts the speed dial to a delay, or null when off', () => {
+    expect(controlsAutoHideDelayMs(0)).toBeNull()
+    expect(controlsAutoHideDelayMs(1)).toBe(5000)
+    expect(controlsAutoHideDelayMs(5)).toBe(1000)
+  })
+
   it('defaults gravity to 1 (nonzero, so tilt has something to roll with out of the box) and lets it be changed', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
@@ -859,14 +906,14 @@ describe('useSwirlSettings', () => {
       getApi().setZoomSpeed(999)
       getApi().setStrokeWidth(-4)
       getApi().setForegroundCycleSpeed(999)
-      getApi().setBackgroundCycleSpeed(-4)
+      getApi().setBackgroundCycleSpeed(-999)
     })
 
     await waitFor(() => {
       expect(getApi().settings.zoomSpeed).toBe(10)
       expect(getApi().settings.strokeWidth).toBe(1)
       expect(getApi().settings.foregroundCycleSpeed).toBe(5)
-      expect(getApi().settings.backgroundCycleSpeed).toBe(0.1)
+      expect(getApi().settings.backgroundCycleSpeed).toBe(-5)
     })
   })
 
@@ -972,9 +1019,10 @@ describe('useSwirlSettings', () => {
 
   // shakeEnabled/tiltEnabled are opt-outs, not look/tuning knobs — someone who's turned off shake-to-
   // randomize or tilt warp shouldn't have Reset all silently switch them back on, mirroring
-  // audioReactiveEnabled's carve-out above. showLabels is a chrome-density preference, not a
-  // look/tuning knob either. See resetSettings's own comment in useSwirlSettings.tsx.
-  it('resetSettings leaves shakeEnabled, tiltEnabled, and showLabels exactly as they were, on or off', async () => {
+  // audioReactiveEnabled's carve-out above. showLabels and controlsAutoHideSpeed are chrome-density/
+  // interface preferences, not look/tuning knobs either. See resetSettings's own comment in
+  // useSwirlSettings.tsx.
+  it('resetSettings leaves shakeEnabled, tiltEnabled, showLabels, and controlsAutoHideSpeed exactly as they were', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
@@ -982,6 +1030,7 @@ describe('useSwirlSettings', () => {
       getApi().setShakeEnabled(false)
       getApi().setTiltEnabled(false)
       getApi().setShowLabels(true)
+      getApi().setControlsAutoHideSpeed(4)
     })
     await waitFor(() => expect(getApi().settings.shakeEnabled).toBe(false))
 
@@ -993,6 +1042,7 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.shakeEnabled).toBe(false)
     expect(getApi().settings.tiltEnabled).toBe(false)
     expect(getApi().settings.showLabels).toBe(true)
+    expect(getApi().settings.controlsAutoHideSpeed).toBe(4)
   })
 
   // gestureTarget is a tool mode (which point a drag targets), not a look/tuning knob either — same

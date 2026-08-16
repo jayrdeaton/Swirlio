@@ -14,6 +14,21 @@ type GlassToggleFabProps = {
   icon: string | ((props: { size: number; color: string }) => React.ReactNode)
   active: boolean
   onPress: () => void
+  // Optional bonus gesture layered on top of onPress, same tap/hold-does-something-else convention
+  // every other FAB with a long press in this app already uses (skip-previous, Add/Remove mirror,
+  // Cycle shape/line type — see OnScreenControls' own comments) — not every caller needs one, so
+  // this stays undefined by default rather than every GlassToggleFab growing a no-op handler.
+  onLongPress?: () => void
+  // Only meaningful alongside onLongPress — callers pass the same TRANSPORT_LONG_PRESS_MS every
+  // other hold in the app uses (see OnScreenControls' own constant) rather than this component
+  // picking its own value, so "how long is a hold" stays one shared feel app-wide.
+  delayLongPress?: number
+  // Fires on release, regardless of how the press ends (a plain tap, a long press, or a hold that
+  // outlasted delayLongPress) — only meaningful to a caller pairing onLongPress with a hold-to-repeat
+  // hook (useHoldToRepeat/useHoldToRepeatByKey), which needs to know the instant a hold releases so it
+  // can clear its own interval rather than keep firing after the finger's already lifted. Undefined by
+  // default, same as onLongPress, for callers with nothing to stop.
+  onPressOut?: () => void
   // Every icon — string or render-function alike — is normalized through resolveIcon (see MdIcon)
   // before it reaches the underlying FAB, so a plain string no longer yields a testID a caller (or a
   // Jest mock deriving one from the icon prop) can tell apart from any other icon's. Every caller
@@ -37,7 +52,7 @@ type GlassToggleFabProps = {
 // Only mounted for the off state: the "on" fill is fully opaque colors.primary, which already
 // completely occludes anything blurred behind it, so blurring there would be pure wasted compositor
 // work with zero visible effect.
-export function GlassToggleFab({ icon, active, onPress, testID, disabled }: GlassToggleFabProps) {
+export function GlassToggleFab({ icon, active, onPress, onLongPress, delayLongPress, onPressOut, testID, disabled }: GlassToggleFabProps) {
   const { roundness } = useTheme()
   const { backgroundColor, iconColor, borderColor, blurEnabled, tintOpacity } = useToggleFabAppearance(active)
   // Same borderRadius math LabeledFab's own small FAB uses (see BORDER_RADIUS_MULTIPLIER_SMALL there)
@@ -57,7 +72,7 @@ export function GlassToggleFab({ icon, active, onPress, testID, disabled }: Glas
       couple pixels taller than the BlurView backdrop above, both sharing the same top edge, so a
       sliver of whatever's behind both shows through at the bottom. border-box is what makes this
       explicit height/width actually include the border instead of adding to it. */}
-      <FAB testID={testID} icon={resolveIcon(icon)} size='small' color={iconColor} style={fabStyle} onPress={onPress} disabled={disabled} />
+      <FAB testID={testID} icon={resolveIcon(icon)} size='small' color={iconColor} style={fabStyle} onPress={onPress} onLongPress={onLongPress} delayLongPress={delayLongPress} onPressOut={onPressOut} disabled={disabled} />
     </View>
   )
 }

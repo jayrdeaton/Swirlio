@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import { cancelAnimation, runOnJS, useAnimatedReaction, useDerivedValue, useFrameCallback, useSharedValue, withSpring, withTiming } from 'react-native-reanimated'
+import { cancelAnimation, runOnJS, useDerivedValue, useFrameCallback, useSharedValue, withSpring, withTiming } from 'react-native-reanimated'
 
 import { EdgeRevealZones } from '@/components/EdgeRevealZones'
 import { OnScreenControls } from '@/components/OnScreenControls'
@@ -13,11 +13,12 @@ import { mapAudioBand } from '@/constants/audioMapping'
 import { clamp } from '@/constants/clamp'
 import { computeEffectiveSwirlValues } from '@/constants/effectiveSwirlValues'
 import { gravityParticleFrictionSpeed } from '@/constants/gravityWellMath'
-import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
-import { isZoomlessPattern, PATTERN_ORDER } from '@/constants/patterns'
+import { MAX_MIRROR_LINES, MIN_MIRROR_LINES, mirrorLinesFromSigned, signedMirrorLines } from '@/constants/kaleidoscope'
+import { PATTERN_ORDER } from '@/constants/patterns'
 import { MAX_RADIUS_TO_REFERENCE_RATIO, RIPPLE_BASE_COUNT, rippleModulus, rippleSpacing } from '@/constants/rippleMath'
 import { DASH_STYLE_ORDER } from '@/constants/strokeDash'
-import { ControlGroup, useControlGroupSheetDrawer } from '@/hooks/controlGroups'
+import { controlsAutoHideDelayMs } from '@/constants/swirlSettingsRanges'
+import { ControlGroup, useControlGroups, useControlGroupSheetDrawer } from '@/hooks/controlGroups'
 import { useGravityMarkerVisibility } from '@/hooks/gravityMarkerVisibility'
 import { SpeedRateWriters, useRegisterSpeedRateWriters } from '@/hooks/speedRateBridge'
 import { useRegisterSwirlRandomize } from '@/hooks/swirlRandomize'
@@ -25,12 +26,12 @@ import { useRegisterSwirlReset } from '@/hooks/swirlReset'
 import { useAudioReactive } from '@/hooks/useAudioReactive'
 import { SCREEN_EDGE_OFFSET, useDragPointPhysics } from '@/hooks/useDragPointPhysics'
 import { GestureTarget, useEpicenter } from '@/hooks/useEpicenter'
-import { useLookHistory } from '@/hooks/useLookHistory'
-import { PAUSE_EASE_DURATION_MS, useLoopingProgress } from '@/hooks/useLoopingProgress'
+import { ExtraResetFields, useLookHistory } from '@/hooks/useLookHistory'
+import { useLoopingProgress } from '@/hooks/useLoopingProgress'
 import { useRerollUnits } from '@/hooks/useRerollUnits'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { useSwapColors } from '@/hooks/useSwapColors'
-import { DEFAULT_DASH_STYLE, MAX_BOUNCE_FRICTION, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_CYCLE_SPEED, MIN_MIRROR_GAP, MIN_POLYGON_SIDES, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { DEFAULT_DASH_STYLE, MAX_BOUNCE_FRICTION, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_MIRROR_GAP, MAX_POLYGON_SIDES, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_BOUNCE_FRICTION, MIN_MIRROR_GAP, MIN_POLYGON_SIDES, MIN_STROKE_WIDTH, MIN_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
 import { TILT_EASE_SPRING, useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const BASE_ROTATION_DURATION_MS = 12000
@@ -80,7 +81,8 @@ const AUDIO_ROTATION_REVERSED_STORAGE_KEY = 'swirlio.audioRotationReversed.v1'
 const SESSION_STATE_PERSIST_DEBOUNCE_MS = 400
 // How many of the 12 look units in rerollUnits a long-press on the forward transport FAB rerolls at
 // once (see goForwardBatch) — enough to read as "several things changed," short of rerollUnits.length
-// (a full randomize), which is what the separate dice FAB/shake gesture already covers.
+// (a full randomize), which the settings group's own Randomize/long-press shortcuts and the shake
+// gesture already cover (see randomize/randomizeGesture below).
 const TWEAK_BATCH_COUNT = 4
 // "Reset rotation" only means undoing manual/gesture drift once the pattern (or mirror) isn't actively
 // spinning — see resetRotation/resetMirrorRotation below. At that point, springing all the way back to
@@ -88,15 +90,12 @@ const TWEAK_BATCH_COUNT = 4
 // clamping back into [0, 360) and can be sitting on an arbitrarily large/awkward angle by the time
 // something's paused. Any exact multiple of 360 looks visually identical to 0 — a full turn is the
 // identity — so springing to whichever multiple is angularly closest gets the same "squared back up"
-// look with the shortest possible travel.
-function nearestMultipleOf360(value: number): number {
-  return Math.round(value / 360) * 360
+// look with the shortest possible travel. Generalized to an arbitrary increment (not just a full 360°
+// lap) for trySnapPatternRotation/trySnapMirrorRotation below, which need the same "closest multiple"
+// math against a much finer, shape-dependent increment.
+function nearestMultipleOf(value: number, increment: number): number {
+  return Math.round(value / increment) * increment
 }
-// How long the controls stay up, once visible, with zero activity before fading away on their own.
-// Coming back from a hide is always a deliberate gesture, never just waiting: hovering or pressing
-// near an edge (see EdgeRevealZones) is the only way, and doing so also resets this same clock so
-// the controls don't fade out again the instant they've reappeared.
-const CONTROLS_IDLE_FADE_MS = 5000
 // How much relative pinch scale (event.scale — always measured relative to 1 at gesture start, not
 // a per-frame delta) moves mirrorGap, when the pinch targets the mirror — see targetsMirrorPinch
 // below. Unlike mirror lines (a whole-number count with no meaningful "in between"), a gap is a
@@ -140,6 +139,14 @@ const PINCH_SCALE_TO_GRAVITY_SCALE = MAX_GRAVITY / 1.5
 // (a comfortable half-turn) sweeps the whole MIN_TIGHTNESS..MAX_TIGHTNESS range; retune by feel on a
 // real device, same disclaimer as every other gesture-derived scale in this file.
 const ROTATION_DEGREES_TO_TIGHTNESS_SCALE = (MAX_TIGHTNESS - MIN_TIGHTNESS) / 180
+// The same twist/Focus gesture's gravity-mode job: pairs with the gravity-targeting pinch above
+// (strength) the way pattern's own pinch+twist pair (zoom+density) already do — twist dials friction
+// live while pinch dials strength, so both of gravity's two numbers sit under one two-finger gesture.
+// Continuous, not click-stop, the same shape as tightness above (not mirrorLines' discrete dial):
+// bounceFriction is a smooth 0..5 range with a meaningful in-between, same as tightness. 180° sweeps
+// the whole MIN_BOUNCE_FRICTION..MAX_BOUNCE_FRICTION range; retune by feel on a real device, same
+// disclaimer as every other gesture-derived scale in this file.
+const ROTATION_DEGREES_TO_FRICTION_SCALE = (MAX_BOUNCE_FRICTION - MIN_BOUNCE_FRICTION) / 180
 // The same twist/Focus gesture's mirror-mode job: dial mirrorLines up/down a whole step per this many
 // degrees of twist, like a click-stop dial rather than a smooth scrub — mirrorLines is a whole-number
 // count with no meaningful "in between" (see PINCH_SCALE_TO_MIRROR_GAP_SCALE's own comment on the
@@ -149,21 +156,8 @@ const ROTATION_DEGREES_TO_TIGHTNESS_SCALE = (MAX_TIGHTNESS - MIN_TIGHTNESS) / 18
 // Dialing past 0 doesn't dead-end at the boundary either — see rotationGesture's own
 // mirrorLinesBelowZero comment for the "bonus gear" that keeps counting from there.
 const ROTATION_DEGREES_PER_MIRROR_LINE = 30
-// Speed mode's own pinch — see targetsSpeedPinch below. A direct linear offset from zoomSpeed's own
-// value at gesture-start, the same full-range mapping the Zoom speed slider already uses — unlike
-// PINCH_SCALE_TO_GRAVITY_SCALE's magnitude-only shape for gravity's own strength, this one *can* cross
-// zero into the opposite direction, so pinching all the way in (or out) reverses zoom instead of just
-// stopping at 0. Same calibration convention either way: a full, arm's-length pinch spread sweeps close
-// to the whole [MIN_ZOOM_SPEED, MAX_ZOOM_SPEED] range.
-const PINCH_SCALE_TO_ZOOM_SPEED_SCALE = MAX_ZOOM_SPEED / 1.5
-// Speed mode's own twist/Focus — see targetsSpeedRotation below. Nudges foreground and background cycle
-// speed together, by the same delta (preserving whatever difference already existed between the two,
-// not forcing them equal) — same live, degrees-of-twist-to-value shape ROTATION_DEGREES_TO_TIGHTNESS_
-// SCALE already uses for pattern's own Focus mapping, just swept across MIN_CYCLE_SPEED..MAX_CYCLE_SPEED
-// instead. 180° (a comfortable half-turn) sweeps the whole range; retune by feel on a real device, same
-// disclaimer as every other gesture-derived scale in this file.
-const ROTATION_DEGREES_TO_CYCLE_SPEED_SCALE = (MAX_CYCLE_SPEED - MIN_CYCLE_SPEED) / 180
-// Speed mode's own drag/swipe release — see applySpeedRelease below. Converts the release's own angular
+// The outer-field drag's own release (see useEpicenter.ts's panGesture onEnd, and
+// applyPatternRotationRelease/applyMirrorRotationRelease below). Converts the release's own angular
 // velocity (degrees per second — a physical screen-space quantity useEpicenter.ts's panGesture computes
 // from the release event, with no notion of this app's own "speed" unit) into rotationSpeed/
 // mirrorRotationSpeed's own unit — derived directly from how the ambient auto-spin itself already
@@ -172,6 +166,20 @@ const ROTATION_DEGREES_TO_CYCLE_SPEED_SCALE = (MAX_CYCLE_SPEED - MIN_CYCLE_SPEED
 // releasing a live spin hands off to that exact same visual rate, by construction, rather than an
 // approximation of it.
 const DEGREES_PER_SECOND_TO_ROTATION_SPEED = BASE_ROTATION_DURATION_MS / 360 / 1000
+// The deadzone below which an outer-field release (see applyPatternRotationRelease/
+// applyMirrorRotationRelease/applyZoomRelease below) commits to a hard, exact stop instead of whatever
+// small residual rate the release velocity happened to carry — without this, a slow, deliberate release
+// can leave rotationSpeed/mirrorRotationSpeed/zoomSpeed crawling forever at some barely-perceptible
+// non-zero rate rather than actually stopping, which reads as broken rather than "still spinning very
+// slowly." Expressed in the settings' own ±10 speed units (shared by rotationSpeed/mirrorRotationSpeed/
+// zoomSpeed) rather than a raw physical unit, so it's tunable relative to values already meaningful
+// elsewhere (the default rotationSpeed is 2). Retune by feel on a real device, same disclaimer as every
+// other gesture-calibration constant in this file.
+const MIN_FLICK_SPEED = 0.15
+// How close the current orientation has to land to a valid snap increment (see trySnapPatternRotation/
+// trySnapMirrorRotation further down) to actually snap onto it, rather than just settling wherever a
+// slow release left it. Retune by feel on a real device, same disclaimer as above.
+const SNAP_ANGLE_TOLERANCE_DEG = 8
 // Web has no touch pinch to speak of: a trackpad reports an actual pinch as a single wheel event
 // with ctrlKey true (the standard browser convention), never as two separate touches, so RNGH's
 // Gesture.Pinch() below (pointer-based only, tracking real multi-touch) never fires for it. Rather
@@ -212,8 +220,21 @@ function pickRandomDistinct<T>(items: T[], count: number): T[] {
   return picked
 }
 
+// Every ControlGroup but 'settings' now has a GestureTarget counterpart: gravity/mirror/pattern map
+// to themselves, and colors/line — which have no drag/tilt mode of their own — borrow whichever
+// target their own drawer content visually affects (colors recolors the mirror wedges, line rides
+// along on pattern mode already — see OnScreenControls' own comment on slotA/slotB). See the
+// drawer-open effect below for how this drives a temporary activeTargets override.
+const GROUP_GESTURE_TARGET: Partial<Record<ControlGroup, GestureTarget>> = {
+  colors: 'mirror',
+  gravity: 'gravity',
+  line: 'pattern',
+  mirror: 'mirror',
+  pattern: 'pattern',
+}
+
 export default function SwirlScreen() {
-  const { settings, resetSettings, setBackgroundCycleSpeed, setDashStyle, setForegroundCycleSpeed, setGestureTarget, setGravity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
+  const { settings, resetSettings, setBackgroundCycleSpeed, setBounceFriction, setDashStyle, setForegroundCycleSpeed, setGestureTarget, setGravity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setTriggerStackExpanded, setZoomSpeed } = useSwirlSettings()
   const { medium, notification, selection } = useVibration()
 
   // The transport row's back/forward FABs (see OnScreenControls) — and every direct on-canvas "hot
@@ -232,11 +253,9 @@ export default function SwirlScreen() {
   // Tilt's own output — fed to whichever gesture target is currently active: pattern/mirror pull toward
   // tiltX/tiltY through useEpicenter's own tiltStrength (a real physics pull, friction-decayed the same
   // way gravity's own pull already is — see useDragPointPhysics.ts and useEpicenter.ts's own
-  // TILT_PULL_STRENGTH), gravity combines the same pair with its own touch drag below (see
-  // effectiveGravityCenterX/Y), and speed reads rawTiltX/rawTiltY as a live throttle instead (see the
-  // tilt-driven speed reaction further down) — a spin/zoom/color rate should track the phone's actual
-  // angle immediately, not through a position-easing spring tuned for something rolling around on screen.
-  const { gravityCenterX: tiltX, gravityCenterY: tiltY, rawTiltX, rawTiltY } = useTiltGravityCenter(SCREEN_EDGE_OFFSET, settings.tiltEnabled)
+  // TILT_PULL_STRENGTH), and gravity combines the same pair with its own touch drag below (see
+  // effectiveGravityCenterX/Y).
+  const { gravityCenterX: tiltX, gravityCenterY: tiltY } = useTiltGravityCenter(SCREEN_EDGE_OFFSET, settings.tiltEnabled)
   // isVisible (not isOpen): stays true for the full close animation too, not just until something
   // asks to close — see OnScreenControls for why the row this gates needs to track that same window.
   // isOpen (not isVisible) for the tap-to-dismiss check in handleCanvasTap below: isOpen flips the
@@ -244,6 +263,7 @@ export default function SwirlScreen() {
   // through to the ordinary hide-controls/swap-colors branches, rather than waiting out the sheets'
   // own outro animation (isVisible) before a second tap can do anything.
   const { close: closeControlGroupSheet, isOpen: groupSheetOpen, isVisible: groupSheetVisible } = useControlGroupSheetDrawer()
+  const { activeGroup } = useControlGroups()
   const { swapColors } = useSwapColors()
   // bass drives stroke width live (see reactiveStrokeWidth below); mid/treble/loudness feed the
   // "effective" speed values further down, each replacing (not adding to) its own slider-driven
@@ -251,10 +271,8 @@ export default function SwirlScreen() {
   // override, not a boost, is what audio-reactive mode means everywhere except stroke width.
   const { bass, mid, treble, loudness } = useAudioReactive(settings.audioReactiveEnabled, settings.micSensitivity)
 
-  const [frozen, setFrozen] = useState(false)
-
-  // Exists purely so flipDirections (see its own comment) has something to act on while audio-reactive
-  // mode is driving rotation instead of the rotationSpeed/zoomSpeed sliders: effectiveRotationSpeed's
+  // Exists purely so stopAndSnapGesture (see its own comment) has something to act on while audio-
+  // reactive mode is driving rotation instead of the rotationSpeed/zoomSpeed sliders: effectiveRotationSpeed's
   // audio-reactive branch is always non-negative on its own (mapped straight from treble via
   // mapAudioBand, whose own min is 0), so negating settings.rotationSpeed there has nothing to flip.
   // PERSISTENT across the mic turning off and back on (see the hydrate/save effect below, the same
@@ -300,7 +318,7 @@ export default function SwirlScreen() {
   }, [])
 
   // Debounced the same way useSwirlSettings.tsx's own settings writer is (see PERSIST_DEBOUNCE_MS
-  // there) — flipDirections can fire this dozens of times in quick succession.
+  // there) — stopAndSnapGesture can fire this dozens of times in quick succession.
   useEffect(() => {
     if (!audioRotationReversedHydrated) return
 
@@ -315,9 +333,9 @@ export default function SwirlScreen() {
 
   // Which point the one-finger drag and two-finger twist currently apply to — see useEpicenter.ts.
   // A Set of exactly one entry, not a bare value (see GestureTarget's own comment in useEpicenter.ts
-  // for why the Set shape stuck around). The *set itself* stays local, session-scoped React state, same
-  // as frozen above — the live UI state (which FAB is highlighted, what a drag currently targets) has no
-  // reason to round-trip through useSwirlSettings on every tap. What's now persisted is only the seed:
+  // for why the Set shape stuck around). The *set itself* stays local, session-scoped React state — the
+  // live UI state (which FAB is highlighted, what a drag currently targets) has no reason to round-trip
+  // through useSwirlSettings on every tap. What's now persisted is only the seed:
   // settings.gestureTarget (see useSwirlSettings.tsx) is read once, right here, to initialize this Set
   // to whichever target was last selected, instead of always defaulting to 'pattern' — see
   // selectGestureTarget below for the other half (writing back whenever it changes). The initializer
@@ -325,13 +343,15 @@ export default function SwirlScreen() {
   // doesn't itself trigger — useState only ever calls it once, on mount.
   const [activeTargets, setActiveTargets] = useState<Set<GestureTarget>>(() => new Set<GestureTarget>([settings.gestureTarget]))
   // At 0 mirror lines there's no wedge for the mirror anchor to move — a single, unmirrored copy has
-  // no boundary to speak of (see Spiral.tsx's `active`), so a drag targeting 'mirror' here has nothing
-  // visible to do yet. That's no longer a reason to lock the gesture target itself out, though (mirror
-  // can always be selected in the fan, same "pre-arm ahead of having anything to act on" reasoning as
-  // Mirror gap/rotation speed already get while mirrorLines is 0 — see ControlGroupBottomSheetContent's
-  // own comment) — this only still gates the mirror-rotation animation below (mirrorPaused) and the
-  // "mirrors going off" effect further down, both of which are genuinely about there being no visible
-  // wedge to animate, not about whether the gesture can be pointed at mirror.
+  // no boundary to speak of (see Spiral.tsx's `active`). That's not a reason to lock the gesture
+  // *target* itself out (mirror can always be selected in the fan, same "pre-arm ahead of having
+  // anything to act on" reasoning as Mirror gap/rotation speed already get while mirrorLines is 0 — see
+  // ControlGroupBottomSheetContent's own comment) — but the live drag/long-press it now dispatches
+  // redirects to pattern instead (see useEpicenter.ts's own targetsPattern/targetsMirror fallback),
+  // since there'd otherwise be nothing visible for it to move or spin. mirrorAvailable itself
+  // is a narrower, separate gate: only the ambient mirror-rotation clock below (mirrorPaused) and the
+  // "mirrors going off" effect further down, both genuinely about there being no wedge to animate on
+  // their own, independent of whatever a live gesture happens to be doing.
   const mirrorAvailable = settings.mirrorLines > 0
   // Direct selection (the fan picks a target by name, replacing whatever was active) rather than the
   // old tap-to-cycle-through-them — one tap reaches any target, including ones several positions
@@ -350,74 +370,39 @@ export default function SwirlScreen() {
     },
     [selection, setGestureTarget]
   )
-  // Speed mode's own two-way single-select (see OnScreenControls' own transport button and
-  // toggleSpeedTarget further down for the rest of it) — just the raw state hoisted up here, ahead of
-  // effectiveRotationSpeed/effectiveMirrorRotationSpeed below, since speed's own live tilt throttle
-  // needs to know which of the two it's currently aiming at to pick a value for either.
-  const [speedTargetsMirror, setSpeedTargetsMirror] = useState(false)
-
-  // Speed mode's own tilt throttle: whether tilt should be driving rotationSpeed/mirrorRotationSpeed
-  // live right now — 'speed' selected, tilt on and available (see tiltEnabledShared's own comment for
-  // why web is excluded). A plain, render-computed boolean, not a SharedValue of its own — everything
-  // that reads it (effectiveRotationSpeed/effectiveMirrorRotationSpeed below) is already plain-JS/render
-  // driven too, the same "override, don't boost" shape audioReactiveEnabled already uses for those same
-  // two variables.
-  const speedTiltActive = Platform.OS !== 'web' && settings.tiltEnabled && activeTargets.has('speed')
-  // Mirrored into a SharedValue purely to gate the reaction below (which runs on the UI thread) — same
-  // "worklet needs a SharedValue, not a stale-capturable plain prop" reasoning as tiltEnabledShared.
-  const speedTiltActiveShared = useSharedValue(speedTiltActive)
-  useEffect(() => {
-    speedTiltActiveShared.value = speedTiltActive
-  }, [speedTiltActive, speedTiltActiveShared])
-  // Same reasoning as speedTiltActiveShared, for speedTargetsMirror: the reaction below runs on the UI
-  // thread, so it needs a SharedValue mirror of this flag too rather than a stale-capturable plain
-  // boolean read out of the closure.
-  const speedTargetsMirrorShared = useSharedValue(speedTargetsMirror)
-  useEffect(() => {
-    speedTargetsMirrorShared.value = speedTargetsMirror
-  }, [speedTargetsMirror, speedTargetsMirrorShared])
-  // Whether the current pattern actually has a zoom dimension for tilt-Y to drive (see
-  // isZoomlessPattern's own comment in constants/patterns.ts — Spiral/Starburst reshape a single
-  // curve/fan with nothing for zoom to pulse) — mirrored into a SharedValue for the same "worklet
-  // needs a SharedValue, not a stale-capturable plain prop" reasoning as tiltEnabledShared.
-  const patternSupportsZoomShared = useSharedValue(!isZoomlessPattern(settings.pattern))
-  useEffect(() => {
-    patternSupportsZoomShared.value = !isZoomlessPattern(settings.pattern)
-  }, [settings.pattern, patternSupportsZoomShared])
-
-  // Speed mode's own live tilt throttle — commits straight into the real settings on every tilt sample
-  // (the same "commit straight to the real setting on every update" shape the zoom pinch already uses,
-  // see pinchGesture's own onUpdate comment further down) rather than through a local, ephemeral
-  // override, so a rate tilt sets keeps going after switching away from Speed mode instead of resetting
-  // back to whatever the slider said. rawTiltX (left/right) drives whichever of rotationSpeed/
-  // mirrorRotationSpeed speedTargetsMirror currently selects — the same target, and the same direction
-  // (no sign flip), the manual pan-drag/flick gestures already use (see applySpeedRelease and
-  // useEpicenter.ts's own panGesture onUpdate) — tilt is just another way of driving that one target,
-  // not a second, independent control of both at once. rawTiltY (up/down) drives zoomSpeed when the
-  // pattern has a zoom dimension, and otherwise folds into that same selected target's rotation ratio
-  // (summed and clamped, since a zoomless pattern has nothing else for it to do) — and always also
-  // drives color-transition speed regardless of pattern, since cycle speed has no direction of its own
-  // to conflict with (see MIN_CYCLE_SPEED/MAX_CYCLE_SPEED's own comment) and up/down would otherwise
-  // have no further use for it on a zoom-capable pattern.
-  useAnimatedReaction(
-    () => ({ x: rawTiltX.value, y: rawTiltY.value }),
-    ({ x, y }) => {
-      if (!speedTiltActiveShared.value) return
-      const zoomless = !patternSupportsZoomShared.value
-      const rotationRatio = zoomless ? clamp(x + y, -1, 1) : x
-      if (speedTargetsMirrorShared.value) {
-        runOnJS(setMirrorRotationSpeed)(rotationRatio * MAX_MIRROR_ROTATION_SPEED)
-      } else {
-        runOnJS(setRotationSpeed)(rotationRatio * MAX_ROTATION_SPEED)
-      }
-      if (!zoomless) {
-        runOnJS(setZoomSpeed)(y * MAX_ZOOM_SPEED)
-      }
-      const colorSpeed = clamp(Math.abs(y) * MAX_CYCLE_SPEED, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED)
-      runOnJS(setForegroundCycleSpeed)(colorSpeed)
-      runOnJS(setBackgroundCycleSpeed)(colorSpeed)
+  // Opening a drawer whose group has a matching GestureTarget (see GROUP_GESTURE_TARGET) temporarily
+  // points canvas drag/tilt at it — the transport row's own active-target FAB is hidden for as long as
+  // a sheet is open (see OnScreenControls' sheetFadeStyle), so without this there'd be no way to tell
+  // what a touch on the canvas is actually affecting while tweaking a setting. Session-only: this
+  // writes straight to activeTargets, never through setGestureTarget/selectGestureTarget, so the
+  // persisted standing preference (settings.gestureTarget) never sees the temporary switch.
+  // preOverrideTargets only ever captures the FIRST override of a given open session (guarded by the
+  // `=== null` check) — switching groups again while the sheet stays open (e.g. mirror to gravity
+  // without closing) keeps re-pointing activeTargets at whatever's newly open, but closing always
+  // restores whatever was active before the session started, not just the most recently visited group.
+  //
+  // Adjusts activeTargets during render rather than in a useEffect — React's own recommended shape
+  // for "state that needs to change in response to a prop/state change" (see its docs on storing
+  // information from previous renders): comparing against lastSheetOverrideKey here applies the switch
+  // in the same render that first sees the new (groupSheetVisible, activeGroup) pair, rather than
+  // committing one stale frame first and correcting a render later the way an effect would. Plain
+  // useState (not a ref) for preOverrideTargets too, since this codebase's lint rules (react-hooks/
+  // refs) forbid reading or writing a ref's .current during render — only state reads/writes are safe
+  // there.
+  const [preOverrideTargets, setPreOverrideTargets] = useState<Set<GestureTarget> | null>(null)
+  const sheetOverrideKey = `${groupSheetVisible}:${activeGroup ?? ''}`
+  const [lastSheetOverrideKey, setLastSheetOverrideKey] = useState(sheetOverrideKey)
+  if (sheetOverrideKey !== lastSheetOverrideKey) {
+    setLastSheetOverrideKey(sheetOverrideKey)
+    const target = groupSheetVisible && activeGroup && GROUP_GESTURE_TARGET[activeGroup]
+    if (target) {
+      if (preOverrideTargets === null) setPreOverrideTargets(activeTargets)
+      if (!(activeTargets.size === 1 && activeTargets.has(target))) setActiveTargets(new Set([target]))
+    } else if (!groupSheetVisible && preOverrideTargets !== null) {
+      setActiveTargets(preOverrideTargets)
+      setPreOverrideTargets(null)
     }
-  )
+  }
 
   const [controlsVisible, setControlsVisible] = useState(true)
   // Bumped by revealControls (an edge hover/press — the only way the controls come back once hidden)
@@ -440,26 +425,53 @@ export default function SwirlScreen() {
     setActivityEpoch((epoch) => epoch + 1)
   }, [])
 
+  // The top-right EdgeRevealZone's own bonus (see its own onExpandTriggerStack prop comment) — force-
+  // expands the trigger stack rather than toggling it, since EdgeRevealZones itself only ever calls this
+  // while triggerStackExpanded is already false.
+  const expandTriggerStack = useCallback(() => setTriggerStackExpanded(true), [setTriggerStackExpanded])
+
   // Whether the gesture-target fan (see OnScreenControls' GestureFanItem) is currently spread out —
   // mirrored up from OnScreenControls' own local state (via onGestureFanOpenChange) purely so the
   // idle-fade effect below can see it; index.tsx has no other use for this value. The fan's own
   // primary-FAB toggle is still the only thing that ever changes it.
   const [gestureFanOpen, setGestureFanOpen] = useState(false)
 
+  // Backs the corner Pause/Play FAB (see OnScreenControls' own pauseFab) — forces every speed-driven
+  // effective value to 0 below (see the frozen-aware override right after effectiveSwirlValues) without
+  // touching a single slider, so Play always resumes exactly what the sliders already said. Session-
+  // only, same as gestureFanOpen above: a "stop the show for now" toggle, not a standing preference
+  // worth persisting across launches. toggleFrozen is the only way this turns ON; it turns back OFF
+  // either via the same toggle, or automatically the moment a live rotation/mirror-rotation/zoom/
+  // mirror-cycle drag actually releases (see applyPatternRotationRelease/applyMirrorRotationRelease/
+  // applyZoomRelease/applyMirrorCycleRelease further down) — a screen gesture always wins over a stale
+  // pause.
+  const [frozen, setFrozen] = useState(false)
+  const toggleFrozen = useCallback(() => setFrozen((current) => !current), [])
+  // The top-left EdgeRevealZone's own bonus (see its own onPause prop comment) — forces frozen on
+  // rather than toggling it like the pauseFab's ordinary tap does, since revealing the controls should
+  // always land on a deliberate pause, never accidentally resume one already in flight.
+  const pause = useCallback(() => setFrozen(true), [])
+
   // Fade away again after a long stretch of doing nothing at all, once visible — keyed on activityEpoch
-  // so this restarts from a fresh CONTROLS_IDLE_FADE_MS every time the controls come back up. Suspended
-  // entirely while a sheet is open: reading sliders inside one is exactly the kind of "not touching the
-  // FAB row" stretch this timer would otherwise read as idle, and the row is meant to stay put the
-  // whole time a sheet is up (see OnScreenControls' Portal) — fading it out from underneath defeats
-  // that regardless of how correctly the portal itself is working. Also suspended while the gesture-
-  // target fan is open, for the same reason: picking a target is deliberate, "not touching anything"
-  // time that shouldn't read as idle either. Closing the fan re-runs this effect and starts a fresh
-  // CONTROLS_IDLE_FADE_MS window from that point, same as any other activity would.
+  // so this restarts from a fresh delay every time the controls come back up. Coming back from a hide
+  // is always a deliberate gesture, never just waiting: hovering or pressing near an edge (see
+  // EdgeRevealZones) is the only way, and doing so also resets this same clock so the controls don't
+  // fade out again the instant they've reappeared. Suspended entirely while a sheet is open: reading
+  // sliders inside one is exactly the kind of "not touching the FAB row" stretch this timer would
+  // otherwise read as idle, and the row is meant to stay put the whole time a sheet is up (see
+  // OnScreenControls' Portal) — fading it out from underneath defeats that regardless of how correctly
+  // the portal itself is working. Also suspended while the gesture-target fan is open, for the same
+  // reason: picking a target is deliberate, "not touching anything" time that shouldn't read as idle
+  // either. Closing the fan re-runs this effect and starts a fresh window from that point, same as any
+  // other activity would. The delay itself is user-configurable (see settings.controlsAutoHideSpeed's
+  // own field comment and controlsAutoHideDelayMs) — null means "off," the settings speed dial's own 0
+  // extreme, so the timer just never gets scheduled at all rather than firing with some enormous delay.
   useEffect(() => {
-    if (!controlsVisible || groupSheetVisible || gestureFanOpen) return
-    const timer = setTimeout(() => setControlsVisible(false), CONTROLS_IDLE_FADE_MS)
+    const delayMs = controlsAutoHideDelayMs(settings.controlsAutoHideSpeed)
+    if (!controlsVisible || groupSheetVisible || gestureFanOpen || delayMs == null) return
+    const timer = setTimeout(() => setControlsVisible(false), delayMs)
     return () => clearTimeout(timer)
-  }, [controlsVisible, activityEpoch, groupSheetVisible, gestureFanOpen])
+  }, [controlsVisible, activityEpoch, groupSheetVisible, gestureFanOpen, settings.controlsAutoHideSpeed])
 
   // audioReactiveEnabled is still read directly off settings by name in a few places below
   // (reactiveStrokeWidth/reactiveSides' own live per-frame reads, and the cropRadius/holeRadius/
@@ -468,7 +480,18 @@ export default function SwirlScreen() {
   // itself lives in computeEffectiveSwirlValues (constants/effectiveSwirlValues.ts) — see that
   // function's own comment for the full band-to-property mapping.
   const audioReactiveEnabled = settings.audioReactiveEnabled
-  const { effectiveRotationSpeed, effectiveMirrorRotationSpeed, effectiveZoomSpeed, effectiveTightness, effectiveForegroundCycleSpeed, effectiveBackgroundCycleSpeed, effectiveCropRadius, effectiveHoleRadius, effectiveMirrorGap } = computeEffectiveSwirlValues(settings, audioRotationReversed, treble, mid, loudness)
+  // frozen (see the corner Pause/Play FAB above) forces every speed-driven value to a hard 0 here, on
+  // top of whatever computeEffectiveSwirlValues already resolved (slider-driven or audio-reactive
+  // alike) — an override, not a replacement of that function's own logic, the same "override, not
+  // boost" shape audio-reactive mode itself already uses (see that function's own comment). Only the
+  // actual rates get zeroed — crop/hole radius, mirror gap, and tightness are shape parameters, not
+  // speeds, so pausing leaves them exactly where computeEffectiveSwirlValues already put them.
+  const effectiveSwirlValues = useMemo(() => {
+    const raw = computeEffectiveSwirlValues(settings, audioRotationReversed, treble, mid, loudness)
+    if (!frozen) return raw
+    return { ...raw, effectiveRotationSpeed: 0, effectiveMirrorRotationSpeed: 0, effectiveZoomSpeed: 0, effectiveForegroundCycleSpeed: 0, effectiveBackgroundCycleSpeed: 0 }
+  }, [settings, audioRotationReversed, treble, mid, loudness, frozen])
+  const { effectiveRotationSpeed, effectiveMirrorRotationSpeed, effectiveZoomSpeed, effectiveTightness, effectiveForegroundCycleSpeed, effectiveBackgroundCycleSpeed, effectiveCropRadius, effectiveHoleRadius, effectiveMirrorGap } = effectiveSwirlValues
 
   // No manual-twist overlay anymore — the twist/rotation gesture means Focus now (density/mirror
   // lines, see rotationGesture's own comment), not "spin the pattern," so baseRotation is the whole
@@ -476,11 +499,10 @@ export default function SwirlScreen() {
   const baseRotation = useSharedValue(0)
   // Degrees per ms baseRotation accumulates by every frame (see the frame callback below) — signed,
   // since rotationSpeed itself is bipolar (negative reverses, 0 stops). Kept in sync with
-  // effectiveRotationSpeed/frozen by the rate effect further down, the same "plain SharedValue
-  // mirroring a prop so a worklet always sees the latest value" shape as useDragPointPhysics's own
-  // frozenShared — a frame callback's closure over a plain JS value is captured once, when it's sent
-  // to the UI thread, and isn't guaranteed to pick up a later JS-thread change the way a SharedValue
-  // read does.
+  // effectiveRotationSpeed by the rate effect further down, the same "plain SharedValue mirroring a
+  // prop so a worklet always sees the latest value" shape tiltEnabledShared uses elsewhere in this
+  // file — a frame callback's closure over a plain JS value is captured once, when it's sent to the UI
+  // thread, and isn't guaranteed to pick up a later JS-thread change the way a SharedValue read does.
   const baseRotationRate = useSharedValue(0)
   // Suspends accumulation while resetRotation's spring is in flight, so the frame callback below
   // doesn't fight it for control of baseRotation on the very next frame — see resetRotation.
@@ -509,43 +531,44 @@ export default function SwirlScreen() {
   // accumulator of its own to carry, so it can just use the shared hook outright. mirrorPaused mirrors
   // baseRotationPaused's role, just for resetMirrorRotation instead of resetRotation.
   const mirrorRotationSign = useSharedValue(effectiveMirrorRotationSpeed < 0 ? -1 : 1)
-  const { progress: mirrorProgress, paused: mirrorPaused, rate: mirrorRotationRate } = useLoopingProgress(BASE_ROTATION_DURATION_MS, Math.abs(effectiveMirrorRotationSpeed), frozen || effectiveMirrorRotationSpeed === 0 || !mirrorAvailable)
+  const { progress: mirrorProgress, paused: mirrorPaused, rate: mirrorRotationRate } = useLoopingProgress(BASE_ROTATION_DURATION_MS, Math.abs(effectiveMirrorRotationSpeed), effectiveMirrorRotationSpeed === 0 || !mirrorAvailable)
   const mirrorRotation = useDerivedValue(() => mirrorProgress.value * 360 * mirrorRotationSign.value)
 
-  // Only actually does anything once rotation ISN'T actively spinning (frozen, or effectiveRotationSpeed
-  // exactly 0) — while actively spinning, this is a deliberate no-op. Reset used to always undo an
-  // in-progress twist regardless of spin state; now a live spin is left running untouched, and only a
-  // stopped one gets squared back up — the button's own placement next to each speed slider always
-  // meant "put the orientation back," not "stop the spin to do it."
+  // Only actually does anything once rotation ISN'T actively spinning (effectiveRotationSpeed exactly
+  // 0) — while actively spinning, this is a deliberate no-op. Reset used to always undo an in-progress
+  // twist regardless of spin state; now a live spin is left running untouched, and only a stopped one
+  // gets squared back up — the button's own placement next to each speed slider always meant "put the
+  // orientation back," not "stop the spin to do it."
   //
-  // Once stopped, snaps to the nearest multiple of 360 (see nearestMultipleOf360's own comment) rather
+  // Once stopped, snaps to the nearest multiple of 360 (see nearestMultipleOf's own comment) rather
   // than a literal 0. baseRotationPaused holds the per-frame accumulator off baseRotation for the
   // duration of the spring (it would otherwise fight the spring for control on the very next frame,
-  // since it runs unconditionally once rotationSpeed/frozen say it should), same "stop whatever's
-  // animating and settle at the target" shape as useEpicenter's own recenter for the settle itself, but
-  // unlike recenter this doesn't leave things parked afterward: the spring's `finished` callback lifts
-  // the pause, and accumulation just continues from wherever the spring settled, at whatever rate is
+  // since it runs unconditionally once rotationSpeed says it should), same "stop whatever's animating
+  // and settle at the target" shape as useEpicenter's own recenter for the settle itself, but unlike
+  // recenter this doesn't leave things parked afterward: the spring's `finished` callback lifts the
+  // pause, and accumulation just continues from wherever the spring settled, at whatever rate is
   // current by then — no separate "resume" call needed the way a restarted animation would. The
   // `finished` check (real only when the spring wasn't itself interrupted, e.g. by another reset)
-  // matches resetMirrorRotation below.
+  // matches resetMirrorRotation below. Also reused, with a different target, by
+  // trySnapPatternRotation/trySnapMirrorRotation further down — see their own comment.
   //
   // react-hooks/immutability flags the SharedValue writes here for the same known-false-positive
   // reason as bounceFriction/gravity in useEpicenter.ts.
   const resetRotation = useCallback(() => {
-    if (!frozen && effectiveRotationSpeed !== 0) return
+    if (effectiveRotationSpeed !== 0) return
     // eslint-disable-next-line react-hooks/immutability -- SharedValue, see comment above
     baseRotationPaused.value = true
     cancelAnimation(baseRotation)
-    const target = nearestMultipleOf360(baseRotation.value)
+    const target = nearestMultipleOf(baseRotation.value, 360)
     // eslint-disable-next-line react-hooks/immutability -- SharedValue, see comment above
     baseRotation.value = withSpring(target, ROTATION_RESET_SPRING, (finished) => {
       if (finished) {
         baseRotationPaused.value = false
       }
     })
-  }, [baseRotation, baseRotationPaused, effectiveRotationSpeed, frozen])
+  }, [baseRotation, baseRotationPaused, effectiveRotationSpeed])
   const resetMirrorRotation = useCallback(() => {
-    if (!frozen && effectiveMirrorRotationSpeed !== 0) return
+    if (effectiveMirrorRotationSpeed !== 0) return
     // eslint-disable-next-line react-hooks/immutability -- SharedValue, see comment above
     mirrorPaused.value = true
     cancelAnimation(mirrorProgress)
@@ -559,7 +582,7 @@ export default function SwirlScreen() {
         mirrorPaused.value = false
       }
     })
-  }, [effectiveMirrorRotationSpeed, frozen, mirrorPaused, mirrorProgress])
+  }, [effectiveMirrorRotationSpeed, mirrorPaused, mirrorProgress])
 
   // Ripples always travel rippleModulus's off-screen buffer past the visible radius before
   // wrapping, regardless of the crop radius — cropping is now a single clip drawn over the whole
@@ -577,24 +600,37 @@ export default function SwirlScreen() {
   // just reads whatever duration is current each frame, so retuning this as tightness changes doesn't
   // jump either.
   // zoomSpeed is bipolar (negative reverses, 0 stops), but useLoopingProgress expects a plain
-  // positive rate and handles its own stopping via `frozen` — so direction is split off into the
+  // positive rate and handles its own stopping via a paused flag — so direction is split off into the
   // `reversed` shared value below (which the zoom patterns read to negate their pulse), and 0 is
-  // routed through as "frozen" here rather than reaching baseDurationMs/speed as an actual divide.
+  // routed through as "paused" here rather than reaching baseDurationMs/speed as an actual divide.
   // fixedSpacing widens the same modulus the ripple patterns compute for themselves (see
   // RingsPattern/PolygonPattern/StarPattern) to MAX_RADIUS_TO_REFERENCE_RATIO laps instead of 1 — has
   // to match exactly, or the pulse clock and what the patterns actually render fall out of sync.
-  // `paused` goes unused here (and for both cycle progresses below) — neither has a reset spring of
-  // its own to protect from the per-frame accumulator, unlike mirrorProgress above.
+  // `paused` (basePulsePaused) goes unused for its own reset-spring purposes here (unlike
+  // baseRotationPaused/mirrorPaused above) — zoom has no reset spring of its own to protect from the
+  // per-frame accumulator. It's still threaded into useEpicenter below, though, for a second, unrelated
+  // reason: suspending the ambient accumulator for the duration of an outer-field drag targeting
+  // pattern, same as baseRotationPaused — see useEpicenter.ts's own onStart/onEnd comment for why.
   // Named (not inlined into the useLoopingProgress call below) so the speed-rate bridge's own
   // writeZoomRateLive fast path further down can divide by the exact same value rather than
   // recomputing a second, possibly-drifting copy of this formula.
   const zoomBaseDurationMs = PULSE_DURATION_MS * rippleModulus(rippleSpacing(RIPPLE_BASE_COUNT, effectiveTightness), settings.fixedSpacing ? MAX_RADIUS_TO_REFERENCE_RATIO : 1)
-  const { progress: basePulse, rate: zoomRate } = useLoopingProgress(zoomBaseDurationMs, Math.abs(effectiveZoomSpeed), frozen || effectiveZoomSpeed === 0)
+  const { progress: basePulse, paused: basePulsePaused, rate: zoomRate } = useLoopingProgress(zoomBaseDurationMs, Math.abs(effectiveZoomSpeed), effectiveZoomSpeed === 0)
   // Each list cycles on its own clock, independent of rotation, pulse, and each other — that
   // decoupling (and the fact there are two of them) is the whole point: colour cycling used to
-  // piggyback on the rotation angle, so it was locked to the spin rate and shared between lists.
-  const { progress: foregroundCycleProgress, rate: foregroundCycleRate } = useLoopingProgress(BASE_CYCLE_DURATION_MS, effectiveForegroundCycleSpeed, frozen)
-  const { progress: backgroundCycleProgress, rate: backgroundCycleRate } = useLoopingProgress(BASE_CYCLE_DURATION_MS, effectiveBackgroundCycleSpeed, frozen)
+  // piggyback on the rotation angle, so it was locked to the spin rate and shared between lists. Never
+  // paused — see gravityParticleProgress's own identical literal-`false` for why: neither has anything
+  // left to gate it on now that there's no app-wide "speed" stop concept.
+  const { progress: foregroundCycleProgress, rate: foregroundCycleRate } = useLoopingProgress(BASE_CYCLE_DURATION_MS, effectiveForegroundCycleSpeed, false)
+  const { progress: backgroundCycleProgress, rate: backgroundCycleRate } = useLoopingProgress(BASE_CYCLE_DURATION_MS, effectiveBackgroundCycleSpeed, false)
+  // The bounds useEpicenter.ts's own outer-field radial fader clamps mirror's live cycle-rate write to
+  // (see its own minCycleRate/maxCycleRate param comment), in foregroundCycleRate/backgroundCycleRate's
+  // own laps-per-ms unit. Symmetric around 0, matching the setting's own bipolar MIN_CYCLE_SPEED (see
+  // its own comment): sweeping the touch inward reads as a positive rate, outward as negative (see
+  // useEpicenter.ts's onUpdate for the sign flip). Plain numbers, not SharedValues: neither bound ever
+  // changes at runtime.
+  const maxCycleRate = MAX_CYCLE_SPEED / BASE_CYCLE_DURATION_MS
+  const minCycleRate = -maxCycleRate
 
   // Mirrored from effectiveTightness (persisted settings, or mid's own live reading while
   // audio-reactive) so the on-screen slider/drawer and the actual render agree on the same value.
@@ -637,16 +673,6 @@ export default function SwirlScreen() {
   // Captured at pinch-start the same way startMirrorGap is — the gravity-targeting pinch below reads
   // this for its own starting *magnitude and sign* (see PINCH_SCALE_TO_GRAVITY_SCALE's own comment).
   const startGravity = useSharedValue(0)
-  // Captured at pinch-start the same way startGravity is — speed mode's own pinch reads this for its
-  // starting magnitude and sign, same shape as gravity's strength (see PINCH_SCALE_TO_ZOOM_SPEED_SCALE's
-  // own comment).
-  const startZoomSpeed = useSharedValue(0)
-  // Captured at Focus-gesture-start (rotationGesture's onStart), the speed-mode counterpart to
-  // startTightness below — see ROTATION_DEGREES_TO_CYCLE_SPEED_SCALE's own comment. Two separate values
-  // (not one shared "start"), since foreground/background cycle speed can genuinely differ from each
-  // other and the twist preserves that gap rather than collapsing it.
-  const startForegroundCycleSpeed = useSharedValue(0)
-  const startBackgroundCycleSpeed = useSharedValue(0)
   // Captured at pinch-start the same way startMirrorGap is, for the one other property a
   // pattern-targeting pinch drives alongside zoom — see PINCH_SCALE_TO_STROKE_WIDTH_SCALE's own
   // comment for why line thickness moves together with zoom.
@@ -655,6 +681,10 @@ export default function SwirlScreen() {
   // ROTATION_DEGREES_TO_TIGHTNESS_SCALE's own comment for why density lives on the twist now, not
   // the pinch.
   const startTightness = useSharedValue(0)
+  // Captured at Focus-gesture-start the same way startTightness is — the gravity-targeting twist
+  // below reads this for its own starting friction, see ROTATION_DEGREES_TO_FRICTION_SCALE's own
+  // comment.
+  const startBounceFriction = useSharedValue(0)
   // Mirror's own Focus target: the mirrorLines count the twist started from, and the count it's
   // currently live-dialed to — two separate values (not just one "start" the way startTightness is)
   // because mirrorLines steps discretely rather than tracking continuously, so onUpdate needs to know
@@ -713,12 +743,10 @@ export default function SwirlScreen() {
   // permanently-zeroed SharedValue stands in for the ambient gravity-pull argument — this point *is*
   // the gravity source, so nothing should pull it toward another center the way gravity pulls
   // pattern/mirror toward it (see useEpicenter.ts's own gravityHandle comment for the same reasoning).
-  // useDragPointPhysics no longer takes a frozen flag at all — speed mode's own `frozen` used to also
-  // stop this point (and pattern/mirror's own physics, see useEpicenter.ts) dead in its tracks, but
-  // that meant pausing the rotation/zoom/color-cycle speeds also froze gravity's own pull and the
-  // well's dust, even though gravity has nothing to do with speed. Speed's stop is scoped to exactly
-  // the speed values now (baseRotationRate/mirrorProgress/basePulse/foreground+backgroundCycleProgress
-  // below); gravity keeps doing whatever it was already doing regardless of speed's own pause state.
+  // useDragPointPhysics takes no frozen/pause flag at all — a two-finger long press stopping rotation/
+  // zoom/mirror rotation (see stopAndSnapGesture below) has nothing to do with gravity's own pull or
+  // the well's dust, so neither is ever gated on it; gravity keeps doing whatever it was already doing
+  // regardless.
   const gravityHandleZero = useSharedValue(0)
   const gravityHandle = useDragPointPhysics(bounceFriction, gravityHandleZero, followSpeed, medium)
   // True only for the duration of an actual one-finger drag while 'gravity' is one of the active
@@ -754,7 +782,7 @@ export default function SwirlScreen() {
     gravityTargetActiveShared.value = activeTargets.has('gravity')
   }, [activeTargets, gravityTargetActiveShared])
 
-  // Gravity marker's own visibility — session-only, same category as frozen/activeTargets above: a
+  // Gravity marker's own visibility — session-only, same category as activeTargets above: a
   // "how I'm working right now" tool mode, not a persisted look preference. Read (not set) here — the
   // toggle button itself now lives in the gravity group's own top sheet (ControlGroupTopSheetContent),
   // reachable regardless of which gestureTarget is active, which is the whole point: the marker shows
@@ -783,65 +811,200 @@ export default function SwirlScreen() {
     selection()
   }, [pushHistory, selection, setGravity, settings.gravity])
 
-  // Speed mode's own transport button (see OnScreenControls) — a two-way single-select, not two
-  // independent toggles: exactly one of rotationSpeed/mirrorRotationSpeed is ever "the one the canvas's
-  // drag/swipe currently sets" (see applySpeedRelease below), so there's no meaningful "both" or
-  // "neither" state to represent. One button that alternates between the two on each press, rather than
-  // a separate button per option — see OnScreenControls' own speedTargetsMirror comment for why this
-  // reads better than the Pattern speed/Mirror speed pair it replaced. Session-only, same category as
-  // gravityMarkerVisible above — a "how I'm working right now" tool mode, not a persisted look
-  // preference. Defaults to Pattern speed (false). The state itself lives up with activeTargets now
-  // (see its own comment there) — just the toggle callback stays here, next to the rest of speed mode's
-  // own actions.
-  const toggleSpeedTarget = useCallback(() => {
-    setSpeedTargetsMirror((prev) => !prev)
-    selection()
-  }, [selection])
+  // Settles a fully-stopped rotation onto the nearest valid snap angle, if it's close enough — see
+  // applyPatternRotationRelease/applyMirrorRotationRelease and stopAndSnapGesture further down for the
+  // two places a rotation actually reaches a hard stop. 90° ÷ N, where N is however many-fold symmetry
+  // the current shape already has (polygonSides for pattern, mirrorLines for mirror) — e.g. a 4-sided
+  // pattern snaps every 22.5°, a single mirror line every 90° (so it can lock horizontal or vertical),
+  // two mirror lines every 45° (the "+" and the "X" in between). Reuses resetRotation's own exact
+  // pause-the-accumulator / cancelAnimation / withSpring-to-target / un-pause-on-finished idiom — see
+  // its comment above — just against a computed nearby target instead of always the nearest multiple of
+  // a full 360° lap.
+  const trySnapPatternRotation = useCallback(() => {
+    const increment = 90 / settings.polygonSides
+    if (!Number.isFinite(increment) || increment <= 0) return
+    const target = nearestMultipleOf(baseRotation.value, increment)
+    if (Math.abs(baseRotation.value - target) > SNAP_ANGLE_TOLERANCE_DEG) return
+    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+    baseRotationPaused.value = true
+    cancelAnimation(baseRotation)
+    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+    baseRotation.value = withSpring(target, ROTATION_RESET_SPRING, (finished) => {
+      if (finished) {
+        baseRotationPaused.value = false
+      }
+    })
+  }, [baseRotation, baseRotationPaused, settings.polygonSides])
 
-  // Speed mode's own canvas long press (see useEpicenter.ts's longPressGesture) — zeroes every
-  // genuinely stoppable speed setting at once, regardless of which one the flanking button above
-  // currently selects: "stop ALL speed settings," not just the selected one. foreground/backgroundCycle
-  // Speed have no true "stopped" state of their own (MIN_CYCLE_SPEED is 0.1, never 0 — color cycling
-  // always cycles at *some* rate), so those two go to their own floor instead, as close to stopped as
-  // either can actually get. medium() rather than selection() — same "significant, multi-field action"
-  // haptic weight flipDirections already uses for its own multi-setting flip, not the light tick a
-  // plain one-field toggle gets.
-  const stopAllSpeeds = useCallback(() => {
-    setRotationSpeed(0)
-    setMirrorRotationSpeed(0)
-    setZoomSpeed(0)
-    setForegroundCycleSpeed(MIN_CYCLE_SPEED)
-    setBackgroundCycleSpeed(MIN_CYCLE_SPEED)
-    medium()
-  }, [medium, setBackgroundCycleSpeed, setForegroundCycleSpeed, setMirrorRotationSpeed, setRotationSpeed, setZoomSpeed])
+  // Same idea as trySnapPatternRotation above, for the mirror assembly. mirrorProgress is an unsigned
+  // 0..1 loop (see mirrorRotation's own comment above), but the snap increments are naturally defined in
+  // signed, visual degrees (mirrorProgress * 360 * sign) — a "90° apart" increment means something
+  // different in progress-space depending on which way it's currently spinning — so both the current
+  // angle and the eventual spring target round-trip through that signed space. mirrorRotationSign is
+  // always exactly ±1, so dividing back out by it is safe.
+  const trySnapMirrorRotation = useCallback(() => {
+    if (settings.mirrorLines < 1) return
+    const increment = 90 / settings.mirrorLines
+    const currentAngle = mirrorProgress.value * 360 * mirrorRotationSign.value
+    const nearestAngle = nearestMultipleOf(currentAngle, increment)
+    if (Math.abs(currentAngle - nearestAngle) > SNAP_ANGLE_TOLERANCE_DEG) return
+    const target = nearestAngle / 360 / mirrorRotationSign.value
+    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+    mirrorPaused.value = true
+    cancelAnimation(mirrorProgress)
+    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+    mirrorProgress.value = withSpring(target, ROTATION_RESET_SPRING, (finished) => {
+      if (finished) {
+        mirrorPaused.value = false
+      }
+    })
+  }, [mirrorPaused, mirrorProgress, mirrorRotationSign, settings.mirrorLines])
 
-  // Speed mode's own canvas drag/swipe release (see useEpicenter.ts's panGesture own onEnd, which
-  // computes this angular velocity around the epicentre from the release event) — sets a new
-  // rotationSpeed or mirrorRotationSpeed outright, whichever speedTargetsMirror currently selects: "let
-  // go while spinning it" hands off to that exact rate, the natural release of the same live "grab and
-  // spin" drag the pattern already followed throughout the gesture (see panGesture's own onUpdate). No
-  // manual clamping here — setRotationSpeed/setMirrorRotationSpeed already clamp to their own MIN/MAX
-  // internally, same as every other setter call in this file.
+  // The outer-field drag's own release (see useEpicenter.ts's panGesture onEnd, which computes this
+  // angular velocity around the active target's own center from the release event) — a fast flick hands
+  // off to that exact rate as the new sustained rotationSpeed, the natural release of the same live
+  // "grab and spin" drag the pattern already followed throughout the gesture (see panGesture's own
+  // onUpdate). A slow, deliberate release (below MIN_FLICK_SPEED) instead commits to a hard, exact 0 —
+  // rather than whatever barely-perceptible residual rate the release velocity happened to carry — and
+  // checks whether the resulting orientation is close enough to a valid angle to snap onto. No manual
+  // clamping on the fast path — setRotationSpeed/setMirrorRotationSpeed already clamp to their own
+  // MIN/MAX internally, same as every other setter call in this file.
   //
-  // Also lifts frozen, if it's currently set: the live "grab and spin" drag already moves
-  // baseRotation/mirrorProgress directly regardless of frozen (see panGesture's own onUpdate), so
-  // spinning it by hand already works while stopped — but leaving frozen on through the release would
-  // mean the newly-set speed above never actually gets to animate (baseRotationRate's own effect eases
-  // back to 0 whenever frozen is true, no matter what the current speed is). Letting go while spinning
-  // is a deliberate "start it going again at this rate," so it should actually resume, not settle back
-  // to stopped a moment after release.
-  const applySpeedRelease = useCallback(
+  // baseRotationRate.value is written directly here, synchronously, alongside baseRotationPaused.value
+  // = false — not left to setRotationSpeed's own round-trip (a state update, a re-render, then the
+  // baseRotationRate sync effect further down) to eventually catch up. useEpicenter.ts's own onStart
+  // paused the ambient accumulator the moment this drag took over (see baseRotationPaused's own param
+  // comment there); if onEnd here left it paused=false before the new rate had actually landed, the very
+  // next frame would resume accumulating at whatever STALE rate baseRotationRate still held from before
+  // the drag — often the old direction — for the handful of frames the settings round-trip takes,
+  // reading as a visible snap backward that then corrects itself once the real rate arrives. Writing the
+  // rate first and unpausing in the same synchronous call closes that gap: there's no frame where
+  // paused=false and the rate is still stale. The setRotationSpeed call right after is what makes this
+  // stick (persisted, reflected in the slider) rather than just a one-off live nudge — same "authoritative
+  // effect, this is just the fast path" split the speed-rate bridge's own writeRotationRateLive already
+  // uses, just inlined here rather than calling out to it (that helper is declared further down, after
+  // this — a dependency-array reference to it here would run into the same temporal-dead-zone problem
+  // this whole fix exists to avoid, just at render time instead of gesture time).
+  const applyPatternRotationRelease = useCallback(
     (angularVelocityDegPerSec: number) => {
       const nextSpeed = angularVelocityDegPerSec * DEGREES_PER_SECOND_TO_ROTATION_SPEED
-      if (speedTargetsMirror) {
-        setMirrorRotationSpeed(nextSpeed)
+      if (Math.abs(nextSpeed) < MIN_FLICK_SPEED) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        baseRotationRate.value = 0
+        setRotationSpeed(0)
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        baseRotationPaused.value = false
+        trySnapPatternRotation()
       } else {
+        baseRotationRate.value = (360 / BASE_ROTATION_DURATION_MS) * nextSpeed
         setRotationSpeed(nextSpeed)
+
+        baseRotationPaused.value = false
       }
+      // A completed drag always wins over a stale Pause — see frozen's own comment further up. Clearing
+      // it here (rather than leaving Pause to silently zero this release right back out) is what makes
+      // "any screen gesture" the other, gesture-driven way to resume, alongside the corner FAB itself.
       setFrozen(false)
       selection()
     },
-    [selection, setFrozen, setMirrorRotationSpeed, setRotationSpeed, speedTargetsMirror]
+    [baseRotationPaused, baseRotationRate, selection, setRotationSpeed, trySnapPatternRotation]
+  )
+
+  // Same take-over-not-snap-back fix as applyPatternRotationRelease above, for mirror's own rotation.
+  const applyMirrorRotationRelease = useCallback(
+    (angularVelocityDegPerSec: number) => {
+      const nextSpeed = angularVelocityDegPerSec * DEGREES_PER_SECOND_TO_ROTATION_SPEED
+      if (Math.abs(nextSpeed) < MIN_FLICK_SPEED) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        mirrorRotationRate.value = 0
+        setMirrorRotationSpeed(0)
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        mirrorPaused.value = false
+        trySnapMirrorRotation()
+      } else {
+        mirrorRotationRate.value = Math.abs(nextSpeed) / BASE_ROTATION_DURATION_MS
+        const newSign = nextSpeed < 0 ? -1 : 1
+        if (newSign !== mirrorRotationSign.value) {
+          // mirrorRotation is mirrorProgress * 360 * sign (see its own comment) — flipping sign alone
+          // jumps that product by a full swing of whatever fraction mirrorProgress currently holds,
+          // the same "hard jerk" mirrorRotationSign's own sync effect already calls out for the
+          // exactly-0 case, just for a genuine direction reversal instead (reachable here, not there,
+          // since a released flick can jump straight from one sign to the other with no in-between
+          // steps the way dragging a slider through 0 naturally has). Re-deriving mirrorProgress from
+          // the CURRENT visual angle through the NEW sign keeps that angle exactly where it already
+          // was the instant the sign flips, so only the direction of further spin changes — nothing
+          // about where the pattern is already sitting.
+          const currentVisualAngle = mirrorProgress.value * 360 * mirrorRotationSign.value
+          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+          mirrorProgress.value = (((currentVisualAngle / 360 / newSign) % 1) + 1) % 1
+          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+          mirrorRotationSign.value = newSign
+        }
+        setMirrorRotationSpeed(nextSpeed)
+
+        mirrorPaused.value = false
+      }
+      // See applyPatternRotationRelease's own comment — same "a completed drag always wins over a
+      // stale Pause" reasoning, just for the mirror's own rotation instead of the pattern's.
+      setFrozen(false)
+      selection()
+    },
+    [mirrorPaused, mirrorProgress, mirrorRotationRate, mirrorRotationSign, selection, setMirrorRotationSpeed, trySnapMirrorRotation]
+  )
+
+  // Same fast-flick/slow-deliberate-stop split as rotation above, for pattern's own zoom — no snap
+  // check on the slow path, though: zoom has no orientation the way rotation does (see
+  // trySnapPatternRotation's own comment), so a full stop is the whole story here. lapsPerSecond is
+  // already unit-converted by useEpicenter.ts's own RADIAL_PIXELS_TO_PULSE_SCALE (radial screen pixels
+  // -> fraction of a zoom lap); this just carries that through zoomBaseDurationMs -> zoomSpeed's own
+  // unit, the same way DEGREES_PER_SECOND_TO_ROTATION_SPEED does for rotation, inverting basePulse's
+  // own rate = zoomSpeed / zoomBaseDurationMs relationship (see its own useLoopingProgress call above).
+  // Same take-over-not-snap-back fix as applyPatternRotationRelease above, for basePulse instead of
+  // baseRotation.
+  const applyZoomRelease = useCallback(
+    (lapsPerSecond: number) => {
+      const nextZoomSpeed = (lapsPerSecond * zoomBaseDurationMs) / 1000
+      if (Math.abs(nextZoomSpeed) < MIN_FLICK_SPEED) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        zoomRate.value = 0
+        setZoomSpeed(0)
+      } else {
+        zoomRate.value = Math.abs(nextZoomSpeed) / zoomBaseDurationMs
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        reversed.value = nextZoomSpeed < 0
+        setZoomSpeed(nextZoomSpeed)
+      }
+      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+      basePulsePaused.value = false
+      // See applyPatternRotationRelease's own comment — same "a completed drag always wins over a
+      // stale Pause" reasoning, just for zoom instead of rotation.
+      setFrozen(false)
+      selection()
+    },
+    [basePulsePaused, reversed, selection, setZoomSpeed, zoomBaseDurationMs, zoomRate]
+  )
+
+  // Mirror's own outer-field radial axis (see useEpicenter.ts's onUpdate/onEnd) — a live fader, not a
+  // flick: foreground/backgroundCycleSpeed is bipolar (see MIN_CYCLE_SPEED's own comment), and this
+  // gesture matches it — it hands back a signed rate in minCycleRate..maxCycleRate's own [-max, max]
+  // (see their declaration above), positive for a touch swept inward, negative for outward (see
+  // useEpicenter.ts's onUpdate for the sign flip). rateLapsPerMs already sits at its final, clamped
+  // value the moment a finger lifts, so this just carries it back through BASE_CYCLE_DURATION_MS into
+  // foregroundCycleSpeed/backgroundCycleSpeed's own unit — both lists always move together off this one
+  // gesture, since there's nothing on a single radial axis to tell them apart by. No MIN_FLICK_SPEED
+  // deadzone or manual clamping needed either — setForegroundCycleSpeed/setBackgroundCycleSpeed already
+  // clamp to MIN_CYCLE_SPEED/MAX_CYCLE_SPEED internally, same as every other setter call in this file.
+  const applyMirrorCycleRelease = useCallback(
+    (rateLapsPerMs: number) => {
+      const nextSpeed = rateLapsPerMs * BASE_CYCLE_DURATION_MS
+      setForegroundCycleSpeed(nextSpeed)
+      setBackgroundCycleSpeed(nextSpeed)
+      // See applyPatternRotationRelease's own comment — same "a completed drag always wins over a
+      // stale Pause" reasoning, just for mirror cycle speed instead of rotation.
+      setFrozen(false)
+      selection()
+    },
+    [selection, setBackgroundCycleSpeed, setForegroundCycleSpeed]
   )
 
   // The single effective gravity center: gravityHandle's own live position while touch owns it
@@ -849,7 +1012,7 @@ export default function SwirlScreen() {
   // now — tracked 1:1, with no extra lag layered on top of whatever glideTo/startBounce is already doing
   // to it), or tilt's own output once gravity mode is selected and tilt takes back over. Gating on
   // gravityTargetActiveShared is what keeps the well parked exactly where it was while you're tilt-
-  // controlling pattern/mirror/speed instead — picking gravity mode is the only thing that ever moves it
+  // controlling pattern/mirror instead — picking gravity mode is the only thing that ever moves it
   // again, same as picking pattern/mirror is the only thing that ever drags it by hand. withSpring called
   // directly inside the derivation (not a plain passthrough switch) is what lets a manual-to-tilt handoff
   // actually animate: Reanimated keeps a derived value's own animation state across re-evaluations, so
@@ -862,7 +1025,7 @@ export default function SwirlScreen() {
   const effectiveGravityCenterX = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.x.value : withSpring(tiltX.value, TILT_EASE_SPRING)))
   const effectiveGravityCenterY = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.y.value : withSpring(tiltY.value, TILT_EASE_SPRING)))
 
-  const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, longPressGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, medium, settings.mirrorLines, bounceFriction, gravity, followSpeed, effectiveGravityCenterX, effectiveGravityCenterY, activeTargets, gravityHandle, isDraggingGravity, gravityManualControl, stopAllSpeeds, applySpeedRelease, baseRotation, mirrorProgress, mirrorRotationSign, speedTargetsMirror, tiltX, tiltY, tiltEnabledShared)
+  const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, longPressGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, medium, settings.mirrorLines, bounceFriction, gravity, followSpeed, effectiveGravityCenterX, effectiveGravityCenterY, activeTargets, gravityHandle, isDraggingGravity, gravityManualControl, applyPatternRotationRelease, applyMirrorRotationRelease, applyZoomRelease, applyMirrorCycleRelease, baseRotation, baseRotationPaused, mirrorProgress, mirrorPaused, mirrorRotationSign, manualPulseOffset, basePulse, basePulsePaused, foregroundCycleRate, backgroundCycleRate, minCycleRate, maxCycleRate, tiltX, tiltY, tiltEnabledShared)
 
   // Drives GravityWell's particles (Spiral.tsx) — bounceFriction's own speed, full stop (see
   // gravityParticleFrictionSpeed's own comment and GRAVITY_PARTICLE_FRICTION_MIN/MAX_SPEED above).
@@ -872,10 +1035,9 @@ export default function SwirlScreen() {
   // the sum, so dragging Friction barely visibly changed anything. Gravity's strength already has its
   // own indicator (the hole/particle size — see gravityParticleSizeScale in Spiral.tsx); size is
   // gravity's job, speed is friction's, and mixing the two into one number just diluted both signals
-  // into one muddy one. Never frozen — `frozen` is speed mode's own stop, and the well's swirl is
-  // gravity's effect, not a speed control (see baseRotationRate/basePulse/foregroundCycleProgress for
-  // the ones `frozen` actually gates); stopping speed shouldn't also stop gravity from visibly doing
-  // its own thing. There's also no zero-speed case to guard against the way basePulse/
+  // into one muddy one. Never gated on anything rotation/zoom/mirror-rotation-related — the well's
+  // swirl is gravity's own effect, not a speed control, so stopping those shouldn't also stop gravity
+  // from visibly doing its own thing. There's also no zero-speed case to guard against the way basePulse/
   // foregroundCycleProgress above need for their own: gravityParticleFrictionSpeed never reaches 0 on
   // its own, so the well always has some visible flow regardless of where gravity's slider sits.
   // Direction (falling in vs. emanating out) isn't this clock's job either — GravityParticle reads
@@ -905,9 +1067,9 @@ export default function SwirlScreen() {
     recenterMirror()
   }, [recenterMirror, resetMirrorRotation])
   // No rotation of its own to square up (the well has no orientation) — just springs the gravity
-  // handle back to center and hands control back to tilt, the same pair resetSwirl/
-  // recenterGestureTarget's own gravity branches used to duplicate inline (both now call this
-  // instead). The gravity group's own Reset button (ControlGroupTopSheetContent) combines this with
+  // handle back to center and hands control back to tilt, the same logic recenterGestureTarget's own
+  // gravity branch used to duplicate inline (it now calls this instead). The gravity group's own Reset
+  // button (ControlGroupTopSheetContent) combines this with
   // setGravity(DEFAULT_GRAVITY)/setBounceFriction(DEFAULT_BOUNCE_FRICTION) on its own side — the same
   // "ephemeral half here, persisted half in the sheet's own onPress" split resetPattern/resetMirror
   // use, bridged the same way via useRegisterSwirlReset below.
@@ -918,30 +1080,10 @@ export default function SwirlScreen() {
   }, [gravityHandle, gravityManualControl])
   useRegisterSwirlReset(resetPattern, resetMirror, resetGravityPosition)
 
-  // Long-press on the transport row's play/pause FAB (see OnScreenControls) — a single "put it all
-  // back" gesture bundling every reset-style action this screen has, rather than making someone dig
-  // through the mirror and speed group sheets for their own separate Reset buttons. That FAB (and this
-  // long-press with it) only renders while 'speed' is the active gesture target now — see
-  // OnScreenControls' own showPauseFab comment — so this is reachable only from speed mode, not every
-  // mode the way it used to be. Doesn't touch
-  // frozen itself — this is a reset, not also an unpause. Always resets pattern, mirror, and gravity
-  // regardless of activeTargets — "put it all back" isn't itself mode-dependent, unlike the drag/twist
-  // gestures that only touch whichever point(s) are currently targeted. Gravity's own reset also clears
-  // gravityManualControl, same as recenterGestureTarget's gravity branch below — without that, a thrown
-  // gravity point now stays wherever it landed indefinitely (see effectiveGravityCenterX/Y's own
-  // comment), so "put it all back" has to be the one thing that unconditionally hands it back to tilt
-  // too, not just spring its position to the origin.
-  const resetSwirl = useCallback(() => {
-    resetPattern()
-    resetMirror()
-    resetGravityPosition()
-  }, [resetGravityPosition, resetMirror, resetPattern])
-
-  // Long-press on the transport row's skip-previous FAB (see OnScreenControls) — the exact same
-  // three calls as the settings drawer's own "Reset all" button (see ControlGroupTopSheetContent's
-  // 'settings' branch), reachable without opening that sheet at all. Distinct from resetSwirl above:
-  // that one only squares ephemeral position/rotation/gravity-center back up, while this one also
-  // resets every persisted look/tuning setting (colors, stroke width, dash style, and so on) via
+  // Long-press on the transport row's skip-previous FAB (see OnScreenControls) — the same three calls
+  // as the settings drawer's own "Reset all" button (see ControlGroupTopSheetContent's 'settings'
+  // branch), reachable without opening that sheet at all: every persisted look/tuning setting (colors,
+  // stroke width, dash style, and so on) via
   // resetSettings — which already carries over audioReactiveEnabled/shakeEnabled/showLabels/
   // tiltEnabled rather than resetting them (see resetSettings' own comment), and never touches
   // themeSettings (appearance/blur), a separate persisted store this screen doesn't own at all.
@@ -981,34 +1123,36 @@ export default function SwirlScreen() {
     selection()
   }, [activeTargets, resetGravityPosition, resetMirror, resetPattern, selection])
 
+  // Long-press bonus on the corner Pause/Play FAB (see OnScreenControls' pauseFab) — recentres AND
+  // reorients every point unconditionally, not just whichever gesture target(s) happen to be active
+  // the way recenterGestureTarget's own long press is scoped. Pause already means "stop everything at
+  // once" regardless of mode (see frozen's own comment above), so its long press reads the same way:
+  // put everything back, not just whatever's currently selected. Position/rotation resets only — same
+  // ephemeral-state-only scope resetPattern/resetMirror/resetGravityPosition already have on their
+  // own, so this never touches a persisted setting (or pushes undo history) the way resetAllSettings
+  // does.
+  const recenterEverything = useCallback(() => {
+    resetPattern()
+    resetMirror()
+    resetGravityPosition()
+    selection()
+  }, [resetGravityPosition, resetMirror, resetPattern, selection])
+
   useEffect(() => {
     // Neither depends on pattern anymore: rotationSpeed means the same thing (a plain rate) for every
-    // pattern, so there's no more spinning/opt-in split to branch on here. rotationSpeed === 0 stops it
-    // too, but snaps straight there rather than easing (see the frozen branch below) — there's no
-    // motion to ease down from an already-zero rate, and treating a zeroed slider as a sudden freeze
-    // would be reading intent into what's actually just a deliberate value, the same reasoning
-    // `frozen || effectiveRotationSpeed === 0` already uses everywhere else in this file.
-    // effectiveRotationSpeed, not settings.rotationSpeed directly, so a quiet stretch of audio (treble
-    // mapping to 0) stops the spin the same way a zeroed slider already does. cancelAnimation(baseRotation)
-    // only matters for the rarer case of freezing/zeroing mid-reset, to also cut off an in-flight reset
-    // spring rather than let it keep settling underneath a frozen pattern.
+    // pattern, so there's no more spinning/opt-in split to branch on here. effectiveRotationSpeed, not
+    // settings.rotationSpeed directly, so a quiet stretch of audio (treble mapping to 0) stops the spin
+    // the same way a zeroed slider already does. cancelAnimation(baseRotation) only matters for the
+    // rarer case of zeroing mid-reset, to also cut off an in-flight reset spring rather than let it keep
+    // settling underneath a stopped pattern.
     if (effectiveRotationSpeed === 0) {
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
       baseRotationRate.value = 0
       cancelAnimation(baseRotation)
       return
     }
-    // Eases down to 0 over PAUSE_EASE_DURATION_MS instead of snapping there — see
-    // useLoopingProgress.ts's own identical treatment (mirror rotation, zoom/pulse), which exports
-    // this constant so every eased motion visibly stops together. Unfreezing snaps straight back to
-    // the current rate, same instant-resume reasoning as useLoopingProgress.ts.
-    if (frozen) {
-      baseRotationRate.value = withTiming(0, { duration: PAUSE_EASE_DURATION_MS })
-      cancelAnimation(baseRotation)
-      return
-    }
     baseRotationRate.value = (360 / BASE_ROTATION_DURATION_MS) * effectiveRotationSpeed
-  }, [baseRotation, baseRotationRate, effectiveRotationSpeed, frozen])
+  }, [baseRotation, baseRotationRate, effectiveRotationSpeed])
 
   useEffect(() => {
     // A speed of exactly 0 means mirrorProgress is frozen (see its own useLoopingProgress call
@@ -1084,18 +1228,9 @@ export default function SwirlScreen() {
   }, [settings.polygonSides, sides])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
     reversed.value = effectiveZoomSpeed < 0
   }, [effectiveZoomSpeed, reversed])
-
-  // Mirrored into a SharedValue purely so the speed-rate bridge's write callbacks below always see the
-  // LATEST frozen state at the instant they're invoked, not whichever value was baked into whichever
-  // closure SwirlScreen last registered — same "a plain JS closure isn't guaranteed to pick up a later
-  // change" reasoning as speedTiltActiveShared/tiltEnabledShared elsewhere in this file, just read from
-  // JS-thread code here instead of a worklet.
-  const frozenShared = useSharedValue(frozen)
-  useEffect(() => {
-    frozenShared.value = frozen
-  }, [frozen, frozenShared])
 
   // The speed-rate bridge (see speedRateBridge.tsx) — a low-latency fast path alongside the settings →
   // effect sync everywhere above, letting the 6 speed-driving sliders in ControlGroupBottomSheetContent
@@ -1104,69 +1239,60 @@ export default function SwirlScreen() {
   // through a full re-render of this component and back out through the effects above. Each callback
   // below replicates exactly what its own authoritative effect already computes — never a *replacement*
   // for that effect, which stays the sole source of truth and silently overwrites whatever these write
-  // on its own next pass regardless.
+  // on its own next pass regardless. Rotation/mirror rotation/zoom can also be set live from the
+  // canvas's own outer-field drag (see useEpicenter.ts) — a separate write path straight into the real
+  // settings, not this bridge, which exists purely for the sliders.
   const writeRotationRateLive = useCallback(
     (speed: number) => {
-      if (frozenShared.value) return
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
       baseRotationRate.value = (360 / BASE_ROTATION_DURATION_MS) * speed
     },
-    [baseRotationRate, frozenShared]
+    [baseRotationRate]
   )
 
   const writeMirrorRotationRateLive = useCallback(
     (speed: number) => {
-      if (!frozenShared.value) {
-        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
-        mirrorRotationRate.value = Math.abs(speed) / BASE_ROTATION_DURATION_MS
-      }
+      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+      mirrorRotationRate.value = Math.abs(speed) / BASE_ROTATION_DURATION_MS
       // Skips the sign write at exactly 0 — same -0 reasoning as mirrorRotationSign's own sync effect above.
       if (speed !== 0) {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         mirrorRotationSign.value = speed < 0 ? -1 : 1
       }
     },
-    [mirrorRotationRate, mirrorRotationSign, frozenShared]
+    [mirrorRotationRate, mirrorRotationSign]
   )
 
   const writeZoomRateLive = useCallback(
     (speed: number) => {
-      if (!frozenShared.value) {
-        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
-        zoomRate.value = Math.abs(speed) / zoomBaseDurationMs
-      }
+      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+      zoomRate.value = Math.abs(speed) / zoomBaseDurationMs
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
       reversed.value = speed < 0
     },
-    [zoomRate, reversed, zoomBaseDurationMs, frozenShared]
+    [zoomRate, reversed, zoomBaseDurationMs]
   )
 
-  // Foreground/background cycle speed can never reach exactly 0 (MIN_CYCLE_SPEED is 0.1, not 0) and
-  // have no direction/reversed concept at all — the simplest two of the six, just a frozen-gated rate
-  // write.
   const writeForegroundCycleRateLive = useCallback(
     (speed: number) => {
-      if (frozenShared.value) return
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
       foregroundCycleRate.value = speed / BASE_CYCLE_DURATION_MS
     },
-    [foregroundCycleRate, frozenShared]
+    [foregroundCycleRate]
   )
 
   const writeBackgroundCycleRateLive = useCallback(
     (speed: number) => {
-      if (frozenShared.value) return
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
       backgroundCycleRate.value = speed / BASE_CYCLE_DURATION_MS
     },
-    [backgroundCycleRate, frozenShared]
+    [backgroundCycleRate]
   )
 
-  // Never gated by frozenShared — gravityParticleProgress's own useLoopingProgress call above passes a
-  // literal `false`, not `frozen`, for exactly this reason (see its own comment): the well's swirl is
-  // gravity's effect, not a speed-mode control, so pausing speed mode shouldn't also stop it. Takes the
-  // raw bounceFriction value straight off the slider and applies the same transform the authoritative
-  // gravityParticleSpeed computation above uses, so this can never drift from it.
+  // gravityParticleProgress's own useLoopingProgress call above passes a literal `false` (see its own
+  // comment): the well's swirl is gravity's effect, not a speed-mode control, so nothing gates this.
+  // Takes the raw bounceFriction value straight off the slider and applies the same transform the
+  // authoritative gravityParticleSpeed computation above uses, so this can never drift from it.
   const writeGravityParticleRateLive = useCallback(
     (bounceFriction: number) => {
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
@@ -1254,42 +1380,62 @@ export default function SwirlScreen() {
     selection()
   }, [pushHistory, selection, setPolygonSides, settings.polygonSides])
 
-  // Mirror mode's two transport buttons (see OnScreenControls) — plain ±1 steps on mirrorLines,
-  // relying on setMirrorLines' own clamp to MIN/MAX_MIRROR_LINES rather than checking bounds here;
-  // the buttons themselves disable at the boundary (see OnScreenControls' own mirrorLines prop).
+  // Mirror mode's two transport buttons (see OnScreenControls) — walk the same signed mirrorLines/
+  // mirrorAlternateColors scale the Focus twist gesture already dials through (see rotationGesture's
+  // own targetsMirrorRotation branch below): a ±1 step past 0 crosses into "negative" territory,
+  // flipping mirrorAlternateColors on and counting magnitude back up, rather than dead-ending at 0 the
+  // way a plain mirrorLines clamp would. setMirrorAlternateColors only fires when the sign actually
+  // changed, so a step that stays on the same side doesn't churn a no-op update. The explicit clamp on
+  // the signed step matters even though setMirrorLines self-clamps its own magnitude — it's the signed
+  // value, not just the magnitude, that has to stay in [-MAX_MIRROR_LINES, MAX_MIRROR_LINES] here. The
+  // buttons themselves disable only at the true signed extremes (see OnScreenControls' own mirrorLines/
+  // mirrorAlternateColors props), not at the 0 midpoint — both directions stay valid there.
   const addMirrorLine = useCallback(() => {
     pushHistory()
-    setMirrorLines(settings.mirrorLines + 1)
+    const currentSigned = signedMirrorLines(settings.mirrorLines, settings.mirrorAlternateColors)
+    const next = mirrorLinesFromSigned(clamp(currentSigned + 1, -MAX_MIRROR_LINES, MAX_MIRROR_LINES))
+    setMirrorLines(next.mirrorLines)
+    if (next.mirrorAlternateColors !== settings.mirrorAlternateColors) setMirrorAlternateColors(next.mirrorAlternateColors)
     selection()
-  }, [pushHistory, selection, setMirrorLines, settings.mirrorLines])
+  }, [pushHistory, selection, setMirrorLines, setMirrorAlternateColors, settings.mirrorLines, settings.mirrorAlternateColors])
   const removeMirrorLine = useCallback(() => {
     pushHistory()
-    setMirrorLines(settings.mirrorLines - 1)
+    const currentSigned = signedMirrorLines(settings.mirrorLines, settings.mirrorAlternateColors)
+    const next = mirrorLinesFromSigned(clamp(currentSigned - 1, -MAX_MIRROR_LINES, MAX_MIRROR_LINES))
+    setMirrorLines(next.mirrorLines)
+    if (next.mirrorAlternateColors !== settings.mirrorAlternateColors) setMirrorAlternateColors(next.mirrorAlternateColors)
     selection()
-  }, [pushHistory, selection, setMirrorLines, settings.mirrorLines])
-  // Add/Remove mirror's own long-press bonus (see OnScreenControls) — jumps straight to the boundary
-  // instead of a single ±1 step.
+  }, [pushHistory, selection, setMirrorLines, setMirrorAlternateColors, settings.mirrorLines, settings.mirrorAlternateColors])
+  // Add/Remove mirror's own long-press bonus (see OnScreenControls) — each treats 0 as a "pass through
+  // first" stop in the direction it points, mirror images of each other: "+" jumps to 0 if currently
+  // negative, otherwise all the way to +MAX_MIRROR_LINES; "-" jumps to 0 if currently positive,
+  // otherwise all the way to -MAX_MIRROR_LINES (MAX_MIRROR_LINES with alternate colors on). Wired to
+  // useHoldToRepeat (see OnScreenControls' own maxMirrorLinesHold/minMirrorLinesHold), so continuing to
+  // hold past the first hop calls this again — landing on 0 the first tick, then the far extreme the
+  // next, the same two-stop journey a tap-tap would take, just automatic. The early return once the
+  // target matches where the dial already sits is what makes that safe to keep calling on a timer:
+  // without it, a hold that outlasts reaching the far extreme would keep pushing no-op history entries
+  // and firing a haptic every tick for as long as the button stayed held.
   const maxMirrorLines = useCallback(() => {
+    const currentSigned = signedMirrorLines(settings.mirrorLines, settings.mirrorAlternateColors)
+    const targetSigned = currentSigned < 0 ? 0 : MAX_MIRROR_LINES
+    if (targetSigned === currentSigned) return
     pushHistory()
-    setMirrorLines(MAX_MIRROR_LINES)
+    const next = mirrorLinesFromSigned(targetSigned)
+    setMirrorLines(next.mirrorLines)
+    if (next.mirrorAlternateColors !== settings.mirrorAlternateColors) setMirrorAlternateColors(next.mirrorAlternateColors)
     selection()
-  }, [pushHistory, selection, setMirrorLines])
+  }, [pushHistory, selection, setMirrorLines, setMirrorAlternateColors, settings.mirrorLines, settings.mirrorAlternateColors])
   const minMirrorLines = useCallback(() => {
+    const currentSigned = signedMirrorLines(settings.mirrorLines, settings.mirrorAlternateColors)
+    const targetSigned = currentSigned > 0 ? 0 : -MAX_MIRROR_LINES
+    if (targetSigned === currentSigned) return
     pushHistory()
-    setMirrorLines(MIN_MIRROR_LINES)
+    const next = mirrorLinesFromSigned(targetSigned)
+    setMirrorLines(next.mirrorLines)
+    if (next.mirrorAlternateColors !== settings.mirrorAlternateColors) setMirrorAlternateColors(next.mirrorAlternateColors)
     selection()
-  }, [pushHistory, selection, setMirrorLines])
-
-  // Silent on purpose: the on-screen Pause FAB this drives (see OnScreenControls) is now a
-  // @rific/haptic-press FAB, which already fires its own selection haptic on press — a manual call
-  // here would double-buzz every tap. Freeze is reachable only through that FAB — no raw-gesture caller
-  // needs its own explicit haptic (the two-finger long-press canvas gesture that used to shortcut to
-  // this same toggle now flips direction instead, see flipDirections/twoFingerLongPressGesture below) —
-  // and that FAB itself only renders while 'speed' is the active gesture target (see OnScreenControls'
-  // own showPauseFab comment), so frozen can currently only be toggled from speed mode, not any other.
-  const toggleFrozen = useCallback(() => {
-    setFrozen((prev) => !prev)
-  }, [])
+  }, [pushHistory, selection, setMirrorLines, setMirrorAlternateColors, settings.mirrorLines, settings.mirrorAlternateColors])
 
   // A canvas tap is just as much a direct look-changing "hot key" as any on-screen FAB — foreground/
   // backgroundColors are Look-tracked fields, so this needs pushHistory just like every FAB-driven
@@ -1303,66 +1449,57 @@ export default function SwirlScreen() {
     selection()
   }, [pushHistory, selection, swapColors])
 
-  // A tap while a group sheet is open, or while the on-screen controls are otherwise visible,
-  // dismisses that chrome instead of swapping colors — the color swap only fires on a tap that lands
-  // with everything already hidden, so the first tap after a drawer or the controls appear can't
-  // accidentally change the art. An open drawer takes priority over the plain controlsVisible check:
-  // closing it also hides the controls in the same tap (rather than leaving a third tap to hide the
-  // now-empty trigger stack), so exactly two taps — dismiss, then swap — gets you back to a color
-  // swap, matching the plain controlsVisible-only case below. Recentring used to also live here (a tap
-  // near the epicentre/mirror anchor), but that's gone now — see resetPattern/resetMirror below for
-  // where it moved, and why a proximity tap was a bad way to reach it in the first place (there's no
-  // fixed visual marker for either point once the pattern is mirrored, so "near" was a guess).
+  // A tap always swaps colors now — the controls row fades out on its own after its own configurable
+  // delay (see the idle-fade effect above) instead of being spent dismissing chrome, so there's no longer a
+  // "first tap hides, second tap swaps" split to preserve here. Only the gesture-target fan and an open
+  // group sheet still take priority: those are their own chrome that a canvas tap should close first,
+  // same "press away" dismissal as before, rather than closing them and swapping colors underneath in
+  // the same tap. Recentring used to also live here (a tap near the epicentre/mirror anchor), but
+  // that's gone now — see resetPattern/resetMirror below for where it moved, and why a proximity tap
+  // was a bad way to reach it in the first place (there's no fixed visual marker for either point once
+  // the pattern is mirrored, so "near" was a guess).
   const handleCanvasTap = useCallback(() => {
-    // The gesture-target fan (see OnScreenControls) is its own kind of chrome to dismiss first, ahead
-    // of even the group-sheet check below — a tap on the canvas while the fan is open (picking a
-    // combo, or just changing your mind) should only close the fan, not also hide the whole row in the
-    // same tap: closing it here mirrors the primary FAB's own "press away" and leaves a second tap to
-    // hide everything normally, same two-stage dismiss as everywhere else in this function.
     if (gestureFanOpen) {
       setGestureFanOpen(false)
       return
     }
     if (groupSheetOpen) {
       closeControlGroupSheet()
-      hideControls()
-      return
-    }
-    if (controlsVisible) {
-      hideControls()
       return
     }
     swapColorsWithFeedback()
-    hideControls()
-  }, [closeControlGroupSheet, controlsVisible, gestureFanOpen, groupSheetOpen, hideControls, swapColorsWithFeedback])
+  }, [closeControlGroupSheet, gestureFanOpen, groupSheetOpen, swapColorsWithFeedback])
 
-  // The two-finger long press's action: negates whichever signed speed(s) are currently active, same
-  // inline pattern-then-mirror branching as recenterGestureTarget above. Mostly a plain
-  // button-style action rather than a toggle — there's no single "reversed" boolean
-  // for rotation/zoom/mirror rotation themselves, since each can independently be forward, reverse,
-  // or stopped — except for audioRotationReversed (see its own comment above), which exists purely
-  // because audio-reactive mode's own rotation speed is always non-negative on its own (mapped
-  // straight from treble), so negating the settings that normally carry direction has nothing to act
-  // on while the mic is driving rotation instead. audioRotationReversed only ever flips with the
-  // pattern branch — mirror rotation has no independent lever to flip while audio-reactive, since
-  // effectiveMirrorRotationSpeed is already always the negation of effectiveRotationSpeed then (see
-  // its own comment above), so flipping the pattern side already flips the mirror's effective speed
-  // too, automatically.
-  const flipDirections = useCallback(() => {
-    // Independent per-target membership checks, same as recenterGestureTarget above — any active
-    // combination flips exactly its own pieces. 'gravity' has nothing directional to flip here (its
-    // own strength slider isn't a "reverse" gesture the way rotation/zoom speed are), so it has no
-    // branch of its own; being active alongside pattern/mirror doesn't add or suppress anything here.
+  // The two-finger long press's action: hard-stops whichever signed speed(s) are currently active and
+  // snaps their orientation to the nearest valid angle if it's close enough (see trySnapPatternRotation/
+  // trySnapMirrorRotation above) — the deliberate, explicit counterpart to a slow release doing the same
+  // thing (see applyPatternRotationRelease/applyMirrorRotationRelease), for whenever you want to kill an
+  // ongoing spin outright rather than coast it down by hand. Same inline pattern-then-mirror branching
+  // as recenterGestureTarget above; 'gravity' has nothing to stop here (its own strength slider isn't a
+  // speed the way rotation/zoom are), so it has no branch of its own.
+  //
+  // Also unconditionally flips audioRotationReversed on the pattern branch, exactly as this gesture
+  // always did before it meant "stop" — audio-reactive mode's own rotation speed is always non-negative
+  // on its own (mapped straight from treble), so there's no settings value here for a stop to actually
+  // zero, and flipping audioRotationReversed is the only way this gesture (or anything else) can still
+  // change which way audio-reactive rotation spins. Kept unconditional (not gated on audio-reactive
+  // currently being on) so it's pre-armed the same way it always was — see audioRotationReversed's own
+  // comment above. mirror rotation has no independent lever to flip while audio-reactive, since
+  // effectiveMirrorRotationSpeed is already always the negation of effectiveRotationSpeed then (see its
+  // own comment above), so the pattern branch already covers the mirror's effective speed too.
+  const stopAndSnapGesture = useCallback(() => {
     if (activeTargets.has('pattern')) {
-      setRotationSpeed(-settings.rotationSpeed)
-      setZoomSpeed(-settings.zoomSpeed)
+      setRotationSpeed(0)
+      setZoomSpeed(0)
       setAudioRotationReversed((prev) => !prev)
+      trySnapPatternRotation()
     }
     if (activeTargets.has('mirror')) {
-      setMirrorRotationSpeed(-settings.mirrorRotationSpeed)
+      setMirrorRotationSpeed(0)
+      trySnapMirrorRotation()
     }
     medium()
-  }, [activeTargets, medium, setMirrorRotationSpeed, setRotationSpeed, setZoomSpeed, settings.mirrorRotationSpeed, settings.rotationSpeed, settings.zoomSpeed])
+  }, [activeTargets, medium, setMirrorRotationSpeed, setRotationSpeed, setZoomSpeed, trySnapMirrorRotation, trySnapPatternRotation])
 
   // Broad: everything that's purely "what does this look like" gets rerolled — see useRerollUnits.tsx
   // for the full field list and per-group breakdown. Broken into one reroll function per conceptual
@@ -1379,33 +1516,51 @@ export default function SwirlScreen() {
   // (rerolls a random subset) — pushes the look as it stands right now, before any of `units` actually
   // runs, so a single goBack always undoes exactly what this call is about to do, whether that's every
   // field, one field, or a whole TWEAK_BATCH_COUNT-sized batch, each landing as one history entry
-  // regardless of which it was.
+  // regardless of which it was. extra threads straight through to pushHistory — only randomizeGroup's
+  // own 'colors' branch below ever passes one, since rerollUnits/rerollUnitsByGroup's other slices never
+  // touch an ExtraResetFields field at all (see useRerollUnits.tsx's own top comment).
   const pushHistoryAndReroll = useCallback(
-    (units: (() => void)[]) => {
-      pushHistory()
+    (units: (() => void)[], extra?: Partial<ExtraResetFields>) => {
+      pushHistory(extra)
       units.forEach((reroll) => reroll())
     },
     [pushHistory]
   )
 
+  // Only the shake gesture drives this directly now (via randomizeGesture below, which is why it needs
+  // its own explicit notification() there — a shake has no Pressable of its own for @rific/haptic-press
+  // to wire a haptic onto). The on-screen "randomize everything" shortcuts (the settings group's own
+  // Randomize button, and a long press on the cog/chevron — see OnScreenControls/
+  // ControlGroupTopSheetContent) go through randomizeGroup('settings') instead, whose own
+  // rerollUnitsByGroup slice is every unit in rerollUnits combined (see useRerollUnits.tsx) — same
+  // reroll, reached through the same per-group ref bridge (and the same auto-haptic Pressables) every
+  // other group's Randomize already uses, rather than a second bespoke prop just for this one case.
   const randomize = useCallback(() => {
-    // Silent on purpose: the on-screen dice FAB this drives (see OnScreenControls) already fires its
-    // own selection haptic on press via @rific/haptic-press — see randomizeGesture for the shake
-    // trigger below, which isn't a Pressable and needs its own explicit haptic instead.
     pushHistoryAndReroll(rerollUnits)
   }, [pushHistoryAndReroll, rerollUnits])
 
   // Drives each top sheet group's own "Randomize" button (see ControlGroupTopSheetContent) — same
   // undo/haptic-free treatment as randomize above, just scoped to one group's units via
-  // rerollUnitsByGroup instead of all of them.
+  // rerollUnitsByGroup instead of all of them. 'colors' is the one group whose own units reach outside
+  // Look's own 16 fields (see useRerollUnits.tsx's own top comment) — foreground/backgroundCycleSpeed
+  // are ExtraResetFields, not Look fields, so without passing their current value along here as extra, a
+  // colors-group randomize that happened to reroll either one would leave it un-restored on the next
+  // goBack, the same staleness ExtraResetFields already exists to prevent for resetAllSettings (see
+  // pushHistory's own comment in useLookHistory.tsx). Every other group's units are all plain Look
+  // fields, so they pass no extra at all, same as before cycle speed joined the colors group.
   const randomizeGroup = useCallback(
     (group: ControlGroup) => {
-      pushHistoryAndReroll(rerollUnitsByGroup[group])
+      pushHistoryAndReroll(rerollUnitsByGroup[group], group === 'colors' ? { backgroundCycleSpeed: settings.backgroundCycleSpeed, foregroundCycleSpeed: settings.foregroundCycleSpeed } : undefined)
     },
-    [pushHistoryAndReroll, rerollUnitsByGroup]
+    [pushHistoryAndReroll, rerollUnitsByGroup, settings.backgroundCycleSpeed, settings.foregroundCycleSpeed]
   )
 
   useRegisterSwirlRandomize(randomizeGroup)
+
+  // The top-right EdgeRevealZone's own long-press bonus (see its own onRandomizeEverything prop
+  // comment) — the exact same 'settings' slice (every group's units combined) a long press on the
+  // cog/chevron already fires, just reachable without the real controls ever coming up.
+  const randomizeEverything = useCallback(() => randomizeGroup('settings'), [randomizeGroup])
 
   // A device shake has no Pressable of its own for the package to wire a haptic onto — this fires
   // notification() explicitly so shaking the device still gets *some* tactile confirmation it landed.
@@ -1433,11 +1588,10 @@ export default function SwirlScreen() {
   // target happens to be "current."
   const targetsPatternRotation = activeTargets.has('pattern')
   const targetsMirrorRotation = activeTargets.has('mirror')
-  const targetsSpeedRotation = activeTargets.has('speed')
+  const targetsGravityRotation = activeTargets.has('gravity')
   const targetsPatternZoom = activeTargets.has('pattern')
   const targetsMirrorPinch = activeTargets.has('mirror')
   const targetsGravityPinch = activeTargets.has('gravity')
-  const targetsSpeedPinch = activeTargets.has('speed')
 
   // Scoped to this same ref (not window) so the web wheel-pinch effect below only ever fires over
   // the canvas — never while the pointer is over the on-screen FAB controls or the settings sheets,
@@ -1450,7 +1604,6 @@ export default function SwirlScreen() {
       startPulseOffset.value = manualPulseOffset.value
       startStrokeWidth.value = strokeWidth.value
       startGravity.value = gravity.value
-      startZoomSpeed.value = settings.zoomSpeed
       runOnJS(hideControls)()
     })
     .onUpdate((event) => {
@@ -1477,6 +1630,7 @@ export default function SwirlScreen() {
       // own sign), it's a plain unsigned magnitude with no "reversed" concept of its own, so spreading
       // always grows it and pinching always shrinks it, no sign flip needed.
       if (targetsPatternZoom) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         manualPulseOffset.value = startPulseOffset.value + (reversed.value ? -1 : 1) * (event.scale - 1) * PINCH_SCALE_TO_PULSE_OFFSET_SCALE
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         strokeWidth.value = clamp(startStrokeWidth.value + (event.scale - 1) * PINCH_SCALE_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
@@ -1490,22 +1644,6 @@ export default function SwirlScreen() {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         gravity.value = gravitySign * magnitude
       }
-      // A direct linear offset from zoomSpeed's own value at gesture-start, the same full-range mapping
-      // the Zoom speed slider itself uses — unlike gravity's own magnitude-only strength above, this can
-      // cross zero into the opposite direction (see PINCH_SCALE_TO_ZOOM_SPEED_SCALE's own comment).
-      // Unlike every other pinch-driven value in this file, zoomSpeed has no live SharedValue of its own
-      // that Spiral reads directly — it only ever reaches the screen through useLoopingProgress's own
-      // effectiveZoomSpeed, a plain settings number — so this commits straight to the real setting on
-      // every update rather than writing a SharedValue first and folding it in on release the way
-      // mirrorGap/strokeWidth do. No heavier than an ordinary slider drag already is: effectiveZoomSpeed's
-      // own comment already documents that a rapid run of intermediate values (like a dragged slider) has
-      // nothing to visibly stutter or snap on, and that's exactly what this is.
-      // "Spread = grow" here, same sign as every other pinch-driven magnitude in this file — a real
-      // touch pinch has no equivalent of the wheel's own natural-scrolling sign flip (see the web wheel
-      // effect's own targetsSpeedPinch branch further down), so it's left unflipped.
-      if (targetsSpeedPinch) {
-        runOnJS(setZoomSpeed)(clamp(startZoomSpeed.value + (event.scale - 1) * PINCH_SCALE_TO_ZOOM_SPEED_SCALE, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED))
-      }
     })
     .onEnd((event) => {
       if (targetsPatternZoom) {
@@ -1517,6 +1655,7 @@ export default function SwirlScreen() {
         const foldedPulse = basePulse.value + manualPulseOffset.value
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         basePulse.value = ((foldedPulse % 1) + 1) % 1
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         manualPulseOffset.value = 0
         // zoomSpeed itself is deliberately left alone here — see PINCH_SCALE_TO_PULSE_OFFSET_SCALE's
         // own comment above for why a pinch doesn't feed its release velocity into it. The live pulse
@@ -1552,13 +1691,6 @@ export default function SwirlScreen() {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         gravity.value = nextGravity
         runOnJS(setGravity)(nextGravity)
-      }
-      if (targetsSpeedPinch) {
-        // Recomputed from event.scale rather than trusting the last onUpdate already committed it —
-        // same "onEnd's own event is authoritative" reasoning as gravity's own commit above, covering a
-        // pinch too quick to generate any onUpdate at all.
-        const nextZoomSpeed = clamp(startZoomSpeed.value + (event.scale - 1) * PINCH_SCALE_TO_ZOOM_SPEED_SCALE, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED)
-        runOnJS(setZoomSpeed)(nextZoomSpeed)
       }
       // Fired again on release (not just on start) so the on-screen controls get a full,
       // uninterrupted hide window measured from the end of the pinch — same reasoning as the
@@ -1602,9 +1734,6 @@ export default function SwirlScreen() {
       }
       if (targetsMirrorPinch) setMirrorGap(mirrorGap.value)
       if (targetsGravityPinch) setGravity(gravity.value)
-      // No SharedValue mirror of its own to read back here (see pinchGesture's own targetsSpeedPinch
-      // comment) — onWheel below already commits setZoomSpeed directly on every tick, so there's
-      // nothing left to re-read/re-commit at gesture-end the way the other three above do.
       hideControls()
     }
 
@@ -1622,7 +1751,6 @@ export default function SwirlScreen() {
         startPulseOffset.value = manualPulseOffset.value
         startStrokeWidth.value = strokeWidth.value
         startGravity.value = gravity.value
-        startZoomSpeed.value = settings.zoomSpeed
         scale = 1
         hideControls()
       } else {
@@ -1640,18 +1768,6 @@ export default function SwirlScreen() {
         const gravitySign = startGravity.value < 0 ? -1 : 1
         gravity.value = gravitySign * clamp(Math.abs(startGravity.value) + (scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE, 0, MAX_GRAVITY)
       }
-      if (targetsSpeedPinch) {
-        // Deliberately (1 - scale), the opposite sign every other wheel-driven property above uses —
-        // see this branch's own comment in the native pinchGesture (targetsSpeedPinch, further up) for
-        // why: macOS's default "natural scrolling" reports a physical upward two-finger swipe as a
-        // *positive* deltaY (the opposite of the traditional/Windows convention scale's own shared sign
-        // already assumes), so scrolling up read as "decrease" instead of the "up = more" every wheel-
-        // as-a-dial control (volume, zoom) normally means. Isolated to this one property rather than
-        // flipping `scale` itself, which would also flip mirrorGap/pulse/gravity above — none of which
-        // were reported as backwards, so there's no reason to disturb them to fix this one. Linear, not
-        // magnitude-only (see PINCH_SCALE_TO_ZOOM_SPEED_SCALE's own comment) — this can cross zero.
-        setZoomSpeed(clamp(startZoomSpeed.value + (1 - scale) * PINCH_SCALE_TO_ZOOM_SPEED_SCALE, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED))
-      }
       idleTimer = setTimeout(endGesture, WHEEL_PINCH_IDLE_MS)
     }
 
@@ -1660,17 +1776,18 @@ export default function SwirlScreen() {
       node.removeEventListener?.('wheel', onWheel)
       if (idleTimer !== null) clearTimeout(idleTimer)
     }
-  }, [targetsMirrorPinch, targetsPatternZoom, targetsGravityPinch, targetsSpeedPinch, hideControls, setMirrorGap, setStrokeWidth, setGravity, setZoomSpeed, basePulse, manualPulseOffset, mirrorGap, gravity, reversed, startMirrorGap, startPulseOffset, startStrokeWidth, startGravity, startZoomSpeed, strokeWidth, settings.zoomSpeed])
+  }, [targetsMirrorPinch, targetsPatternZoom, targetsGravityPinch, hideControls, setMirrorGap, setStrokeWidth, setGravity, basePulse, manualPulseOffset, mirrorGap, gravity, reversed, startMirrorGap, startPulseOffset, startStrokeWidth, startGravity, strokeWidth])
 
   // The twist/rotation gesture's job is Focus now, not "spin the pattern": rotationSpeed/
-  // mirrorRotationSpeed have their own dedicated gesture mode instead (see targetsSpeedRotation below —
-  // 'speed' is a GestureTarget of its own now, not reachable through this twist at all). Pattern gets a
-  // live, continuous density scrub; mirror gets a discrete, click-stop dial over mirrorLines; speed gets
-  // a live nudge to both cycle speeds together — each reuses the same physical twist, mapped
-  // independently per active target, the same shape every other gesture in this file already uses.
+  // mirrorRotationSpeed live on the canvas's own outer-field drag instead (see useEpicenter.ts). Pattern
+  // gets a live, continuous density scrub; mirror gets a discrete, click-stop dial over mirrorLines;
+  // gravity gets a live, continuous friction scrub, pairing with the gravity-targeting pinch's own
+  // strength control — each reuses the same physical twist, mapped independently per active target,
+  // the same shape every other gesture in this file already uses.
   const rotationGesture = Gesture.Rotation()
     .onStart(() => {
       startTightness.value = tightness.value
+      startBounceFriction.value = bounceFriction.value
       startMirrorLines.value = settings.mirrorLines
       mirrorLinesLive.value = settings.mirrorLines
       // Seeded from the real, current mirrorAlternateColors — not hardcoded false — so a gesture that
@@ -1679,8 +1796,6 @@ export default function SwirlScreen() {
       mirrorLinesBelowZero.value = settings.mirrorAlternateColors
       startMirrorLinesBelowZero.value = settings.mirrorAlternateColors
       mirrorAlternateColorsLive.value = settings.mirrorAlternateColors
-      startForegroundCycleSpeed.value = settings.foregroundCycleSpeed
-      startBackgroundCycleSpeed.value = settings.backgroundCycleSpeed
       runOnJS(hideControls)()
     })
     .onUpdate((event) => {
@@ -1692,6 +1807,13 @@ export default function SwirlScreen() {
       if (targetsPatternRotation) {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         tightness.value = clamp(startTightness.value + degrees * ROTATION_DEGREES_TO_TIGHTNESS_SCALE, MIN_TIGHTNESS, MAX_TIGHTNESS)
+      }
+      // Gravity's own Focus job: friction, live 1:1-tracked the same continuous way tightness is
+      // above — see ROTATION_DEGREES_TO_FRICTION_SCALE's own comment for why this pairs with the
+      // gravity-targeting pinch's strength control.
+      if (targetsGravityRotation) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        bounceFriction.value = clamp(startBounceFriction.value + degrees * ROTATION_DEGREES_TO_FRICTION_SCALE, MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION)
       }
       // Discrete rather than continuous: mirrorLines is a whole-number count, so this steps like a
       // click-stop dial instead of a smooth scrub — one line per ROTATION_DEGREES_PER_MIRROR_LINE of
@@ -1732,17 +1854,6 @@ export default function SwirlScreen() {
           runOnJS(selection)()
         }
       }
-      // Speed mode's own Focus job: nudges foreground and background cycle speed together, by the same
-      // delta — see ROTATION_DEGREES_TO_CYCLE_SPEED_SCALE's own comment for why this preserves whatever
-      // gap already existed between the two rather than forcing them equal. No live SharedValue of its
-      // own to write to first (see targetsSpeedPinch's own comment on zoomSpeed for the same situation),
-      // so this commits straight to both real settings on every update, same as that pinch does.
-      if (targetsSpeedRotation) {
-        const nextForegroundCycleSpeed = clamp(startForegroundCycleSpeed.value + degrees * ROTATION_DEGREES_TO_CYCLE_SPEED_SCALE, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED)
-        const nextBackgroundCycleSpeed = clamp(startBackgroundCycleSpeed.value + degrees * ROTATION_DEGREES_TO_CYCLE_SPEED_SCALE, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED)
-        runOnJS(setForegroundCycleSpeed)(nextForegroundCycleSpeed)
-        runOnJS(setBackgroundCycleSpeed)(nextBackgroundCycleSpeed)
-      }
     })
     .onEnd((event) => {
       if (targetsPatternRotation) {
@@ -1755,11 +1866,18 @@ export default function SwirlScreen() {
         tightness.value = nextTightness
         runOnJS(setTightness)(nextTightness)
       }
-      // mirrorLines and cycle speed both have nothing left to commit here — every mirrorLines step
-      // already went through setMirrorLines live, in onUpdate, the instant it crossed each threshold,
-      // and cycle speed already went through setForegroundCycleSpeed/setBackgroundCycleSpeed live on
-      // every single update for the same reason zoomSpeed's own pinch commits every frame instead of
-      // waiting for release.
+      if (targetsGravityRotation) {
+        // Recomputed from event.rotation rather than trusting bounceFriction.value already landed
+        // here from the last onUpdate — same "onEnd's own event is authoritative" reasoning as
+        // tightness's own commit above.
+        const degrees = (event.rotation * 180) / Math.PI
+        const nextBounceFriction = clamp(startBounceFriction.value + degrees * ROTATION_DEGREES_TO_FRICTION_SCALE, MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION)
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        bounceFriction.value = nextBounceFriction
+        runOnJS(setBounceFriction)(nextBounceFriction)
+      }
+      // mirrorLines has nothing left to commit here — every step already went through setMirrorLines
+      // live, in onUpdate, the instant it crossed each threshold.
       runOnJS(hideControls)()
     })
 
@@ -1786,8 +1904,8 @@ export default function SwirlScreen() {
     .numberOfPointers(2)
     .minDuration(LONG_PRESS_MS)
     .onStart(() => {
-      // flipDirections already fires its own medium() haptic internally, so nothing extra is needed here.
-      runOnJS(flipDirections)()
+      // stopAndSnapGesture already fires its own medium() haptic internally, so nothing extra is needed here.
+      runOnJS(stopAndSnapGesture)()
       runOnJS(hideControls)()
     })
 
@@ -1865,8 +1983,8 @@ export default function SwirlScreen() {
       </GestureDetector>
       {/* Forced on (independent of controlsVisible) while the group sheet is open — see
       OnScreenControls' own Portal, which keeps the trigger stack reachable the whole time. */}
-      <OnScreenControls visible={controlsVisible || groupSheetVisible} frozen={frozen} activeTargets={activeTargets} backDisabled={backDisabled} gestureFanOpen={gestureFanOpen} onGestureFanOpenChange={setGestureFanOpen} onToggleFrozen={toggleFrozen} onRandomize={randomize} onResetSwirl={resetSwirl} onSelectGestureTarget={selectGestureTarget} onRecenter={recenterGestureTarget} onGoBack={goBack} onResetAllSettings={resetAllSettings} onGoForward={goForward} onGoForwardBatch={goForwardBatch} mirrorLines={settings.mirrorLines} onAddMirrorLine={addMirrorLine} onRemoveMirrorLine={removeMirrorLine} onMaxMirrorLines={maxMirrorLines} onMinMirrorLines={minMirrorLines} onCycleShape={nextPattern} onCycleLineType={nextDashStyle} onCycleSides={cycleSides} onResetLineToSolid={resetLineToSolid} gravityRepelling={settings.gravity < 0} onReverseGravity={reverseGravity} speedTargetsMirror={speedTargetsMirror} onToggleSpeedTarget={toggleSpeedTarget} />
-      <EdgeRevealZones active={!controlsVisible} onReveal={revealControls} triggerStackExpanded={settings.triggerStackExpanded} />
+      <OnScreenControls visible={controlsVisible || groupSheetVisible} activeTargets={activeTargets} backDisabled={backDisabled} frozen={frozen} onToggleFrozen={toggleFrozen} onRecenterEverything={recenterEverything} gestureFanOpen={gestureFanOpen} onGestureFanOpenChange={setGestureFanOpen} onSelectGestureTarget={selectGestureTarget} onRecenter={recenterGestureTarget} onGoBack={goBack} onResetAllSettings={resetAllSettings} onGoForward={goForward} onGoForwardBatch={goForwardBatch} mirrorLines={settings.mirrorLines} mirrorAlternateColors={settings.mirrorAlternateColors} onAddMirrorLine={addMirrorLine} onRemoveMirrorLine={removeMirrorLine} onMaxMirrorLines={maxMirrorLines} onMinMirrorLines={minMirrorLines} onCycleShape={nextPattern} onCycleLineType={nextDashStyle} onCycleSides={cycleSides} onResetLineToSolid={resetLineToSolid} gravityRepelling={settings.gravity < 0} onReverseGravity={reverseGravity} onHideControls={hideControls} />
+      <EdgeRevealZones active={!controlsVisible} onReveal={revealControls} triggerStackExpanded={settings.triggerStackExpanded} onPause={pause} onRecenterEverything={recenterEverything} onExpandTriggerStack={expandTriggerStack} onRandomizeEverything={randomizeEverything} />
     </View>
   )
 }

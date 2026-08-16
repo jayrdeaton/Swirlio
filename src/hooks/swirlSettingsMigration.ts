@@ -2,7 +2,7 @@ import { clamp as clampRange } from '@/constants/clamp'
 import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
 import { PATTERN_ORDER } from '@/constants/patterns'
 import { DASH_STYLE_ORDER } from '@/constants/strokeDash'
-import { defaultSettings, MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED } from '@/constants/swirlSettingsRanges'
+import { defaultSettings, MAX_BOUNCE_FRICTION, MAX_CONTROLS_AUTO_HIDE_SPEED, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CONTROLS_AUTO_HIDE_SPEED, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED } from '@/constants/swirlSettingsRanges'
 
 import { GESTURE_TARGET_ORDER } from './useEpicenter'
 import type { SwirlSettings } from './useSwirlSettings'
@@ -83,6 +83,7 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.foregroundCycleSpeed === 'number' ? { foregroundCycleSpeed: clamp(persisted.foregroundCycleSpeed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : legacyCycleSpeed != null ? { foregroundCycleSpeed: legacyCycleSpeed } : null),
       ...(typeof persisted.backgroundCycleSpeed === 'number' ? { backgroundCycleSpeed: clamp(persisted.backgroundCycleSpeed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : legacyCycleSpeed != null ? { backgroundCycleSpeed: legacyCycleSpeed } : null),
       ...(typeof persisted.bounceFriction === 'number' ? { bounceFriction: clamp(persisted.bounceFriction, MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION) } : null),
+      ...(typeof persisted.controlsAutoHideSpeed === 'number' ? { controlsAutoHideSpeed: clamp(persisted.controlsAutoHideSpeed, MIN_CONTROLS_AUTO_HIDE_SPEED, MAX_CONTROLS_AUTO_HIDE_SPEED) } : null),
       // Checked against GESTURE_TARGET_ORDER, same general-fallback approach as pattern/dashStyle
       // below — a retired target (or garbage) falls through to defaultSettings.gestureTarget ('pattern')
       // instead of needing its own migration.

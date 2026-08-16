@@ -11,11 +11,12 @@ import type { SwirlSettings } from '@/hooks/useSwirlSettings'
 
 // Bipolar, unlike the other speed-ish settings on this screen: negative is reverse, 0 is stopped,
 // positive is forward. There's no separate boolean for direction anymore — it lives entirely in the
-// sign of these two values, so rotation and zoom can each run their own direction independently.
+// sign of these two values, so rotation, zoom, and each colour list's own cycle speed can all run
+// their own direction independently.
 export const MIN_ZOOM_SPEED = -10
 export const MAX_ZOOM_SPEED = 10
-export const MIN_CYCLE_SPEED = 0.1
 export const MAX_CYCLE_SPEED = 5
+export const MIN_CYCLE_SPEED = -MAX_CYCLE_SPEED
 export const MIN_STROKE_WIDTH = 1
 export const MAX_STROKE_WIDTH = 36
 export const MIN_TIGHTNESS = 0.4
@@ -52,6 +53,28 @@ export const MAX_HOLE_RADIUS = 1
 export const MIN_BOUNCE_FRICTION = 0
 export const MAX_BOUNCE_FRICTION = 5
 export const DEFAULT_BOUNCE_FRICTION = 1
+// A rate dial, the same shape as bounceFriction just above — not a raw duration — so that "lower
+// value, longer visible" holds smoothly all the way down to 0, rather than a plain seconds-of-delay
+// field where 0 ("off") would have to sit right next to the shortest numeric delay and jump straight
+// to the longest as the slider moves away from it. 0 is a deliberate toy extreme (never auto-hides at
+// all, left visible until an explicit gesture dismisses it — see index.tsx's own hideControls call
+// sites), not a bug; 5 hides as quickly as this control ever will. See controlsAutoHideDelayMs below
+// for how this converts to an actual setTimeout duration.
+export const MIN_CONTROLS_AUTO_HIDE_SPEED = 0
+export const MAX_CONTROLS_AUTO_HIDE_SPEED = 5
+export const DEFAULT_CONTROLS_AUTO_HIDE_SPEED = 1
+// The delay, in ms, at controlsAutoHideSpeed's own default (1) — chosen so that default reproduces
+// exactly this app's original fixed 5-second idle-fade behavior, unchanged, rather than picking some
+// other "round" base and quietly shifting what a fresh install (or an existing save with no persisted
+// controlsAutoHideSpeed) actually does.
+export const CONTROLS_AUTO_HIDE_BASE_MS = 5000
+// Shared by index.tsx (the actual idle-fade setTimeout) and the settings slider's own seconds readout,
+// so both agree on exactly the same number rather than each reimplementing this division. null means
+// "off" — the speed-0 extreme, where there's no delay to compute at all because the idle-fade timer
+// never fires in the first place (see index.tsx's own effect).
+export function controlsAutoHideDelayMs(speed: number): number | null {
+  return speed > 0 ? CONTROLS_AUTO_HIDE_BASE_MS / speed : null
+}
 // A spring constant (acceleration = -gravity * (position - gravityCenter), both in fraction-of-window
 // units) applied every frame gravity is nonzero, not just alongside a release-driven bounce — see
 // useDragPointPhysics.ts's frame callback and its ambient-activation reaction. 0 leaves the epicentre
@@ -120,6 +143,7 @@ export const defaultSettings: SwirlSettings = {
   backgroundColors: DEFAULT_BACKGROUND_COLORS,
   backgroundCycleSpeed: 1,
   bounceFriction: DEFAULT_BOUNCE_FRICTION,
+  controlsAutoHideSpeed: DEFAULT_CONTROLS_AUTO_HIDE_SPEED,
   cropRadius: 1,
   cropShaped: true,
   dashStyle: DEFAULT_DASH_STYLE,

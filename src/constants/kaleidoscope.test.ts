@@ -1,4 +1,4 @@
-import { copyCountForMirrorLines, inverseWedgeVector, reflectionMatrix, rotationMatrix, wedgeAngleDegrees, wedgeClipPath, wedgeContentTransform, wedgeIndexAtPoint, wedgePath, wedgeVector } from './kaleidoscope'
+import { copyCountForMirrorLines, inverseWedgeVector, mirrorLinesFromSigned, reflectionMatrix, rotationMatrix, signedMirrorLines, wedgeAngleDegrees, wedgeClipPath, wedgeContentTransform, wedgeIndexAtPoint, wedgePath, wedgeVector } from './kaleidoscope'
 
 describe('copyCountForMirrorLines', () => {
   it('is 1 at 0 lines (unmirrored), and 2x lines otherwise', () => {
@@ -6,6 +6,43 @@ describe('copyCountForMirrorLines', () => {
     expect(copyCountForMirrorLines(1)).toBe(2)
     expect(copyCountForMirrorLines(2)).toBe(4)
     expect(copyCountForMirrorLines(6)).toBe(12)
+  })
+})
+
+describe('signedMirrorLines', () => {
+  it('negates the magnitude when alternate colors is on, leaves it as-is otherwise', () => {
+    expect(signedMirrorLines(4, false)).toBe(4)
+    expect(signedMirrorLines(4, true)).toBe(-4)
+  })
+
+  it('is exactly 0 at 0 lines regardless of alternate colors, never a negative-zero reading', () => {
+    expect(signedMirrorLines(0, false)).toBe(0)
+    expect(Object.is(signedMirrorLines(0, true), -0)).toBe(false)
+    expect(signedMirrorLines(0, true)).toBe(0)
+  })
+})
+
+describe('mirrorLinesFromSigned', () => {
+  it('splits a signed value back into a non-negative magnitude and the alternate-colors sign', () => {
+    expect(mirrorLinesFromSigned(4)).toEqual({ mirrorLines: 4, mirrorAlternateColors: false })
+    expect(mirrorLinesFromSigned(-4)).toEqual({ mirrorLines: 4, mirrorAlternateColors: true })
+  })
+
+  it('reads 0 as alternate colors off', () => {
+    expect(mirrorLinesFromSigned(0)).toEqual({ mirrorLines: 0, mirrorAlternateColors: false })
+  })
+
+  it('round-trips through signedMirrorLines for any in-range magnitude/sign pair', () => {
+    for (const mirrorLines of [0, 1, 3, 6]) {
+      for (const mirrorAlternateColors of [false, true]) {
+        expect(mirrorLinesFromSigned(signedMirrorLines(mirrorLines, mirrorAlternateColors))).toEqual({
+          mirrorLines,
+          // 0 lines always round-trips to alternate colors off, regardless of the sign fed in — see
+          // signedMirrorLines' own 0/-0 test above.
+          mirrorAlternateColors: mirrorLines === 0 ? false : mirrorAlternateColors
+        })
+      }
+    }
   })
 })
 

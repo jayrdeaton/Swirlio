@@ -243,28 +243,28 @@ export function ControlGroupTopSheetContent() {
 
         {group === 'settings' && (
           <>
-            {/* Its own row rather than trailing into the toggles below on whatever line it happens to
-            wrap to — see Mirror's own comment for why a row break, not a plain gap, is what actually
-            marks a cluster boundary consistently regardless of width. Same "picker vs. the toggles
-            after it" boundary as Pattern's own type picker vs. Crop/Hole shape, or Line's dash style
-            picker vs. Fixed spacing — appearance is a choice among System/Light/Dark, not an on/off
-            preference like everything below it. */}
             <FabRow>
-              {appearanceFabs}
-              {/* Trails the appearance buttons rather than getting its own row: it used to break out
-              on its own trailing line, but as the only item there it left a sparse row with room to
-              spare — same reasoning as Mirror's Alternate colors or Pattern's Crop/Hole sharing their
-              leading row instead of breaking out. The one button in this group that isn't its own
-              preference — every slider and toggle across all five groups, plus the pattern/mirror
-              rotation+position the per-group Reset buttons above already square back up
-              (resetPattern/resetMirror), in one tap. 'Reset' alone (matching Mirror/Pattern/Colors' own
-              buttons) would read as scoped to whichever sheet happens to be open, same as those three —
-              'Reset all' says plainly that this one isn't. themeSettings (appearance/blur/blurTint/
-              harmony — a separate persisted store from useSwirlSettings, see @rific/auto-paper's
-              ThemeProvider) is deliberately left untouched entirely, not just its `color` field:
-              appearance and blur are look preferences the user set deliberately, same reasoning as the
-              mic/shake/tilt/labels carve-outs in resetSettings' own comment, so a flat reset shouldn't
-              silently switch them back either. */}
+              {/* Leads the row — see Mirror's own comment above for why Randomize/Reset front every
+              group now. Settings has no "look" of its own to reroll (its own sheet is toggles/
+              appearance, not a slider-backed field — see useRerollUnits' own rerollUnitsByGroup), so
+              this rerolls every OTHER group's units at once instead — the exact same reroll the shake
+              gesture triggers (see index.tsx's randomize/rerollUnits) — rather than being left out the
+              way a genuinely look-less group otherwise would be. Also reachable without opening this
+              sheet at all, via a long press on either the cog trigger or the always-visible chevron
+              above it (see OnScreenControls) — the corner dice FAB used to be the one dedicated
+              shortcut for this exact reroll; now that it's freed up for Pause/Play, those two long
+              presses are what took its place. */}
+              <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('settings')} />
+              {/* The one button in this group that isn't its own preference — every slider and toggle
+              across all five groups, plus the pattern/mirror rotation+position the per-group Reset
+              buttons above already square back up (resetPattern/resetMirror), in one tap. 'Reset'
+              alone (matching Mirror/Pattern/Colors' own buttons) would read as scoped to whichever
+              sheet happens to be open, same as those three — 'Reset all' says plainly that this one
+              isn't. themeSettings (appearance/blur/blurTint/harmony — a separate persisted store from
+              useSwirlSettings, see @rific/auto-paper's ThemeProvider) is deliberately left untouched
+              entirely, not just its `color` field: appearance and blur are look preferences the user
+              set deliberately, same reasoning as the mic/shake/tilt/labels carve-outs in
+              resetSettings' own comment, so a flat reset shouldn't silently switch them back either. */}
               <ActionFab
                 icon='backup-restore'
                 label='Reset all'
@@ -274,6 +274,12 @@ export function ControlGroupTopSheetContent() {
                   resetMirror()
                 }}
               />
+              {/* Shares this row with Randomize/Reset rather than getting its own forced break — unlike
+              Pattern's type picker or Line's dash style picker (each a wider, self-contained cluster
+              worth its own line), appearance is just 3 more buttons, so it wraps in alongside
+              Randomize/Reset the same ordinary way any FabRow wraps once it runs out of width, instead
+              of always starting on a fresh line regardless of how much room is left on this one. */}
+              {appearanceFabs}
             </FabRow>
             <FabRow>
               <SettingToggleFab icon='blur' label='Blur' value={themeSettings.blur} onValueChange={(value) => setThemeSettings({ blur: value })} />
@@ -302,13 +308,6 @@ export function ControlGroupTopSheetContent() {
               `vibrate` icon, a `vibrate`/`vibrate-off` pair read as near-duplicates at a glance despite
               meaning unrelated things (a physical shake gesture vs. press feedback on every tap). */}
               {!isWeb && <SettingToggleFab icon='gesture-tap' label='Haptics' value={settings.hapticsEnabled} onValueChange={setHapticsEnabled} />}
-              {/* Tilt (DeviceMotion) no-ops on web already (see useTiltGravityCenter.ts's own
-              Platform.OS check) — hidden here for the same reason every other web-inert toggle is
-              (see isWeb's own comment). Drives whichever gesture target is currently active (pattern/
-              mirror/gravity/speed — see useEpicenter.ts and index.tsx's own tilt wiring), not just
-              gravity, so it lives here as a global input-mode preference rather than under any one
-              mode-specific group. */}
-              {!isWeb && <SettingToggleFab icon='axis-arrow' label='Tilt control' value={settings.tiltEnabled} onValueChange={setTiltEnabled} />}
             </FabRow>
           </>
         )}
@@ -346,6 +345,17 @@ export function ControlGroupTopSheetContent() {
             gravityMarkerVisibility.tsx's own comment for why this reads from a dedicated
             sibling-shared context instead of useSwirlSettings. */}
             <SettingToggleFab icon='eye' label='Visible' value={gravityMarkerVisible} onValueChange={setGravityMarkerVisible} />
+            {/* Tilt (DeviceMotion) no-ops on web already (see useTiltGravityCenter.ts's own
+            Platform.OS check) — hidden here for the same reason every other web-inert toggle is (see
+            isWeb's own comment). Drives whichever gesture target is currently active (pattern/mirror/
+            gravity/speed — see useEpicenter.ts and index.tsx's own tilt wiring), not just gravity, so
+            it's still a global input-mode preference rather than something this group alone owns —
+            it just lives here now as the same kind of physics-feel tuning as Friction/Gravity/Follow
+            speed above, rather than filed under Settings alongside Labels/Haptics/Shake. Left out of
+            this group's own Randomize above for the same reason Shake/Mic are (see resetSettings' own
+            comment and useRerollUnits.tsx): a behavioral device-capability toggle the user sets
+            deliberately, not a look to reroll. */}
+            {!isWeb && <SettingToggleFab icon='axis-arrow' label='Tilt control' value={settings.tiltEnabled} onValueChange={setTiltEnabled} />}
           </FabRow>
         )}
       </View>

@@ -8,9 +8,29 @@ import { tiltToScreenAxes } from '@/constants/tiltOrientation'
 
 const UPDATE_INTERVAL_MS = 100
 const NORMALIZE_RADIANS = Math.PI / 4
+// A phone resting flat/steady still reports a few tenths of a degree of gamma/beta jitter from the
+// accelerometer/gyroscope fusion — real noise, not an intentional tilt, but downstream it reads as
+// "never quite at rest": gravityCenterX/Y keeps re-targeting its spring every UPDATE_INTERVAL_MS,
+// which keeps the epicentre nudging (see Spiral.tsx's own `radius` comment) enough to occasionally
+// cross RADIUS_QUANTUM_PX and force a full pattern-geometry rebuild — continuously, forever, with the
+// phone just sitting there. Only reproduces on real hardware (the simulator reports no motion data at
+// all, and tilt is disabled outright on web), which is why it doesn't show up testing either of those.
+// Fixed at the source rather than by loosening GRAVITY_SETTLE_DISTANCE or the quantum downstream: a
+// deadzone this small (~1.1°) is well under any deliberate tilt but comfortably clears typical
+// stationary sensor noise, so it changes nothing about how tilting the device actually feels.
+const TILT_NOISE_DEADZONE = 0.03
 // Shared with index.tsx's own effectiveGravityCenterX/Y, which deliberately eases with this exact
 // same feel on a manual-to-tilt handoff — see that call site's own comment for why.
 export const TILT_EASE_SPRING = { damping: 20, stiffness: 90 } as const
+
+// Rescales the deadzone back out of the range rather than just clamping it away, so the far end of a
+// real tilt still reaches exactly ±1 (a hard "subtract and clamp" would leave the last DEADZONE worth
+// of physical rotation unreachable). Runs on the JS thread inside the DeviceMotion listener below, not
+// a worklet — nothing here touches a SharedValue.
+function applyDeadzone(ratio: number, deadzone: number): number {
+  if (Math.abs(ratio) < deadzone) return 0
+  return (Math.sign(ratio) * (Math.abs(ratio) - deadzone)) / (1 - deadzone)
+}
 
 // Tilt's own raw signal, in two shapes: gravityCenterX/Y (the eased, screen-edge-scaled pair) is what
 // index.tsx/useEpicenter.ts feed into whichever draggable point (pattern epicentre, mirror anchor,
@@ -67,8 +87,8 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
           // rolling smoothly along the edge. Honoring a physical-orientation swap the UI never actually
           // makes was the bug, not a real screen rotation to compensate for.
           const screenTilt = tiltToScreenAxes(rotation.gamma, rotation.beta, 0)
-          const ratioX = clamp(screenTilt.x / NORMALIZE_RADIANS, -1, 1)
-          const ratioY = clamp(screenTilt.y / NORMALIZE_RADIANS, -1, 1)
+          const ratioX = applyDeadzone(clamp(screenTilt.x / NORMALIZE_RADIANS, -1, 1), TILT_NOISE_DEADZONE)
+          const ratioY = applyDeadzone(clamp(screenTilt.y / NORMALIZE_RADIANS, -1, 1), TILT_NOISE_DEADZONE)
           rawX.value = ratioX * maxOffset
           rawY.value = ratioY * maxOffset
           rawTiltX.value = ratioX

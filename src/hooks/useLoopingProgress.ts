@@ -45,9 +45,11 @@ export type LoopingProgress = {
 export function useLoopingProgress(baseDurationMs: number, speed: number, frozen: boolean): LoopingProgress {
   const progress = useSharedValue(0)
   const paused = useSharedValue(false)
-  // Laps per ms. Always >= 0: every call site already passes Math.abs(speed) and routes direction
-  // (rotation sign, zoom's reversed flag) through a mechanism of its own, so progress only ever counts
-  // forward — the wrap below assumes that.
+  // Laps per ms. Usually >= 0: most call sites pass Math.abs(speed) and route direction (rotation
+  // sign, zoom's reversed flag) through a mechanism of its own. Colour cycle speed is the one
+  // exception — it passes its raw signed speed straight through with no separate direction flag, since
+  // the wrap below (next - Math.floor(next)) already produces a correct [0,1) result for a negative
+  // rate too, Math.floor rounding toward -Infinity same as it does for a positive one.
   const rate = useSharedValue(frozen ? 0 : speed / baseDurationMs)
 
   useEffect(() => {

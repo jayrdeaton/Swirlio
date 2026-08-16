@@ -1,5 +1,5 @@
 import { mapAudioBand } from '@/constants/audioMapping'
-import { MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_ROTATION_SPEED, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_HOLE_RADIUS, MIN_MIRROR_GAP, MIN_TIGHTNESS } from '@/constants/swirlSettingsRanges'
+import { MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_ROTATION_SPEED, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_CROP_RADIUS, MIN_HOLE_RADIUS, MIN_MIRROR_GAP, MIN_TIGHTNESS } from '@/constants/swirlSettingsRanges'
 import type { SwirlSettings } from '@/hooks/useSwirlSettings'
 
 // While audio-reactive mode is on, every animated value it drives quantizes its audio-mapped speed to
@@ -71,8 +71,8 @@ export type EffectiveSwirlValues = {
 export function computeEffectiveSwirlValues(settings: SwirlSettings, audioRotationReversed: boolean, treble: number, mid: number, loudness: number): EffectiveSwirlValues {
   const audioReactiveEnabled = settings.audioReactiveEnabled
   // audioRotationReversed only ever flips this one band's sign — treble's own mapAudioBand output is
-  // always non-negative, so without it there'd be nothing for index.tsx's own flipDirections to act on
-  // while the mic is driving rotation instead of the rotationSpeed slider. Quantized first, then
+  // always non-negative, so without it there'd be nothing for index.tsx's own stopAndSnapGesture to act
+  // on while the mic is driving rotation instead of the rotationSpeed setting. Quantized first, then
   // signed, so the sign flip itself never lands mid-step and isn't part of what gets quantized.
   const effectiveRotationSpeed = audioReactiveEnabled ? (audioRotationReversed ? -1 : 1) * quantizeAudioSpeed(mapAudioBand(treble, 0, MAX_ROTATION_SPEED), 0, MAX_ROTATION_SPEED) : settings.rotationSpeed
   const effectiveMirrorRotationSpeed = audioReactiveEnabled ? -effectiveRotationSpeed : settings.mirrorRotationSpeed
@@ -82,7 +82,11 @@ export function computeEffectiveSwirlValues(settings: SwirlSettings, audioRotati
   // rippleModulus(rippleSpacing(..., tightness), ...) times zoom speed), so driving both from mid
   // keeps that formula internally consistent instead of only half of it reacting.
   const effectiveTightness = audioReactiveEnabled ? mapAudioBand(mid, MIN_TIGHTNESS, MAX_TIGHTNESS) : settings.tightness
-  const effectiveForegroundCycleSpeed = audioReactiveEnabled ? quantizeAudioSpeed(mapAudioBand(loudness, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED), MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) : settings.foregroundCycleSpeed
+  // 0, not the now-bipolar MIN_CYCLE_SPEED — same "audio-reactive mode stays forward-only" choice
+  // rotation/zoom already make above (mapAudioBand(treble/mid, 0, ...), not their own bipolar MIN). A
+  // reversed cycle direction as an undiscoverable side effect of how loud the room is would read as
+  // broken, not as a feature.
+  const effectiveForegroundCycleSpeed = audioReactiveEnabled ? quantizeAudioSpeed(mapAudioBand(loudness, 0, MAX_CYCLE_SPEED), 0, MAX_CYCLE_SPEED) : settings.foregroundCycleSpeed
   const effectiveBackgroundCycleSpeed = audioReactiveEnabled ? effectiveForegroundCycleSpeed : settings.backgroundCycleSpeed
   // Same loudness reading driving cycle speed above also opens up the crop/hole/mirror gap — quiet
   // stretches pull the pattern back to a small, solid, unhollowed, seamless shape (near

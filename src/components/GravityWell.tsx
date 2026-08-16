@@ -12,6 +12,9 @@ import { gravityParticleAngleRad, gravityParticleDotRadius, gravityParticleOpaci
 // more intense effect visibly reads as a bigger hole regardless of which direction it's acting in.
 export const GRAVITY_HOLE_MIN_RADIUS_PX = 14
 export const GRAVITY_HOLE_MAX_RADIUS_PX = 50
+// Thin foreground-colored ring traced right at the hole's own edge — just enough to read as a distinct
+// shape against a background-colored pattern behind it that's close in value to the hole's fill itself.
+const GRAVITY_HOLE_OUTLINE_WIDTH_PX = 1.5
 // How many particles orbit the well — see GravityParticle. Spread across the whole hole via
 // gravityParticleAngleRad's golden-angle placement, so this many is enough to read as a field rather
 // than a scattering of individual dots without looking crowded.
@@ -80,9 +83,10 @@ type GravityWellProps = {
 // Contained entirely within the hole itself (see gravityParticleRadius's own 0..holeRadius bound), the
 // way matter stays inside a black hole's event horizon rather than drifting into the pattern beyond it.
 // The hole is drawn in the exact same `background` value the full canvas already uses (see Spiral's own
-// `background`), so it reads as a genuine hole punched through whatever pattern content sits under it,
-// not a shape trying to contrast against the canvas — filled, not stroked, unlike the old two-ring
-// placeholder this replaced.
+// `background`), so it reads as a genuine hole punched through whatever pattern content sits under it —
+// a thin foreground-colored outline traced at the hole's edge (drawn last, on top of the particles) is
+// what keeps that hole legible as a shape rather than just a blur of dots when it's close in value to
+// whatever's directly behind it.
 export function GravityWell({ x, y, holeRadius, gravity, gravityParticleProgress, foreground, background }: GravityWellProps) {
   return (
     <Group>
@@ -90,6 +94,7 @@ export function GravityWell({ x, y, holeRadius, gravity, gravityParticleProgress
       {GRAVITY_PARTICLE_INDICES.map((index) => (
         <GravityParticle key={index} index={index} x={x} y={y} gravity={gravity} gravityParticleProgress={gravityParticleProgress} holeRadius={holeRadius} foreground={foreground} />
       ))}
+      <Circle cx={x} cy={y} r={holeRadius} style="stroke" strokeWidth={GRAVITY_HOLE_OUTLINE_WIDTH_PX} color={foreground} />
     </Group>
   )
 }

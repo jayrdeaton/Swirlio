@@ -18,11 +18,14 @@ const RANDOMIZE_MAX_FOREGROUND_COLORS = 3
 // Broad: everything that's purely "what does this look like" gets rerolled — colors, pattern,
 // sides/points/petals, dash style, mirror count, its wedge gap, and its alternating-colors toggle,
 // tightness, stroke width, crop/hole radius, whether either traces the pattern's own shape, and bounce
-// friction/gravity strength too. Left out on purpose: rotation/zoom/mirror-rotation/color-cycle speed
-// (deliberate tuning, not a look-based surprise — see index.tsx's own flipDirections for the one
-// randomize-adjacent thing speed does get), shake/tilt/mic (behavioral device-capability toggles,
-// never touched by this), fixed spacing (a layout-precision preference, not a look to reroll), and
-// showLabels (an interface preference, not part of the art either). Doesn't recenter the epicentre,
+// friction/gravity strength too. Left out on purpose: rotation/zoom/mirror-rotation/colour-cycle speed
+// (deliberate tuning, not a look-based surprise — rotation/zoom/mirror-rotation live entirely on the
+// canvas's own outer-field drag, see useEpicenter.ts/index.tsx's stopAndSnapGesture, and colour-cycle
+// speed is gesture-adjustable the same way, via mirror's own outer-field radial axis — none of the four
+// have a reroll-adjacent gesture of their own to protect from being silently overwritten by Randomize),
+// shake/tilt/mic (behavioral device-capability toggles, never touched by this), fixed spacing (a
+// layout-precision preference, not a look to reroll), and showLabels (an interface preference, not part
+// of the art either). Doesn't recenter the epicentre,
 // the gravity handle, or touch activeTargets — those are session-only, position-preserving state, not
 // persisted look settings; that's the gravity group's own Reset button's job instead (see index.tsx's
 // resetGravityPosition), same "Randomize touches persisted values, Reset also squares up position"
@@ -42,15 +45,43 @@ const RANDOMIZE_MAX_FOREGROUND_COLORS = 3
 // out as its own audioDriven entry.
 // Each unit also carries which top-sheet group it belongs to — see ControlGroupTopSheetContent's
 // per-group "Randomize" buttons (wired through rerollUnitsByGroup below), which reroll only one
-// group's units instead of everything randomize() in index.tsx touches. Calls useSwirlSettings()
-// itself rather than taking settings/setters as params — every field/setter here already lives on
-// that one context, so there's nothing for index.tsx to thread through by hand.
+// group's units instead of every unit in rerollUnits at once. Calls useSwirlSettings() itself rather
+// than taking settings/setters as params — every field/setter here already lives on that one context,
+// so there's nothing for index.tsx to thread through by hand.
 export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGroup: Record<ControlGroup, (() => void)[]> } {
   const { settings, setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setPattern, setPolygonSides, setStrokeWidth, setTightness } = useSwirlSettings()
 
   return useMemo<{ rerollUnits: (() => void)[]; rerollUnitsByGroup: Record<ControlGroup, (() => void)[]> }>(() => {
     const randomInRange = (min: number, max: number) => min + Math.random() * (max - min)
     const randomInt = (min: number, max: number) => Math.floor(randomInRange(min, max + 1))
+    // Every slider-backed reroll below draws from one of these three, not a flat 0-1 Math.random() —
+    // full range always reachable (a reroll should never make a value literally impossible), but
+    // skewed so the "boring/safe" outcome is common and the extreme is rare rather than equally likely.
+    // Raising a uniform [0,1] sample to a power > 1 concentrates it toward 0; taking it to the power
+    // 1/that instead concentrates it toward 1 — same SKEW_POWER either way, just which end it leans on.
+    const SKEW_POWER = 2.5
+    // One-sided: for a field where one specific end reads as "barely anything left" (cropRadius near
+    // its MIN — almost fully clipped away; holeRadius/mirrorGap near their MAX — hole swallows the
+    // crop, wedge shrinks to a sliver; bounceFriction near its MAX — "barely a bounce at all before it
+    // comes to rest," see its own comment in swirlSettingsRanges.ts) and the other end is both the
+    // field's own default and the fully-visible/full-effect result.
+    const skewedInRange = (min: number, max: number, towardMin: boolean) => {
+      const u = Math.random()
+      const t = towardMin ? u ** SKEW_POWER : u ** (1 / SKEW_POWER)
+      return min + t * (max - min)
+    }
+    // Two-sided: for a field whose own default sits at the middle of its range rather than an edge
+    // (tightness/strokeWidth — see DEFAULT_STROKE_WIDTH/DEFAULT_TIGHTNESS's own "dead center" comment)
+    // or that's signed around a true middle (gravity — 0 is no pull, negative repels, positive
+    // attracts, and neither sign is more "correct" than the other). Sticks near the center most of the
+    // time but still reaches all the way to either true extreme occasionally, symmetrically.
+    const skewedTowardCenter = (min: number, max: number) => {
+      const center = (min + max) / 2
+      const halfRange = (max - min) / 2
+      const magnitude = Math.random() ** SKEW_POWER
+      const sign = Math.random() < 0.5 ? -1 : 1
+      return center + sign * magnitude * halfRange
+    }
     const audioReactive = settings.audioReactiveEnabled
 
     const units: { group: ControlGroup; audioDriven: boolean; reroll: () => void }[] = [
@@ -86,30 +117,35 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
       },
       { group: 'line', audioDriven: false, reroll: () => setDashStyle(DASH_STYLE_ORDER[Math.floor(Math.random() * DASH_STYLE_ORDER.length)]) },
       { group: 'mirror', audioDriven: false, reroll: () => setMirrorLines(randomInt(MIN_MIRROR_LINES, MAX_MIRROR_LINES)) },
-      { group: 'mirror', audioDriven: true, reroll: () => setMirrorGap(randomInRange(MIN_MIRROR_GAP, MAX_MIRROR_GAP)) },
+      { group: 'mirror', audioDriven: true, reroll: () => setMirrorGap(skewedInRange(MIN_MIRROR_GAP, MAX_MIRROR_GAP, true)) },
       { group: 'mirror', audioDriven: false, reroll: () => setMirrorAlternateColors(Math.random() < 0.5) },
-      { group: 'line', audioDriven: true, reroll: () => setTightness(randomInRange(MIN_TIGHTNESS, MAX_TIGHTNESS)) },
-      { group: 'line', audioDriven: true, reroll: () => setStrokeWidth(randomInRange(MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)) },
-      { group: 'pattern', audioDriven: true, reroll: () => setCropRadius(randomInRange(MIN_CROP_RADIUS, MAX_CROP_RADIUS)) },
+      { group: 'line', audioDriven: true, reroll: () => setTightness(skewedTowardCenter(MIN_TIGHTNESS, MAX_TIGHTNESS)) },
+      { group: 'line', audioDriven: true, reroll: () => setStrokeWidth(skewedTowardCenter(MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)) },
+      { group: 'pattern', audioDriven: true, reroll: () => setCropRadius(skewedInRange(MIN_CROP_RADIUS, MAX_CROP_RADIUS, false)) },
       { group: 'pattern', audioDriven: false, reroll: () => setCropShaped(Math.random() < 0.5) },
-      { group: 'pattern', audioDriven: true, reroll: () => setHoleRadius(randomInRange(MIN_HOLE_RADIUS, MAX_HOLE_RADIUS)) },
+      { group: 'pattern', audioDriven: true, reroll: () => setHoleRadius(skewedInRange(MIN_HOLE_RADIUS, MAX_HOLE_RADIUS, true)) },
       { group: 'pattern', audioDriven: false, reroll: () => setHoleShaped(Math.random() < 0.5) },
       // Neither is audio-driven — audio-reactive mode overrides stroke width/tightness/crop/hole
       // radius/mirror gap (see the comment above), not the physics sliders.
-      { group: 'gravity', audioDriven: false, reroll: () => setBounceFriction(randomInRange(MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION)) },
-      { group: 'gravity', audioDriven: false, reroll: () => setGravity(randomInRange(MIN_GRAVITY, MAX_GRAVITY)) }
+      { group: 'gravity', audioDriven: false, reroll: () => setBounceFriction(skewedInRange(MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION, true)) },
+      { group: 'gravity', audioDriven: false, reroll: () => setGravity(skewedTowardCenter(MIN_GRAVITY, MAX_GRAVITY)) }
     ]
 
     const filteredUnits = units.filter((unit) => !audioReactive || !unit.audioDriven)
+    const allRerolls = filteredUnits.map((unit) => unit.reroll)
     const rerollUnitsByGroup: Record<ControlGroup, (() => void)[]> = {
       colors: filteredUnits.filter((unit) => unit.group === 'colors').map((unit) => unit.reroll),
       gravity: filteredUnits.filter((unit) => unit.group === 'gravity').map((unit) => unit.reroll),
       line: filteredUnits.filter((unit) => unit.group === 'line').map((unit) => unit.reroll),
       mirror: filteredUnits.filter((unit) => unit.group === 'mirror').map((unit) => unit.reroll),
       pattern: filteredUnits.filter((unit) => unit.group === 'pattern').map((unit) => unit.reroll),
-      settings: []
+      // Settings has no "look" of its own to reroll — its sheet is toggles/appearance, not a units
+      // entry above — so its own Randomize button (and the trigger stack's cog/chevron long press,
+      // see OnScreenControls) reroll every OTHER group's units at once instead, the same "randomize
+      // everything" the shake gesture already does (see index.tsx's own randomize/rerollUnits).
+      settings: allRerolls
     }
 
-    return { rerollUnits: filteredUnits.map((unit) => unit.reroll), rerollUnitsByGroup }
+    return { rerollUnits: allRerolls, rerollUnitsByGroup }
   }, [settings.audioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setPattern, setPolygonSides, setStrokeWidth, setTightness])
 }

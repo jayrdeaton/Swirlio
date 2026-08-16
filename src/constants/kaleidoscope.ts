@@ -10,6 +10,30 @@ export const MIN_MIRROR_LINES = 0
 // just a simulator one.
 export const MAX_MIRROR_LINES = 6
 
+// A UI-only "signed" view of the mirrorLines/mirrorAlternateColors pair — settings.mirrorLines is
+// always a non-negative magnitude (see setMirrorLines' own clamp in useSwirlSettings.tsx) and
+// mirrorAlternateColors is a wholly separate boolean, but the Focus twist gesture over 'mirror' (see
+// index.tsx's rotationGesture) already treats them together as one signed dial: negative means
+// "alternating colors on", so dialing past 0 rolls into a mirrored bonus gear instead of dead-ending.
+// Factored out here so the Add/Remove mirror transport FABs (see index.tsx's addMirrorLine/
+// removeMirrorLine/maxMirrorLines/minMirrorLines) can walk the exact same scale a tap/long-press at a
+// time, instead of only ever touching the non-negative mirrorLines count the way they used to.
+export function signedMirrorLines(mirrorLines: number, mirrorAlternateColors: boolean): number {
+  'worklet'
+  // mirrorLines !== 0 guards against returning -0 at the origin — harmless to every consumer here
+  // (comparisons/Math.abs all treat -0 and 0 alike), but a clean 0 is less surprising to read back out.
+  return mirrorAlternateColors && mirrorLines !== 0 ? -mirrorLines : mirrorLines
+}
+
+// The inverse of signedMirrorLines — splits a signed value back into the two independent fields
+// setMirrorLines/setMirrorAlternateColors each actually take. Doesn't clamp on its own (callers step/
+// jump the signed value themselves, typically to within [-MAX_MIRROR_LINES, MAX_MIRROR_LINES], before
+// calling this) — matching signedMirrorLines' own "just the sign math" scope.
+export function mirrorLinesFromSigned(signed: number): { mirrorLines: number; mirrorAlternateColors: boolean } {
+  'worklet'
+  return { mirrorLines: Math.abs(signed), mirrorAlternateColors: signed < 0 }
+}
+
 // A dihedral kaleidoscope's wedges always come in mirrored pairs — one direct copy and one reflected
 // copy per rotational step — so the total is always even once there's at least one mirror line. 0
 // lines is the one exception: nothing to reflect, just the single unmirrored copy.

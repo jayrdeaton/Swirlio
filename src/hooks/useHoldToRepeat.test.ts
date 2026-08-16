@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react-native'
 
-import { useHoldToRepeat } from './useHoldToRepeat'
+import { useHoldToRepeat, useHoldToRepeatByKey } from './useHoldToRepeat'
 
 const REPEAT_MS = 400
 
@@ -139,6 +139,125 @@ describe('useHoldToRepeat', () => {
       unmount()
     })
 
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(REPEAT_MS * 10)
+    })
+    expect(action).toHaveBeenCalledTimes(callsBeforeUnmount)
+  })
+})
+
+describe('useHoldToRepeatByKey', () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  it('calls the action with the held key immediately, then again every repeatMs while that key stays held', async () => {
+    const action = jest.fn()
+    const { result, unmount } = await renderHook(() => useHoldToRepeatByKey(action, REPEAT_MS))
+
+    await act(async () => {
+      result.current.onLongPress('mirror')()
+    })
+    expect(action).toHaveBeenCalledTimes(1)
+    expect(action).toHaveBeenLastCalledWith('mirror')
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(REPEAT_MS)
+    })
+    expect(action).toHaveBeenCalledTimes(2)
+    expect(action).toHaveBeenLastCalledWith('mirror')
+
+    await act(async () => {
+      unmount()
+    })
+  })
+
+  // The whole reason this hook exists over reusing useHoldToRepeat once per target (see its own
+  // comment) — two independently-held keys must keep entirely separate timers, neither stopping nor
+  // restarting the other's.
+  it('keeps two different keys repeating independently — releasing one leaves the other running', async () => {
+    const action = jest.fn()
+    const { result, unmount } = await renderHook(() => useHoldToRepeatByKey(action, REPEAT_MS))
+
+    await act(async () => {
+      result.current.onLongPress('mirror')()
+      result.current.onLongPress('pattern')()
+    })
+    expect(action).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      result.current.onPressOut('mirror')()
+    })
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(REPEAT_MS * 3)
+    })
+
+    const mirrorCalls = action.mock.calls.filter(([key]) => key === 'mirror').length
+    const patternCalls = action.mock.calls.filter(([key]) => key === 'pattern').length
+    expect(mirrorCalls).toBe(1)
+    expect(patternCalls).toBeGreaterThan(1)
+
+    await act(async () => {
+      unmount()
+    })
+  })
+
+  it('stops on onPressOut for the released key — no further calls no matter how long afterward', async () => {
+    const action = jest.fn()
+    const { result, unmount } = await renderHook(() => useHoldToRepeatByKey(action, REPEAT_MS))
+
+    await act(async () => {
+      result.current.onLongPress('settings')()
+    })
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(REPEAT_MS * 2)
+    })
+    const callsBeforeRelease = action.mock.calls.length
+
+    await act(async () => {
+      result.current.onPressOut('settings')()
+    })
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(REPEAT_MS * 10)
+    })
+    expect(action).toHaveBeenCalledTimes(callsBeforeRelease)
+
+    await act(async () => {
+      unmount()
+    })
+  })
+
+  it('onPressOut for a key that was never held is a harmless no-op', async () => {
+    const action = jest.fn()
+    const { result, unmount } = await renderHook(() => useHoldToRepeatByKey(action, REPEAT_MS))
+
+    await act(async () => {
+      result.current.onPressOut('settings')()
+    })
+    expect(action).not.toHaveBeenCalled()
+
+    await act(async () => {
+      unmount()
+    })
+  })
+
+  it('stops every still-held key on unmount rather than leaking their intervals', async () => {
+    const action = jest.fn()
+    const { result, unmount } = await renderHook(() => useHoldToRepeatByKey(action, REPEAT_MS))
+
+    await act(async () => {
+      result.current.onLongPress('mirror')()
+      result.current.onLongPress('pattern')()
+    })
+    const callsBeforeUnmount = action.mock.calls.length
+
+    await act(async () => {
+      unmount()
+    })
     await act(async () => {
       await jest.advanceTimersByTimeAsync(REPEAT_MS * 10)
     })

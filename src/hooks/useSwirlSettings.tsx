@@ -1,14 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import * as SplashScreen from 'expo-splash-screen'
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { Platform } from 'react-native'
 
 import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
 import { PatternType } from '@/constants/patterns'
 import { DashStyle } from '@/constants/strokeDash'
-import { defaultSettings, MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED } from '@/constants/swirlSettingsRanges'
+import { defaultSettings, MAX_BOUNCE_FRICTION, MAX_CONTROLS_AUTO_HIDE_SPEED, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CONTROLS_AUTO_HIDE_SPEED, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED } from '@/constants/swirlSettingsRanges'
 
 import { loadSkiaWeb } from './loadSkiaWeb'
+import { useReady } from './splashGate'
 import { clamp, clampInt, mergePersistedSettings } from './swirlSettingsMigration'
 import { GestureTarget } from './useEpicenter'
 
@@ -23,6 +23,14 @@ export type SwirlSettings = {
   backgroundColors: string[]
   backgroundCycleSpeed: number
   bounceFriction: number
+  // A rate dial for the on-screen controls' idle-fade timer, the same "0/5" shape as bounceFriction
+  // just above — not a raw delay in seconds. 0 means the controls never auto-hide from inactivity at
+  // all (they still respond to every explicit hide gesture — see index.tsx's own hideControls call
+  // sites, which this setting doesn't touch); 5 fades them out as quickly as this control goes. See
+  // constants/swirlSettingsRanges.ts's controlsAutoHideDelayMs for the actual seconds this converts to
+  // — stored as a rate rather than a duration specifically so "lower value, longer visible" holds all
+  // the way down to 0, instead of 0 sitting awkwardly next to whatever the shortest numeric delay is.
+  controlsAutoHideSpeed: number
   // The distance from the center (as a fraction of the pattern's own radius) at which it's
   // hard-clipped away — 1 reaches the true corner, smaller values crop further in. See Spiral.tsx's
   // fadeCircleAnimatedProps for the render-side math.
@@ -45,7 +53,7 @@ export type SwirlSettings = {
   fixedSpacing: boolean
   foregroundColors: string[]
   foregroundCycleSpeed: number
-  // Which point the one-finger drag/two-finger twist targets — pattern/mirror/gravity/speed, see
+  // Which point the one-finger drag/two-finger twist targets — pattern/mirror/gravity, see
   // useEpicenter.ts's GestureTarget. Only ever read once, as the seed for index.tsx's own activeTargets
   // state at mount — index.tsx owns the field from there on (both the live UI state and writing back
   // here via setGestureTarget), rather than this being the single source of truth on every render, the
@@ -133,6 +141,7 @@ type SwirlSettingsContextValue = {
   setBackgroundColors: (colors: string[]) => void
   setBackgroundCycleSpeed: (speed: number) => void
   setBounceFriction: (friction: number) => void
+  setControlsAutoHideSpeed: (speed: number) => void
   setCropRadius: (cropRadius: number) => void
   setCropShaped: (shaped: boolean) => void
   setDashStyle: (dashStyle: DashStyle) => void
@@ -227,9 +236,10 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
     return () => clearTimeout(id)
   }, [hydrated, settings])
 
-  useEffect(() => {
-    if (ready) SplashScreen.hideAsync()
-  }, [ready])
+  // Reports into the shared splash gate (see splashGate.ts) rather than hiding the splash screen
+  // itself — it only hides once every other named gate (currently just 'fonts', see _layout.tsx's
+  // FontsGate) has also reported ready.
+  useReady('persistence', ready)
 
   const value = useMemo<SwirlSettingsContextValue>(
     () => ({
@@ -239,6 +249,7 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setBackgroundColors: (colors) => setSettings((prev) => (colors.length > 0 ? { ...prev, backgroundColors: colors } : prev)),
       setBackgroundCycleSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, backgroundCycleSpeed: clamp(speed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : prev)),
       setBounceFriction: (friction) => setSettings((prev) => (Number.isFinite(friction) ? { ...prev, bounceFriction: clamp(friction, MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION) } : prev)),
+      setControlsAutoHideSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, controlsAutoHideSpeed: clamp(speed, MIN_CONTROLS_AUTO_HIDE_SPEED, MAX_CONTROLS_AUTO_HIDE_SPEED) } : prev)),
       setCropRadius: (cropRadius) => setSettings((prev) => (Number.isFinite(cropRadius) ? { ...prev, cropRadius: clamp(cropRadius, MIN_CROP_RADIUS, MAX_CROP_RADIUS) } : prev)),
       setCropShaped: (shaped) => setSettings((prev) => ({ ...prev, cropShaped: shaped })),
       setDashStyle: (dashStyle) => setSettings((prev) => ({ ...prev, dashStyle })),
@@ -270,20 +281,22 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       // per-field validation to run since defaultSettings is already known-valid, and going through
       // each setter would also mean this drifts out of sync the moment a new field's setter gains its
       // own extra branching (e.g. the empty-list guards on colors) that a plain reset should ignore
-      // anyway. audioReactiveEnabled, gestureTarget, hapticsEnabled, shakeEnabled, showLabels, and
-      // tiltEnabled are all carried over from whatever they already were, not reset to their
-      // defaults — they're device-capability toggles (is the mic feeding this, does a shake
-      // randomize, does tilting the device warp it, do presses buzz), chrome-density preferences
-      // (showLabels), or a tool mode (gestureTarget — which point a drag targets has no bearing on
+      // anyway. audioReactiveEnabled, controlsAutoHideSpeed, gestureTarget, hapticsEnabled,
+      // shakeEnabled, showLabels, and tiltEnabled are all carried over from whatever they already
+      // were, not reset to their defaults — they're device-capability toggles (is the mic feeding
+      // this, does a shake randomize, does tilting the device warp it, do presses buzz), chrome-
+      // density/interface preferences (showLabels, controlsAutoHideSpeed — same bucket, see its own
+      // field comment), or a tool mode (gestureTarget — which point a drag targets has no bearing on
       // what the art itself looks like), not look/tuning preferences like everything else this
       // button touches. audioReactiveEnabled is live session state tied to a mic the user just
-      // granted; shakeEnabled/tiltEnabled/showLabels/gestureTarget/hapticsEnabled are explicit
-      // choices the user made — either way, a flat reset shouldn't silently switch them back on/off
-      // (or back to 'pattern') underneath someone.
+      // granted; shakeEnabled/tiltEnabled/showLabels/controlsAutoHideSpeed/gestureTarget/
+      // hapticsEnabled are explicit choices the user made — either way, a flat reset shouldn't
+      // silently switch them back on/off (or back to 'pattern') underneath someone.
       resetSettings: () =>
         setSettings((prev) => ({
           ...defaultSettings,
           audioReactiveEnabled: prev.audioReactiveEnabled,
+          controlsAutoHideSpeed: prev.controlsAutoHideSpeed,
           gestureTarget: prev.gestureTarget,
           hapticsEnabled: prev.hapticsEnabled,
           shakeEnabled: prev.shakeEnabled,

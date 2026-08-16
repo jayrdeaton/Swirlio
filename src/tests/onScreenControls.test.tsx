@@ -50,6 +50,14 @@ jest.mock('@/hooks/controlGroups', () => ({
   useControlGroupSheetDrawer: () => ({ isVisible: mockGroupSheetOpen, close: mockCloseGroupSheet })
 }))
 
+// Backs each group trigger's own long-press bonus (see OnScreenControls' trigger-stack map) — the real
+// hook is a ref-bridge to SwirlScreen's own randomizeGroup (see swirlRandomize.tsx), which this test
+// file has no reason to stand up just to confirm the trigger is wired to call it.
+const mockRandomizeGroup = jest.fn()
+jest.mock('@/hooks/swirlRandomize', () => ({
+  useSwirlRandomize: () => ({ randomizeGroup: mockRandomizeGroup })
+}))
+
 // Real @/hooks/gravityMarkerVisibility would need a GravityMarkerVisibilityProvider this tree doesn't
 // render (see the module's own comment — it's shared with ControlGroupTopSheetContent's own copy of
 // this toggle in real use, but that sheet isn't rendered by this test file at all). A real useState
@@ -111,14 +119,13 @@ jest.mock('@rific/auto-paper', () => {
 
 const defaultProps = {
   visible: true,
-  frozen: false,
   activeTargets: new Set<GestureTarget>(['pattern']),
   backDisabled: false,
+  frozen: false,
+  onToggleFrozen: jest.fn(),
+  onRecenterEverything: jest.fn(),
   gestureFanOpen: false,
   onGestureFanOpenChange: jest.fn(),
-  onToggleFrozen: jest.fn(),
-  onRandomize: jest.fn(),
-  onResetSwirl: jest.fn(),
   onSelectGestureTarget: jest.fn(),
   onRecenter: jest.fn(),
   onGoBack: jest.fn(),
@@ -128,6 +135,7 @@ const defaultProps = {
   // Mid-range, not a boundary value, so boundary-disabled tests below can opt into 0/MAX explicitly
   // rather than this default silently already being there.
   mirrorLines: 2,
+  mirrorAlternateColors: false,
   onAddMirrorLine: jest.fn(),
   onRemoveMirrorLine: jest.fn(),
   onMaxMirrorLines: jest.fn(),
@@ -138,8 +146,7 @@ const defaultProps = {
   onResetLineToSolid: jest.fn(),
   gravityRepelling: false,
   onReverseGravity: jest.fn(),
-  speedTargetsMirror: false,
-  onToggleSpeedTarget: jest.fn()
+  onHideControls: jest.fn()
 }
 
 // gestureFanOpen is now lifted up and controlled by the parent (index.tsx, in real use — see
@@ -187,42 +194,6 @@ describe('OnScreenControls', () => {
 
     const visible = await renderControls({ visible: true })
     expect(visible.getByTestId('on-screen-controls-root').props.pointerEvents).toBe('box-none')
-  })
-
-  // Play/pause only exists in speed mode now (see OnScreenControls' own showPauseFab comment) — every
-  // test below renders with activeTargets speed for that reason; the "gone entirely in every other
-  // mode" half of that is covered separately, under "the transport row contextual slots".
-  it('shows a play icon when frozen and pause when running', async () => {
-    const running = await renderControls({ activeTargets: new Set(['speed']), frozen: false })
-    expect(running.getByTestId('fab-pause')).toBeTruthy()
-    await running.unmount()
-
-    const frozen = await renderControls({ activeTargets: new Set(['speed']), frozen: true })
-    expect(frozen.getByTestId('fab-play')).toBeTruthy()
-  })
-
-  it('wires the freeze FAB to onToggleFrozen', async () => {
-    const onToggleFrozen = jest.fn()
-    const screen = await renderControls({ activeTargets: new Set(['speed']), onToggleFrozen })
-
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-pause'))
-    })
-
-    expect(onToggleFrozen).toHaveBeenCalledTimes(1)
-  })
-
-  it('wires a long-press on the play/pause FAB to onResetSwirl, independent of onToggleFrozen', async () => {
-    const onToggleFrozen = jest.fn()
-    const onResetSwirl = jest.fn()
-    const screen = await renderControls({ activeTargets: new Set(['speed']), onToggleFrozen, onResetSwirl })
-
-    await act(async () => {
-      fireEvent(screen.getByTestId('fab-pause'), 'longPress')
-    })
-
-    expect(onResetSwirl).toHaveBeenCalledTimes(1)
-    expect(onToggleFrozen).not.toHaveBeenCalled()
   })
 
   it('wires the back FAB to onGoBack', async () => {
@@ -338,15 +309,51 @@ describe('OnScreenControls', () => {
     })
   })
 
-  it('wires the randomize FAB to onRandomize', async () => {
-    const onRandomize = jest.fn()
-    const screen = await renderControls({ onRandomize })
+  it('wires the corner FAB to onToggleFrozen, showing pause when running and play when frozen', async () => {
+    const onToggleFrozen = jest.fn()
+    const running = await renderControls({ frozen: false, onToggleFrozen })
+    expect(running.getByTestId('fab-pause')).toBeTruthy()
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-dice-multiple'))
+      fireEvent.press(running.getByTestId('fab-pause'))
+    })
+    expect(onToggleFrozen).toHaveBeenCalledTimes(1)
+    await running.unmount()
+
+    const frozen = await renderControls({ frozen: true })
+    expect(frozen.getByTestId('fab-play')).toBeTruthy()
+    expect(frozen.queryByTestId('fab-pause')).toBeNull()
+  })
+
+  // Recentres AND reorients every point at once (pattern, mirror, gravity), unconditionally — unlike
+  // the primary FAB's own onRecenter long press (tested separately further down), which only touches
+  // whichever gesture target(s) activeTargets currently holds.
+  it('wires a long-press on the corner FAB to onRecenterEverything, independent of onToggleFrozen', async () => {
+    const onToggleFrozen = jest.fn()
+    const onRecenterEverything = jest.fn()
+    const screen = await renderControls({ onToggleFrozen, onRecenterEverything })
+
+    await act(async () => {
+      fireEvent(screen.getByTestId('fab-pause'), 'longPress')
     })
 
-    expect(onRandomize).toHaveBeenCalledTimes(1)
+    expect(onRecenterEverything).toHaveBeenCalledTimes(1)
+    expect(onToggleFrozen).not.toHaveBeenCalled()
+  })
+
+  it('keeps the corner Pause/Play FAB mounted but fades it out (and disables its touches) while a sheet is open', async () => {
+    mockGroupSheetOpen = false
+    const closed = await renderControls()
+    expect(closed.getByTestId('fab-pause')).toBeTruthy()
+    expect(closed.getByTestId('pause-fab-fade').props.style).toContainEqual({ opacity: 1 })
+    expect(closed.getByTestId('pause-fab-fade').props.pointerEvents).toBe('auto')
+    await closed.unmount()
+
+    mockGroupSheetOpen = true
+    const open = await renderControls()
+    expect(open.getByTestId('fab-pause')).toBeTruthy()
+    expect(open.getByTestId('pause-fab-fade').props.style).toContainEqual({ opacity: 0 })
+    expect(open.getByTestId('pause-fab-fade').props.pointerEvents).toBe('none')
   })
 
   it("shows the single active target's own icon on the primary FAB when exactly one is active", async () => {
@@ -371,10 +378,6 @@ describe('OnScreenControls', () => {
 
     const gravity = await renderControls({ activeTargets: new Set(['gravity']) })
     expect(gravity.getByTestId('fab-target').props.icon({ size: 24, color: '#000000' }).props.name).toBe('magnet')
-    await gravity.unmount()
-
-    const speed = await renderControls({ activeTargets: new Set(['speed']) })
-    expect(speed.getByTestId('fab-target').props.icon({ size: 24, color: '#000000' }).props.name).toBe('speedometer')
   })
 
   // GestureFanItem's own Animated.View style is an array (static position + animated opacity/
@@ -447,26 +450,9 @@ describe('OnScreenControls', () => {
   })
 
   // Unlike the transport row's other flanks (already faded to pointerEvents 'none' while the fan is
-  // open — see fanFlanksStyle), the trigger stack and randomize FAB stay reachable the whole time, so
-  // pressing one of them without also closing the fan would leave it stranded open behind whatever the
-  // press just did — see closeFanFirst's own comment.
-  it('closes the gesture-target fan when the randomize FAB is pressed', async () => {
-    const onRandomize = jest.fn()
-    const screen = await renderControls({ onRandomize })
-
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target'))
-    })
-    expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
-
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-dice-multiple'))
-    })
-
-    expect(onRandomize).toHaveBeenCalledTimes(1)
-    expect(fanItemOpacity(screen, 'mirror')).toBe(0)
-  })
-
+  // open — see fanFlanksStyle), the trigger stack stays reachable the whole time, so pressing one of
+  // its triggers without also closing the fan would leave it stranded open behind whatever the press
+  // just did — see closeFanFirst's own comment.
   it('closes the gesture-target fan when a group trigger is pressed, without blocking the group from opening', async () => {
     const screen = await renderControls()
 
@@ -502,7 +488,7 @@ describe('OnScreenControls', () => {
   // is driven purely by activeTargets. Exactly one of the four cases below applies for any given
   // activeTargets value.
   describe('the transport row contextual slots', () => {
-    it('shows Add mirror / Remove mirror when mirror is the sole active target, disabled at the MIN/MAX_MIRROR_LINES boundary', async () => {
+    it('shows Add mirror / Remove mirror when mirror is the sole active target, disabled only at the signed +/-MAX_MIRROR_LINES extremes', async () => {
       const onAddMirrorLine = jest.fn()
       const onRemoveMirrorLine = jest.fn()
       const mid = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 2, onAddMirrorLine, onRemoveMirrorLine })
@@ -520,14 +506,22 @@ describe('OnScreenControls', () => {
       expect(onRemoveMirrorLine).toHaveBeenCalledTimes(1)
       await mid.unmount()
 
-      const atMin = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 0 })
-      expect(atMin.getByTestId('fab-remove-mirror').props.accessibilityState.disabled).toBe(true)
-      expect(atMin.getByTestId('fab-add-mirror').props.accessibilityState.disabled).toBe(false)
-      await atMin.unmount()
+      // 0 is the midpoint of the signed dial now, not a boundary — both directions stay valid from
+      // here (remove crosses into alternate-colors-on territory instead of dead-ending).
+      const atZero = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 0, mirrorAlternateColors: false })
+      expect(atZero.getByTestId('fab-remove-mirror').props.accessibilityState.disabled).toBe(false)
+      expect(atZero.getByTestId('fab-add-mirror').props.accessibilityState.disabled).toBe(false)
+      await atZero.unmount()
 
-      const atMax = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 6 })
-      expect(atMax.getByTestId('fab-add-mirror').props.accessibilityState.disabled).toBe(true)
-      expect(atMax.getByTestId('fab-remove-mirror').props.accessibilityState.disabled).toBe(false)
+      const atPositiveMax = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 6, mirrorAlternateColors: false })
+      expect(atPositiveMax.getByTestId('fab-add-mirror').props.accessibilityState.disabled).toBe(true)
+      expect(atPositiveMax.getByTestId('fab-remove-mirror').props.accessibilityState.disabled).toBe(false)
+      await atPositiveMax.unmount()
+
+      // The true negative extreme (max lines, alternate colors on) — mirror image of the positive case.
+      const atNegativeMax = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 6, mirrorAlternateColors: true })
+      expect(atNegativeMax.getByTestId('fab-remove-mirror').props.accessibilityState.disabled).toBe(true)
+      expect(atNegativeMax.getByTestId('fab-add-mirror').props.accessibilityState.disabled).toBe(false)
     })
 
     it('wires a long-press on Add/Remove mirror to onMaxMirrorLines/onMinMirrorLines, independent of the plain ±1 taps', async () => {
@@ -550,29 +544,94 @@ describe('OnScreenControls', () => {
       expect(onRemoveMirrorLine).not.toHaveBeenCalled()
     })
 
-    // onMaxMirrorLines/onMinMirrorLines (see index.tsx) call pushHistory and setMirrorLines
-    // unconditionally, with no bounds check of their own — boundary enforcement is deliberately left
-    // entirely to these two FABs' own disabled prop (see the MIN/MAX boundary test above, which only
-    // checks accessibilityState.disabled visually). This is the behavioral half: actually firing
-    // longPress at the boundary and confirming disabled genuinely blocks it, not just reads as
-    // disabled — otherwise a long-press there would push a spurious no-op history entry, and a user's
-    // very next "back" tap would silently do nothing.
-    it('a long-press at the MIN/MAX_MIRROR_LINES boundary never reaches onMaxMirrorLines/onMinMirrorLines — disabled genuinely blocks it, not just visually', async () => {
+    // onMaxMirrorLines/onMinMirrorLines (see index.tsx) do have their own no-op guard now (needed so a
+    // held long-press stops cleanly once it reaches the far extreme — see the hold-to-repeat tests
+    // below), but the FAB's own disabled prop is still what stops longPress from reaching the handler
+    // at all here (see the boundary test above, which only checks accessibilityState.disabled
+    // visually). This is the behavioral half: actually firing longPress at the boundary and confirming
+    // disabled genuinely blocks it, not just reads as disabled — otherwise a long-press there would
+    // still push a spurious no-op history entry, and a user's very next "back" tap would silently do
+    // nothing.
+    it('a long-press at the signed +/-MAX_MIRROR_LINES extreme never reaches onMaxMirrorLines/onMinMirrorLines — disabled genuinely blocks it, not just visually', async () => {
       const onMaxMirrorLines = jest.fn()
       const onMinMirrorLines = jest.fn()
 
-      const atMax = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 6, onMaxMirrorLines, onMinMirrorLines })
+      const atMax = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 6, mirrorAlternateColors: false, onMaxMirrorLines, onMinMirrorLines })
       await act(async () => {
         fireEvent(atMax.getByTestId('fab-add-mirror'), 'longPress')
       })
       expect(onMaxMirrorLines).not.toHaveBeenCalled()
       await atMax.unmount()
 
-      const atMin = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 0, onMaxMirrorLines, onMinMirrorLines })
+      const atMin = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 6, mirrorAlternateColors: true, onMaxMirrorLines, onMinMirrorLines })
       await act(async () => {
         fireEvent(atMin.getByTestId('fab-remove-mirror'), 'longPress')
       })
       expect(onMinMirrorLines).not.toHaveBeenCalled()
+    })
+
+    // Add/Remove mirror's own hold-repeat twin to Cycle shape's/Forward's (see useHoldToRepeat,
+    // maxMirrorLinesHold/minMirrorLinesHold) — the mechanism itself is already thoroughly covered by
+    // useHoldToRepeat.test.ts and the "forward held down" describe block above, so this is just
+    // confirming Add/Remove mirror are actually wired to it: continuing to hold past the first stop
+    // (index.tsx's own onMaxMirrorLines/onMinMirrorLines land on 0 first) carries on toward the far
+    // extreme instead of requiring a release and a second press-and-hold.
+    describe('mirror long-press held down (repeat effect)', () => {
+      beforeEach(() => {
+        jest.useFakeTimers()
+      })
+
+      afterEach(() => {
+        jest.useRealTimers()
+      })
+
+      it('keeps calling onMaxMirrorLines every HOLD_REPEAT_MS while held, and stops on release', async () => {
+        const onMaxMirrorLines = jest.fn()
+        const screen = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 2, onMaxMirrorLines })
+        const fab = screen.getByTestId('fab-add-mirror')
+
+        await act(async () => {
+          fireEvent(fab, 'longPress')
+        })
+        expect(onMaxMirrorLines).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(400)
+        })
+        expect(onMaxMirrorLines).toHaveBeenCalledTimes(2)
+
+        await act(async () => {
+          fireEvent(fab, 'pressOut')
+        })
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(2000)
+        })
+        expect(onMaxMirrorLines).toHaveBeenCalledTimes(2)
+      })
+
+      it('keeps calling onMinMirrorLines every HOLD_REPEAT_MS while held, and stops on release', async () => {
+        const onMinMirrorLines = jest.fn()
+        const screen = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 2, onMinMirrorLines })
+        const fab = screen.getByTestId('fab-remove-mirror')
+
+        await act(async () => {
+          fireEvent(fab, 'longPress')
+        })
+        expect(onMinMirrorLines).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(400)
+        })
+        expect(onMinMirrorLines).toHaveBeenCalledTimes(2)
+
+        await act(async () => {
+          fireEvent(fab, 'pressOut')
+        })
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(2000)
+        })
+        expect(onMinMirrorLines).toHaveBeenCalledTimes(2)
+      })
     })
 
     it('shows Cycle shape / Cycle line type when pattern is the sole active target', async () => {
@@ -840,55 +899,6 @@ describe('OnScreenControls', () => {
       const repelling = await renderControls({ activeTargets: new Set(['gravity']), gravityRepelling: true })
       expect(repelling.getByTestId('fab-reverse-gravity').props.style.backgroundColor).toBe('#6750a4')
     })
-
-    it('shows a single alternating Pattern/Mirror speed button when speed is the sole active target, wired to onToggleSpeedTarget', async () => {
-      const onToggleSpeedTarget = jest.fn()
-      const screen = await renderControls({ activeTargets: new Set(['speed']), onToggleSpeedTarget })
-      expect(screen.queryByTestId('fab-cycle-shape')).toBeNull()
-      expect(screen.queryByTestId('fab-pattern-speed')).toBeNull()
-      expect(screen.queryByTestId('fab-mirror-speed')).toBeNull()
-
-      await act(async () => {
-        fireEvent.press(screen.getByTestId('fab-speed-target'))
-      })
-      expect(onToggleSpeedTarget).toHaveBeenCalledTimes(1)
-    })
-
-    // A single button whose icon reflects whichever of pattern/mirror is currently selected (see
-    // speedTargetsMirror's own prop comment) — the same "call the icon function and inspect what it
-    // renders" approach the primary FAB's own icon test above uses, and the exact same
-    // GESTURE_TARGET_ICONS entries that FAB and the fan already use for these two targets.
-    it("shows the pattern icon when speedTargetsMirror is false, and the mirror icon when it's true", async () => {
-      const pattern = await renderControls({ activeTargets: new Set(['speed']), speedTargetsMirror: false })
-      const patternIcon = pattern.getByTestId('fab-speed-target').props.icon({ size: 24, color: '#000000' })
-      expect(patternIcon.props.pattern).toBe('spiral')
-      await pattern.unmount()
-
-      const mirror = await renderControls({ activeTargets: new Set(['speed']), speedTargetsMirror: true })
-      const mirrorIcon = mirror.getByTestId('fab-speed-target').props.icon({ size: 24, color: '#000000' })
-      expect(mirrorIcon.props.name).toBe('mirror')
-    })
-
-    // Pause/Play only exists in speed mode at all (see OnScreenControls' own showPauseFab comment) —
-    // rendered in slotA's own left-flank position, never the right flank, and never both at once.
-    it('shows Pause/Play in the left flank when speed is the sole active target, and nowhere in the right flank', async () => {
-      const screen = await renderControls({ activeTargets: new Set(['speed']), frozen: false })
-      expect(within(screen.getByTestId('transport-row-flank-left')).getByTestId('fab-pause')).toBeTruthy()
-      expect(within(screen.getByTestId('transport-row-flank-right')).queryByTestId('fab-pause')).toBeNull()
-      expect(screen.getAllByTestId('fab-pause')).toHaveLength(1)
-    })
-
-    // Regression guard: every other mode has no Pause/Play at all, in either flank — it's not merely
-    // relocated for them, it's gone. onResetSwirl (its own onLongPress bonus) goes with it, since both
-    // live on the one FAB.
-    it('shows no Pause/Play FAB at all, in either flank, for every mode other than speed', async () => {
-      for (const target of ['pattern', 'mirror', 'gravity'] as const) {
-        const screen = await renderControls({ activeTargets: new Set([target]) })
-        expect(screen.queryByTestId('fab-pause')).toBeNull()
-        expect(screen.queryByTestId('fab-play')).toBeNull()
-        await screen.unmount()
-      }
-    })
   })
 
   // The primary FAB's own long press — see its own comment in OnScreenControls.tsx for why this moved
@@ -982,6 +992,228 @@ describe('OnScreenControls', () => {
     expect(mockOpenGroup).toHaveBeenCalledTimes(cases.length)
   })
 
+  // Each group trigger's own bonus long press — a shortcut straight to that group's Randomize button
+  // (see ControlGroupTopSheetContent) without opening the sheet at all. Shares the exact same
+  // randomizeGroup call the in-drawer button makes (see swirlRandomize.tsx), so this only needs to
+  // confirm the trigger is wired to it, not re-prove the randomize logic itself.
+  it('wires a long-press on each group trigger to randomizeGroup for that group, including the cog, independent of opening the sheet', async () => {
+    const screen = await renderControls()
+
+    const cases: [string, string][] = [
+      ['fab-cog', 'settings'],
+      ['fab-mirror', 'mirror'],
+      ['fab-palette', 'colors'],
+      ['fab-pattern', 'pattern'],
+      ['fab-format-line-weight', 'line'],
+      ['fab-atom', 'gravity']
+    ]
+
+    for (const [testId, group] of cases) {
+      await act(async () => {
+        fireEvent(screen.getByTestId(testId), 'longPress')
+      })
+      expect(mockRandomizeGroup).toHaveBeenLastCalledWith(group)
+    }
+
+    expect(mockRandomizeGroup).toHaveBeenCalledTimes(cases.length)
+    // The long press is a bonus alongside the ordinary tap-to-open, not a replacement for it — none of
+    // these should have also opened (or closed) a group sheet.
+    expect(mockOpenGroup).not.toHaveBeenCalled()
+    expect(mockCloseGroupSheet).not.toHaveBeenCalled()
+  })
+
+  // The always-visible chevron's long press means something different depending on which state it's
+  // already in. While expanded (chevron-up), the cog right below it already covers "randomize
+  // everything" via its own long press, so this FAB's long press instead collapses AND hides the whole
+  // overlay in one hold — the on-canvas equivalent of an edge-reveal zone's own onReveal undoing this
+  // (see EdgeRevealZones). Its own ordinary tap (collapse/expand + close any open sheet) is covered
+  // separately further down.
+  it('wires a long-press on the chevron-up FAB to collapse the stack, close any open sheet, and hide the whole overlay', async () => {
+    mockGroupSheetOpen = true
+    mockActiveGroup = 'pattern'
+    const onHideControls = jest.fn()
+    const screen = await renderControls({ onHideControls })
+
+    await act(async () => {
+      fireEvent(screen.getByTestId('fab-chevron-up'), 'longPress')
+    })
+
+    expect(onHideControls).toHaveBeenCalledTimes(1)
+    expect(mockCloseGroupSheet).toHaveBeenCalledTimes(1)
+    expect(mockRandomizeGroup).not.toHaveBeenCalled()
+    // Collapsed as part of the same hold — the chevron flips to its collapsed icon/testID.
+    expect(screen.getByTestId('fab-chevron-down')).toBeTruthy()
+  })
+
+  // Once collapsed, the cog and every other sibling are unreachable (disabled — see "disables the
+  // trigger-stack siblings while collapsed" below), so this is the one remaining spot a full reroll
+  // stays reachable — the same randomizeGroup('settings') shortcut the cog's own long press uses while
+  // expanded.
+  it("wires a long-press on the chevron-down FAB to randomizeGroup('settings'), not collapse/hide", async () => {
+    const onHideControls = jest.fn()
+    const screen = await renderControls({ onHideControls })
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('fab-chevron-up'))
+    })
+    expect(screen.getByTestId('fab-chevron-down')).toBeTruthy()
+
+    await act(async () => {
+      fireEvent(screen.getByTestId('fab-chevron-down'), 'longPress')
+    })
+
+    expect(mockRandomizeGroup).toHaveBeenCalledWith('settings')
+    expect(mockRandomizeGroup).toHaveBeenCalledTimes(1)
+    expect(onHideControls).not.toHaveBeenCalled()
+  })
+
+  // Randomize's own hold-repeat twin to Cycle shape's/Forward's/Add-Remove mirror's (see
+  // useHoldToRepeatByKey, randomizeGroupHold) — the mechanism itself is already thoroughly covered by
+  // useHoldToRepeat.test.ts, so this is just confirming the trigger stack is actually wired to it: a
+  // hold on any one group's trigger keeps rerolling just that group every RANDOMIZE_HOLD_REPEAT_MS (see
+  // constants/holdToRepeat.ts — slower than the other three's own HOLD_REPEAT_MS, since a full reroll
+  // takes longer to actually look at than a single-value step), and two different triggers held (one
+  // after the other) don't stop or restart each other's repeat.
+  describe('randomize long-press held down (repeat effect)', () => {
+    beforeEach(() => {
+      jest.useFakeTimers()
+    })
+
+    afterEach(() => {
+      jest.useRealTimers()
+    })
+
+    it('keeps calling randomizeGroup for that group every RANDOMIZE_HOLD_REPEAT_MS while held, and stops on release', async () => {
+      const screen = await renderControls()
+      const fab = screen.getByTestId('fab-pattern')
+
+      await act(async () => {
+        fireEvent(fab, 'longPress')
+      })
+      expect(mockRandomizeGroup).toHaveBeenCalledTimes(1)
+      expect(mockRandomizeGroup).toHaveBeenLastCalledWith('pattern')
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1000)
+      })
+      expect(mockRandomizeGroup).toHaveBeenCalledTimes(2)
+      expect(mockRandomizeGroup).toHaveBeenLastCalledWith('pattern')
+
+      await act(async () => {
+        fireEvent(fab, 'pressOut')
+      })
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000)
+      })
+      expect(mockRandomizeGroup).toHaveBeenCalledTimes(2)
+    })
+
+    it("keeps calling randomizeGroup('settings') every RANDOMIZE_HOLD_REPEAT_MS while the collapsed chevron is held, and stops on release", async () => {
+      const screen = await renderControls()
+
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('fab-chevron-up'))
+      })
+      const fab = screen.getByTestId('fab-chevron-down')
+
+      await act(async () => {
+        fireEvent(fab, 'longPress')
+      })
+      expect(mockRandomizeGroup).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1000)
+      })
+      expect(mockRandomizeGroup).toHaveBeenCalledTimes(2)
+      expect(mockRandomizeGroup).toHaveBeenLastCalledWith('settings')
+
+      await act(async () => {
+        fireEvent(fab, 'pressOut')
+      })
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000)
+      })
+      expect(mockRandomizeGroup).toHaveBeenCalledTimes(2)
+    })
+
+    // The expanded chevron's own long press does something else entirely (collapse + hide, see "wires a
+    // long-press on the chevron-up FAB" above) — its onPressOut is still unconditionally wired to
+    // randomizeGroupHold.onPressOut('settings') (see OnScreenControls' own comment for why that's a safe
+    // no-op here), so this confirms releasing that hold never fires a stray randomize.
+    it('releasing the expanded chevron-up FAB after a long press never fires a stray randomize', async () => {
+      const onHideControls = jest.fn()
+      const screen = await renderControls({ onHideControls })
+      const fab = screen.getByTestId('fab-chevron-up')
+
+      await act(async () => {
+        fireEvent(fab, 'longPress')
+      })
+      await act(async () => {
+        fireEvent(fab, 'pressOut')
+      })
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000)
+      })
+
+      expect(mockRandomizeGroup).not.toHaveBeenCalled()
+      expect(onHideControls).toHaveBeenCalledTimes(1)
+    })
+
+    // The whole reason randomizeGroupHold is keyed rather than one instance per FAB (see its own
+    // comment) — holding one group's trigger, releasing it, then holding a different one must not leak
+    // the first hold's timer into the second, and must not stop a repeat that was never started for the
+    // second key.
+    it('keeps two different group triggers repeating independently of each other', async () => {
+      const screen = await renderControls()
+      const patternFab = screen.getByTestId('fab-pattern')
+      const mirrorFab = screen.getByTestId('fab-mirror')
+
+      await act(async () => {
+        fireEvent(patternFab, 'longPress')
+      })
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1000)
+      })
+      await act(async () => {
+        fireEvent(patternFab, 'pressOut')
+      })
+      mockRandomizeGroup.mockClear()
+
+      await act(async () => {
+        fireEvent(mirrorFab, 'longPress')
+      })
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1000)
+      })
+      expect(mockRandomizeGroup).toHaveBeenCalledTimes(2)
+      expect(mockRandomizeGroup).toHaveBeenCalledWith('mirror')
+      expect(mockRandomizeGroup).not.toHaveBeenCalledWith('pattern')
+
+      await act(async () => {
+        fireEvent(mirrorFab, 'pressOut')
+      })
+    })
+  })
+
+  // Same closeFanFirst treatment as the ordinary tap (see "closes the gesture-target fan when a group
+  // trigger is pressed" above) — a long press landing while the fan is spread out should close it too,
+  // not leave it stranded open behind whatever randomizeGroup just did.
+  it('closes the gesture-target fan when a group trigger is long-pressed', async () => {
+    const screen = await renderControls()
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('fab-target'))
+    })
+    expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
+
+    await act(async () => {
+      fireEvent(screen.getByTestId('fab-pattern'), 'longPress')
+    })
+
+    expect(mockRandomizeGroup).toHaveBeenCalledWith('pattern')
+    expect(fanItemOpacity(screen, 'mirror')).toBe(0)
+  })
+
   // A real toggle, not just an "open" button: pressing the already-open group's own trigger closes
   // the sheet instead of re-opening the same group as a no-op — see the trigger stack's own onPress
   // comment for why this matters more now that tapping the canvas itself no longer closes anything
@@ -1009,7 +1241,7 @@ describe('OnScreenControls', () => {
     const screen = await renderControls()
 
     expect(screen.getByTestId('fab-pattern').props.style.backgroundColor).toBe('#6750a4')
-    for (const testId of ['fab-cog', 'fab-mirror', 'fab-palette', 'fab-format-line-weight', 'fab-magnet']) {
+    for (const testId of ['fab-cog', 'fab-mirror', 'fab-palette', 'fab-format-line-weight', 'fab-atom']) {
       expect(screen.getByTestId(testId).props.style.backgroundColor).toBe('transparent')
     }
     // 5 dimmed sheet triggers (now including gravity) plus the always-present siblings-collapse
@@ -1024,7 +1256,7 @@ describe('OnScreenControls', () => {
     const screen = await renderControls()
 
     expect(screen.getByTestId('fab-cog').props.style.backgroundColor).toBe('#6750a4')
-    for (const testId of ['fab-mirror', 'fab-palette', 'fab-pattern', 'fab-format-line-weight', 'fab-magnet']) {
+    for (const testId of ['fab-mirror', 'fab-palette', 'fab-pattern', 'fab-format-line-weight', 'fab-atom']) {
       expect(screen.getByTestId(testId).props.style.backgroundColor).toBe('transparent')
     }
     expect(within(screen.getByTestId('trigger-stack')).getAllByTestId('blur-view')).toHaveLength(6)
@@ -1035,7 +1267,7 @@ describe('OnScreenControls', () => {
     mockActiveGroup = 'pattern'
     const screen = await renderControls()
 
-    for (const testId of ['fab-cog', 'fab-mirror', 'fab-palette', 'fab-pattern', 'fab-format-line-weight', 'fab-magnet']) {
+    for (const testId of ['fab-cog', 'fab-mirror', 'fab-palette', 'fab-pattern', 'fab-format-line-weight', 'fab-atom']) {
       expect(screen.getByTestId(testId).props.style.backgroundColor).toBe('transparent')
     }
     // 6 dimmed sheet triggers (now including gravity) plus the always-present siblings-collapse toggle.
@@ -1059,26 +1291,6 @@ describe('OnScreenControls', () => {
     const open = await renderControls()
     expect(within(open.getByTestId('on-screen-controls-root')).queryByTestId('trigger-stack')).toBeNull()
     expect(open.getByTestId('trigger-stack')).toBeTruthy()
-  })
-
-  // Randomize sits outside the portaled trigger stack (see OnScreenControls' diceFab) — unlike the
-  // trigger stack, it isn't kept reachable above an open sheet. Rather than popping away instantly or
-  // sitting there to be silently covered, it stays mounted and fades out (sheetFadeStyle) in step with
-  // the sheet that ends up covering it, going untouchable (pointerEvents='none') the moment it starts
-  // fading rather than only once fully invisible.
-  it('keeps the randomize FAB mounted but fades it out (and disables its touches) while a sheet is open', async () => {
-    mockGroupSheetOpen = false
-    const closed = await renderControls()
-    expect(closed.getByTestId('fab-dice-multiple')).toBeTruthy()
-    expect(closed.getByTestId('dice-fab-fade').props.style).toContainEqual({ opacity: 1 })
-    expect(closed.getByTestId('dice-fab-fade').props.pointerEvents).toBe('auto')
-    await closed.unmount()
-
-    mockGroupSheetOpen = true
-    const open = await renderControls()
-    expect(open.getByTestId('fab-dice-multiple')).toBeTruthy()
-    expect(open.getByTestId('dice-fab-fade').props.style).toContainEqual({ opacity: 0 })
-    expect(open.getByTestId('dice-fab-fade').props.pointerEvents).toBe('none')
   })
 
   // Same fade treatment as the dice FAB above, for the same reason (the bottom sheet ends up covering

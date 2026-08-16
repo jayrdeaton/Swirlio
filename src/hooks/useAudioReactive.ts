@@ -84,7 +84,13 @@ export function useAudioReactive(enabled: boolean, sensitivity: number = 1) {
         // session, AudioRecorder.start() resolves fine but nothing actually captures, so this looks
         // identical to a working-but-silent room instead of a broken feature. Android has no such
         // category concept (SessionOptions is all ios*-prefixed), so this is a no-op there.
-        AudioManager.setAudioSessionOptions({ iosCategory: 'playAndRecord', iosMode: 'default' })
+        // 'mixWithOthers' is what lets this be a visualizer for whatever's already playing (Music,
+        // Spotify, a podcast) instead of silencing it: activating playAndRecord without that option
+        // interrupts other apps' audio the moment the session goes active, same as any other app
+        // grabbing the mic. Android never requests audio focus here in the first place (see
+        // observeAudioInterruptions, which this hook doesn't call), so it has no equivalent silencing
+        // to opt out of.
+        AudioManager.setAudioSessionOptions({ iosCategory: 'playAndRecord', iosMode: 'default', iosOptions: ['mixWithOthers'] })
         await AudioManager.setAudioSessionActivity(true)
         if (cancelled) return
 

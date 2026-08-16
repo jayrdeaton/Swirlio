@@ -10,7 +10,7 @@ import SwirlScreen from '@/app/index'
 import { MAX_MIRROR_LINES, wedgeVector } from '@/constants/kaleidoscope'
 import { PatternType } from '@/constants/patterns'
 import { DashStyle } from '@/constants/strokeDash'
-import { useControlGroupSheetDrawer } from '@/hooks/controlGroups'
+import { useControlGroups, useControlGroupSheetDrawer } from '@/hooks/controlGroups'
 import { useGravityMarkerVisibility } from '@/hooks/gravityMarkerVisibility'
 import { SpeedRateWriters, useRegisterSpeedRateWriters } from '@/hooks/speedRateBridge'
 import { useRegisterSwirlReset } from '@/hooks/swirlReset'
@@ -18,7 +18,7 @@ import { useAudioReactive } from '@/hooks/useAudioReactive'
 import { GRAVITY_SETTLE_DISTANCE } from '@/hooks/useDragPointPhysics'
 import { GestureTarget } from '@/hooks/useEpicenter'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
-import { MAX_MIRROR_GAP, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_CYCLE_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { MAX_MIRROR_GAP, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_STROKE_WIDTH, MIN_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
 import { useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const mockSpiralSpy = jest.fn()
@@ -183,6 +183,7 @@ jest.mock('@/hooks/useShakeToRandomize', () => ({
 // for the hook alone (no Provider is rendered in this tree, so it'd just read the default context
 // value), but mocked explicitly anyway so groupSheetOpen is something this file can actually drive.
 jest.mock('@/hooks/controlGroups', () => ({
+  useControlGroups: jest.fn(),
   useControlGroupSheetDrawer: jest.fn()
 }))
 
@@ -214,6 +215,7 @@ const mockedUseTiltGravityCenter = useTiltGravityCenter as jest.MockedFunction<t
 const mockedUseAudioReactive = useAudioReactive as jest.MockedFunction<typeof useAudioReactive>
 const mockedUseShakeToRandomize = useShakeToRandomize as jest.MockedFunction<typeof useShakeToRandomize>
 const mockedUseControlGroupSheetDrawer = useControlGroupSheetDrawer as jest.MockedFunction<typeof useControlGroupSheetDrawer>
+const mockedUseControlGroups = useControlGroups as jest.MockedFunction<typeof useControlGroups>
 const mockedUseRegisterSwirlReset = useRegisterSwirlReset as jest.MockedFunction<typeof useRegisterSwirlReset>
 const mockedUseGravityMarkerVisibility = useGravityMarkerVisibility as jest.MockedFunction<typeof useGravityMarkerVisibility>
 const mockedUseRegisterSpeedRateWriters = useRegisterSpeedRateWriters as jest.MockedFunction<typeof useRegisterSpeedRateWriters>
@@ -311,6 +313,7 @@ const defaultMockSettings = {
   backgroundColors: ['#000000'],
   backgroundCycleSpeed: 1,
   bounceFriction: 1,
+  controlsAutoHideSpeed: 1,
   cropRadius: 1,
   cropShaped: true,
   dashStyle: 'solid' as DashStyle,
@@ -347,6 +350,7 @@ function mockSettings(overrides: Partial<typeof defaultMockSettings> = {}) {
     setBackgroundColors,
     setBackgroundCycleSpeed,
     setBounceFriction,
+    setControlsAutoHideSpeed: jest.fn(),
     setCropRadius,
     setCropShaped,
     setDashStyle,
@@ -392,6 +396,7 @@ describe('SwirlScreen gestures', () => {
     mockedUseAudioReactive.mockReturnValue({ bass: { value: 0 } as any, mid: 0, treble: 0, loudness: 0 })
     mockedUseShakeToRandomize.mockImplementation(() => undefined)
     mockedUseControlGroupSheetDrawer.mockReturnValue({ close: jest.fn(), isOpen: false, isVisible: false, open: jest.fn() })
+    mockedUseControlGroups.mockReturnValue({ activeGroup: null, setActiveGroup: jest.fn() })
     mockedUseGravityMarkerVisibility.mockReturnValue({ gravityMarkerVisible: false, setGravityMarkerVisible: jest.fn() })
   })
 
@@ -560,7 +565,12 @@ describe('SwirlScreen gestures', () => {
     expect(panGesture).toBeTruthy()
 
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + width * 0.2, y: height / 2 + height * 0.1 })
+      // Starts within the outer-field grab radius (see useEpicenter.ts's GRAB_RADIUS_PX) so this still
+      // counts as a direct grab, then drags on out — glideTo tracks the live touch position regardless
+      // of where the gesture started, so the resulting position is identical to a plain far-away start
+      // under the old, pre-grab-radius behavior.
+      panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 + width * 0.2, y: height / 2 + height * 0.1 })
     })
 
     const props = getLastSpiralProps()
@@ -575,7 +585,9 @@ describe('SwirlScreen gestures', () => {
     const panGesture = gestureTestUtils.getLastGesture('Pan')
 
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + width * 5, y: height / 2 - height * 5 })
+      // See the recentre test above for why this starts near center then drags out.
+      panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 + width * 5, y: height / 2 - height * 5 })
     })
 
     const props = getLastSpiralProps()
@@ -691,13 +703,15 @@ describe('SwirlScreen gestures', () => {
     const panGesture = gestureTestUtils.getLastGesture('Pan')
 
     // wedgeAngle is 180/4 = 45 degrees here, so a point at 60 degrees lands in wedge 1 — odd, so
-    // mirrored, with a reflection axis at 45 degrees.
+    // mirrored, with a reflection axis at 45 degrees. Radius is 30px (inside GRAB_RADIUS_PX, see
+    // useEpicenter.ts) rather than the wedge-selecting angle's own radius — wedge selection is purely
+    // angular (see wedgeIndexAtPoint), so shrinking the radius alone keeps this a direct grab.
     const touchAngleRad = (60 * Math.PI) / 180
     await act(async () => {
       // Touch-down only fixes which wedge got grabbed — the update below (not this point) is the
       // absolute position the epicentre actually ends up tracking, since every update re-targets the
       // same live glideTo (see useEpicenter.ts's own onUpdate comment).
-      panGesture.__handlers.start?.({ x: width / 2 + 100 * Math.cos(touchAngleRad), y: height / 2 + 100 * Math.sin(touchAngleRad) })
+      panGesture.__handlers.start?.({ x: width / 2 + 30 * Math.cos(touchAngleRad), y: height / 2 + 30 * Math.sin(touchAngleRad) })
       panGesture.__handlers.update?.({ x: width / 2 + width * 5, y: height / 2 })
     })
 
@@ -735,7 +749,9 @@ describe('SwirlScreen gestures', () => {
     const panGesture = gestureTestUtils.getLastGesture('Pan')
 
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+      // See the recentre test near the top of this file for why this starts near center then drags out.
+      panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
       panGesture.__handlers.end?.({ velocityX: width * 2, velocityY: 0 })
     })
 
@@ -762,7 +778,9 @@ describe('SwirlScreen gestures', () => {
     const panGesture = gestureTestUtils.getLastGesture('Pan')
 
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+      // See the recentre test near the top of this file for why this starts near center then drags out.
+      panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
       // velocityX=5 (window-normalized) for 100ms would overshoot 0.3 + 0.5 = 0.8, well past the real
       // screen edge (0.5, with mirrorLines 0 and the mirror anchor untouched), if it just clamped
       // there instead of bouncing.
@@ -795,7 +813,9 @@ describe('SwirlScreen gestures', () => {
     const panGesture = gestureTestUtils.getLastGesture('Pan')
 
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+      // See the recentre test near the top of this file for why this starts near center then drags out.
+      panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
       // Same overshoot as the reflection test above — comfortably past the boundary within one step.
       panGesture.__handlers.end?.({ velocityX: width * 5, velocityY: 0 })
     })
@@ -822,11 +842,13 @@ describe('SwirlScreen gestures', () => {
 
     const panGesture = gestureTestUtils.getLastGesture('Pan')
     // wedgeAngle is 180/4 = 45 degrees here, so a point at 60 degrees lands in wedge 1 — odd, so
-    // mirrored, with a reflection axis at 45 degrees — same setup as the live-drag version of this test.
+    // mirrored, with a reflection axis at 45 degrees — same setup as the live-drag version of this
+    // test. 30px radius (not 100) keeps the start within GRAB_RADIUS_PX while preserving the
+    // wedge-selecting angle — see that same live-drag test's own comment.
     const touchAngleRad = (60 * Math.PI) / 180
 
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + 100 * Math.cos(touchAngleRad), y: height / 2 + 100 * Math.sin(touchAngleRad) })
+      panGesture.__handlers.start?.({ x: width / 2 + 30 * Math.cos(touchAngleRad), y: height / 2 + 30 * Math.sin(touchAngleRad) })
       panGesture.__handlers.update?.({ x: width / 2 + 100 * Math.cos(touchAngleRad) + width * 0.3, y: height / 2 + 100 * Math.sin(touchAngleRad) })
       panGesture.__handlers.end?.({ velocityX: width * 5, velocityY: 0 })
     })
@@ -945,7 +967,9 @@ describe('SwirlScreen gestures', () => {
     const panGesture = gestureTestUtils.getLastGesture('Pan')
 
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + width * 0.2, y: height / 2 })
+      // See the recentre test near the top of this file for why this starts near center then drags out.
+      panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 + width * 0.2, y: height / 2 })
       // No release velocity — any further movement away from center has to come from the repulsive
       // force itself over the frames below, not residual fling momentum from the release.
       panGesture.__handlers.end?.({ velocityX: 0, velocityY: 0 })
@@ -1108,7 +1132,9 @@ describe('SwirlScreen gestures', () => {
     const panGesture = gestureTestUtils.getLastGesture('Pan')
 
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+      // See the recentre test near the top of this file for why this starts near center then drags out.
+      panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
       panGesture.__handlers.end?.({ velocityX: width * 2, velocityY: 0 })
     })
 
@@ -1146,9 +1172,10 @@ describe('SwirlScreen gestures', () => {
     // Straight out along the positive x-axis from center is always wedge 0 — see wedgeIndexAtPoint's
     // own [0, wedgeAngle) construction. The touch-down point only needs to land in the right wedge —
     // every update re-targets the same live glideTo (see useEpicenter.ts's own onUpdate comment), so
-    // the update below (not the 100px offset here) is what the final assertion actually checks.
+    // the update below (not the 30px offset here, kept within GRAB_RADIUS_PX — see useEpicenter.ts) is
+    // what the final assertion actually checks.
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+      panGesture.__handlers.start?.({ x: width / 2 + 30, y: height / 2 })
       panGesture.__handlers.update?.({ x: width / 2 + width * 0.1, y: height / 2 })
     })
 
@@ -1176,8 +1203,9 @@ describe('SwirlScreen gestures', () => {
     await act(async () => {
       // Touch-down only fixes which wedge got grabbed — the update below (not this point) is what the
       // final assertion checks, since every update re-targets the same live glideTo (see
-      // useEpicenter.ts's own onUpdate comment).
-      panGesture.__handlers.start?.({ x: width / 2 + 100 * Math.cos(touchAngleRad), y: height / 2 + 100 * Math.sin(touchAngleRad) })
+      // useEpicenter.ts's own onUpdate comment). 30px radius (not 100) keeps the start within
+      // GRAB_RADIUS_PX (see useEpicenter.ts) while preserving the wedge-selecting angle.
+      panGesture.__handlers.start?.({ x: width / 2 + 30 * Math.cos(touchAngleRad), y: height / 2 + 30 * Math.sin(touchAngleRad) })
       panGesture.__handlers.update?.({ x: width / 2 + dragDistance * Math.cos(dragAngleRad), y: height / 2 + dragDistance * Math.sin(dragAngleRad) })
     })
 
@@ -1190,16 +1218,8 @@ describe('SwirlScreen gestures', () => {
     expect(props.epicenterY.value).toBeCloseTo((dragDistance * Math.sin(expectedAngleRad)) / height, 5)
   })
 
-  it('swaps the foreground and background color lists on a single tap once the on-screen controls are hidden', async () => {
+  it('swaps the foreground and background color lists on a single tap', async () => {
     await renderScreen()
-
-    // The on-screen controls start visible, so the first tap only dismisses them (see the
-    // 'on-screen controls visibility' describe block below) — a second tap is what swaps colors.
-    // Separate act() calls, not two calls in one block: React batches state updates within a single
-    // synchronous block, so a second tap in the same block would still see the stale pre-hide state.
-    await act(async () => {
-      singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
-    })
 
     await act(async () => {
       singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
@@ -1217,9 +1237,6 @@ describe('SwirlScreen gestures', () => {
     await renderScreen()
     expect(getLastControlsProps().backDisabled).toBe(true)
 
-    await act(async () => {
-      singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
-    })
     await act(async () => {
       singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
     })
@@ -1243,16 +1260,15 @@ describe('SwirlScreen gestures', () => {
     expect(setForegroundColors).not.toHaveBeenCalled()
   })
 
-  it('flips both rotationSpeed and zoomSpeed on a two-finger long press', async () => {
+  it('stops both rotationSpeed and zoomSpeed on a two-finger long press', async () => {
     await renderScreen()
 
     await act(async () => {
       twoFingerLongPress().__handlers.start?.()
     })
 
-    // Both default to 1 in the mocked settings, so flipping negates each.
-    expect(setRotationSpeed).toHaveBeenCalledWith(-1)
-    expect(setZoomSpeed).toHaveBeenCalledWith(-1)
+    expect(setRotationSpeed).toHaveBeenCalledWith(0)
+    expect(setZoomSpeed).toHaveBeenCalledWith(0)
   })
 
   it('cycles the pattern on a two-finger tap', async () => {
@@ -1304,7 +1320,9 @@ describe('SwirlScreen gestures', () => {
 
     const panGesture = gestureTestUtils.getLastGesture('Pan')
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+      // See the recentre test near the top of this file for why this starts near center then drags out.
+      panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
     })
     expect(getLastSpiralProps().epicenterX.value).not.toBe(0)
 
@@ -1342,7 +1360,7 @@ describe('SwirlScreen gestures', () => {
     const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
     const randomize = shakeCall[1] as () => void
 
-    // 0.9 lands PATTERN_ORDER's 6 entries on the last one ('flower', which has sides) and
+    // 0.9 lands PATTERN_ORDER's 7 entries on the last one ('flower', which has sides) and
     // DASH_STYLE_ORDER's 6 entries on the last one ('doubleDash').
     const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.9)
     await act(async () => {
@@ -1448,7 +1466,7 @@ describe('SwirlScreen gestures', () => {
     const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
     const randomize = shakeCall[1] as () => void
 
-    // 0.9 lands PATTERN_ORDER's last entry ('flower', which has sides) — pinning the pattern draw is
+    // 0.9 lands PATTERN_ORDER's 7 entries on the last one ('flower', which has sides) — pinning the pattern draw is
     // what makes the setPolygonSides assertion below a real proof of audio-reactive suppression,
     // rather than a coincidence of whichever pattern happened to get picked.
     const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.9)
@@ -1499,7 +1517,9 @@ describe('SwirlScreen gestures', () => {
     const panGesture = gestureTestUtils.getLastGesture('Pan')
 
     await act(async () => {
-      panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+      // See the recentre test near the top of this file for why this starts near center then drags out.
+      panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
     })
     expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.3, 5)
 
@@ -1527,15 +1547,15 @@ describe('SwirlScreen gestures', () => {
       expect(getLastControlsProps().visible).toBe(true)
     })
 
-    it('hides on a tap while visible, without swapping colors', async () => {
+    it('swaps colors on a tap without hiding the controls', async () => {
       await renderScreen()
 
       await act(async () => {
         singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
       })
 
-      expect(getLastControlsProps().visible).toBe(false)
-      expect(setForegroundColors).not.toHaveBeenCalled()
+      expect(getLastControlsProps().visible).toBe(true)
+      expect(setForegroundColors).toHaveBeenCalledWith(['#000000'])
     })
 
     it('hides when a pinch starts', async () => {
@@ -1583,7 +1603,7 @@ describe('SwirlScreen gestures', () => {
       expect(setPattern).toHaveBeenCalledWith('rings')
     })
 
-    it('hides when the direction is flipped via a two-finger long press', async () => {
+    it('hides when the canvas is stopped via a two-finger long press', async () => {
       await renderScreen()
 
       await act(async () => {
@@ -1591,7 +1611,7 @@ describe('SwirlScreen gestures', () => {
       })
 
       expect(getLastControlsProps().visible).toBe(false)
-      expect(setRotationSpeed).toHaveBeenCalledWith(-1)
+      expect(setRotationSpeed).toHaveBeenCalledWith(0)
     })
 
     // Regression: a gesture-triggered hide used to also arm a passive timer that brought the controls
@@ -1602,9 +1622,10 @@ describe('SwirlScreen gestures', () => {
     // way back is an edge hover/press.
     it('never reappears on its own after a gesture hides it, no matter how long you wait', async () => {
       await renderScreen()
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
 
       await act(async () => {
-        singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
+        pinchGesture.__handlers.start?.()
       })
       expect(getLastControlsProps().visible).toBe(false)
 
@@ -1617,6 +1638,12 @@ describe('SwirlScreen gestures', () => {
 
     it('stays hidden through a whole streak of quick color-swap taps, with nothing bringing it back on its own', async () => {
       await renderScreen()
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+      })
+      expect(getLastControlsProps().visible).toBe(false)
 
       for (let i = 0; i < 5; i += 1) {
         await act(async () => {
@@ -1655,14 +1682,15 @@ describe('SwirlScreen gestures', () => {
 
     it('reveals via an edge press once hidden, and resets the idle-fade clock from that moment', async () => {
       const { getByTestId } = await renderScreen()
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
 
       await act(async () => {
-        singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
+        pinchGesture.__handlers.start?.()
       })
       expect(getLastControlsProps().visible).toBe(false)
 
       await act(async () => {
-        fireEvent(getByTestId('edge-reveal-top-left'), 'pressIn')
+        fireEvent(getByTestId('edge-reveal-top-left'), 'press')
       })
       expect(getLastControlsProps().visible).toBe(true)
 
@@ -1681,9 +1709,10 @@ describe('SwirlScreen gestures', () => {
 
     it('reveals via an edge hover too, not just a press', async () => {
       const { getByTestId } = await renderScreen()
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
 
       await act(async () => {
-        singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
+        pinchGesture.__handlers.start?.()
       })
       expect(getLastControlsProps().visible).toBe(false)
 
@@ -1775,8 +1804,8 @@ describe('SwirlScreen gestures', () => {
     })
 
     // handleCanvasTap (index.tsx) treats an open group sheet as its own kind of chrome to dismiss
-    // first, the same way it already treated the plain on-screen controls — see the "hides on a tap
-    // while visible, without swapping colors" case above for that half.
+    // first, ahead of the plain color-swap — see the "swaps colors on a tap without hiding the
+    // controls" case above for the ordinary, no-chrome-open case.
     it('closes the group sheet on a tap, without swapping colors', async () => {
       const close = jest.fn()
       mockedUseControlGroupSheetDrawer.mockReturnValue({ close, isOpen: true, isVisible: true, open: jest.fn() })
@@ -1790,11 +1819,11 @@ describe('SwirlScreen gestures', () => {
       expect(setForegroundColors).not.toHaveBeenCalled()
     })
 
-    // Exactly two taps, matching the plain controlsVisible case: the drawer-dismissing tap also hides
-    // the controls, rather than leaving a third tap to hide the now-empty trigger stack. Re-mocking
-    // isOpen/isVisible to false and rerendering stands in for @rific/drawer's own isOpen flipping the
-    // instant close() is called — see the "resumes idle-fading once the group sheet closes again" case
-    // above for the same rerender technique.
+    // Exactly two taps: the drawer-dismissing tap only closes the sheet, so a second tap (once the
+    // sheet has actually closed) is what swaps colors. Re-mocking isOpen/isVisible to false and
+    // rerendering stands in for @rific/drawer's own isOpen flipping the instant close() is called —
+    // see the "resumes idle-fading once the group sheet closes again" case above for the same
+    // rerender technique.
     it('swaps colors on the tap right after the drawer-dismissing tap', async () => {
       const close = jest.fn()
       mockedUseControlGroupSheetDrawer.mockReturnValue({ close, isOpen: true, isVisible: true, open: jest.fn() })
@@ -1820,8 +1849,7 @@ describe('SwirlScreen gestures', () => {
 
     // handleCanvasTap treats an open gesture-target fan as its own kind of chrome to dismiss first,
     // ahead of even the group-sheet check — a tap on the canvas while the fan is open only closes the
-    // fan, it doesn't also hide the whole row in the same tap (unlike the group-sheet case above),
-    // matching the primary FAB's own "press away" and leaving a second tap to hide everything normally.
+    // fan, matching the primary FAB's own "press away" and leaving a second tap to swap colors normally.
     it('closes the gesture-target fan on a tap, without hiding the controls or swapping colors', async () => {
       await renderScreen()
 
@@ -1838,8 +1866,8 @@ describe('SwirlScreen gestures', () => {
     })
 
     // Exactly two taps, matching the group-sheet case: the fan-dismissing tap only closes the fan, so
-    // a second tap is what actually hides the controls.
-    it('hides the controls on the tap right after the fan-dismissing tap', async () => {
+    // a second tap is what swaps colors.
+    it('swaps colors on the tap right after the fan-dismissing tap', async () => {
       await renderScreen()
 
       await act(async () => {
@@ -1848,13 +1876,13 @@ describe('SwirlScreen gestures', () => {
       await act(async () => {
         singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
       })
-      expect(getLastControlsProps().visible).toBe(true)
+      expect(setForegroundColors).not.toHaveBeenCalled()
 
       await act(async () => {
         singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
       })
 
-      expect(getLastControlsProps().visible).toBe(false)
+      expect(setForegroundColors).toHaveBeenCalledWith(['#000000'])
     })
 
     // Answers the "does pinch/rotate still work with a drawer open" question directly: those two
@@ -2052,6 +2080,9 @@ describe('SwirlScreen gestures', () => {
     // callback moves the pattern with no settings mock change and no rerender in between — exactly
     // the low-latency path a real slider drag takes via onLiveValue, bypassing the settings → effect
     // round trip entirely (see speedRateBridge.tsx and SettingSlider's own onLiveValue comment).
+    // Rotation/mirror-rotation/zoom can also be set live from the canvas's own outer-field drag (see
+    // useEpicenter.ts) — a separate write path straight into the real settings, not this bridge, which
+    // coexists with these sliders rather than replacing them.
     it('rotation: a live rate write moves rotation on the very next frame step', async () => {
       await renderScreen()
       const before = getLastSpiralProps().rotation.value
@@ -2064,21 +2095,6 @@ describe('SwirlScreen gestures', () => {
       // BASE_ROTATION_DURATION_MS is 12000 (index.tsx): (360/12000) * 5 * 6000 = 900.
       expect(getLastSpiralProps().rotation.value).toBeCloseTo(before + 900, 5)
       expect(setRotationSpeed).not.toHaveBeenCalled()
-    })
-
-    it('rotation: does not move while frozen', async () => {
-      await renderScreen()
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-      const before = getLastSpiralProps().rotation.value
-
-      await act(async () => {
-        getRegisteredSpeedRateWriters().writeRotationRate(5)
-        stepBaseRotation(6000)
-      })
-
-      expect(getLastSpiralProps().rotation.value).toBe(before)
     })
 
     it('mirror rotation: a live rate write moves mirrorRotation, and a negative value flips its sign, on the very next frame step', async () => {
@@ -2103,22 +2119,6 @@ describe('SwirlScreen gestures', () => {
       expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
     })
 
-    it('mirror rotation: does not move while frozen', async () => {
-      mockSettings({ mirrorLines: 4 })
-      await renderScreen()
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-      const before = getLastSpiralProps().mirrorRotation.value
-
-      await act(async () => {
-        getRegisteredSpeedRateWriters().writeMirrorRotationRate(1)
-        stepMirrorProgress(1000)
-      })
-
-      expect(getLastSpiralProps().mirrorRotation.value).toBe(before)
-    })
-
     it('zoom: a live rate write moves pulse, and a negative value flips reversed, on the very next frame step', async () => {
       await renderScreen()
       const before = getLastSpiralProps().pulse.value
@@ -2140,21 +2140,6 @@ describe('SwirlScreen gestures', () => {
       expect(setZoomSpeed).not.toHaveBeenCalled()
     })
 
-    it('zoom: does not move while frozen', async () => {
-      await renderScreen()
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-      const before = getLastSpiralProps().pulse.value
-
-      await act(async () => {
-        getRegisteredSpeedRateWriters().writeZoomRate(3)
-        stepBasePulse(1000)
-      })
-
-      expect(getLastSpiralProps().pulse.value).toBe(before)
-    })
-
     it('foreground cycle: a live rate write moves foregroundCycleProgress on the very next frame step', async () => {
       await renderScreen()
       const before = getLastSpiralProps().foregroundCycleProgress.value
@@ -2169,21 +2154,6 @@ describe('SwirlScreen gestures', () => {
       expect(setForegroundCycleSpeed).not.toHaveBeenCalled()
     })
 
-    it('foreground cycle: does not move while frozen', async () => {
-      await renderScreen()
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-      const before = getLastSpiralProps().foregroundCycleProgress.value
-
-      await act(async () => {
-        getRegisteredSpeedRateWriters().writeForegroundCycleRate(3)
-        stepForegroundCycleProgress(1000)
-      })
-
-      expect(getLastSpiralProps().foregroundCycleProgress.value).toBe(before)
-    })
-
     it('background cycle: a live rate write moves backgroundCycleProgress on the very next frame step', async () => {
       await renderScreen()
       const before = getLastSpiralProps().backgroundCycleProgress.value
@@ -2195,21 +2165,6 @@ describe('SwirlScreen gestures', () => {
 
       expect(getLastSpiralProps().backgroundCycleProgress.value).toBeCloseTo(before + 0.5, 5)
       expect(setBackgroundCycleSpeed).not.toHaveBeenCalled()
-    })
-
-    it('background cycle: does not move while frozen', async () => {
-      await renderScreen()
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-      const before = getLastSpiralProps().backgroundCycleProgress.value
-
-      await act(async () => {
-        getRegisteredSpeedRateWriters().writeBackgroundCycleRate(3)
-        stepBackgroundCycleProgress(1000)
-      })
-
-      expect(getLastSpiralProps().backgroundCycleProgress.value).toBe(before)
     })
 
     // Friction takes the raw bounceFriction slider value, not a speed — this proves the write
@@ -2228,27 +2183,6 @@ describe('SwirlScreen gestures', () => {
       // (0.3 / 3500) * 3500 = 0.3.
       expect(getLastSpiralProps().gravityParticleProgress.value).toBeCloseTo(before + 0.3, 5)
       expect(setBounceFriction).not.toHaveBeenCalled()
-    })
-
-    // The one site deliberately NOT gated by frozenShared — gravityParticleProgress's own
-    // useLoopingProgress call passes a literal `false` for frozen (the well's swirl is gravity's
-    // effect, not a speed-mode control), so this write callback has to match that, unlike every other
-    // site above.
-    it('friction: still moves while frozen, unlike every other speed site', async () => {
-      await renderScreen()
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-      const before = getLastSpiralProps().gravityParticleProgress.value
-
-      await act(async () => {
-        // bounceFriction 0 (min) maps to the max speed, 15.
-        getRegisteredSpeedRateWriters().writeGravityParticleRate(0)
-        stepGravityParticleProgress(350)
-      })
-
-      // (15 / 3500) * 350 = 1.5, wrapping to 0.5.
-      expect(getLastSpiralProps().gravityParticleProgress.value).toBeCloseTo(before + 0.5, 5)
     })
   })
 
@@ -2286,20 +2220,21 @@ describe('SwirlScreen gestures', () => {
     })
 
     it("snaps the pattern's rotation angle to the nearest multiple of 360 once it's stopped, not a literal 0", async () => {
-      await renderScreen() // default rotationSpeed 1 — actively rotating at first
+      const { rerender } = await renderScreen() // default rotationSpeed 1 — actively rotating at first
       // BASE_ROTATION_DURATION_MS is 12000 (index.tsx) — at speed 1 that's a 12000ms lap. Stepping
       // 11800ms lands baseRotation just short of a full lap (354°), closer to 360 (6° away) than 0
-      // (354° away) — nearestMultipleOf360(354) = Math.round(354 / 360) * 360 = 360.
+      // (354° away) — nearestMultipleOf(354, 360) = Math.round(354 / 360) * 360 = 360.
       await act(async () => {
         stepBaseRotation(11800)
       })
       expect(getLastSpiralProps().rotation.value).toBeCloseTo(354, 5)
 
-      // Stop it (frozen, same as resetRotation's own guard requires) so the reset's rotation half
-      // actually fires — see the test above for why an actively-rotating pattern would otherwise
+      // Stop it (rotationSpeed 0, same as resetRotation's own guard requires) so the reset's rotation
+      // half actually fires — see the test above for why an actively-rotating pattern would otherwise
       // leave rotation untouched.
+      mockSettings({ rotationSpeed: 0 })
       await act(async () => {
-        getLastControlsProps().onToggleFrozen()
+        rerender(<SwirlScreen />)
       })
 
       await act(async () => {
@@ -2315,7 +2250,12 @@ describe('SwirlScreen gestures', () => {
 
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
-        panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+        // Starts within the outer-field grab radius (see useEpicenter.ts's GRAB_RADIUS_PX) so this
+        // still counts as a direct grab of the epicentre, then drags on out to 0.3 — glideTo tracks the
+        // live touch position regardless of where the gesture started, so the resulting position is
+        // identical to a plain far-away start under the old, pre-grab-radius behavior.
+        panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        panGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
       })
       expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.3, 5)
 
@@ -2331,11 +2271,13 @@ describe('SwirlScreen gestures', () => {
     // position (see ControlGroupTopSheetContent's own comment on why that tap got dropped).
     it('resetPattern resets rotation and position together, in a single call', async () => {
       const { width, height } = Dimensions.get('window')
-      await renderScreen() // default rotationSpeed 1 — actively rotating at first
+      const { rerender } = await renderScreen() // default rotationSpeed 1 — actively rotating at first
 
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
-        panGesture.__handlers.start?.({ x: width / 2 + width * 0.2, y: height / 2 })
+        // See resetPattern's own recentre test above for why this starts near center then drags out.
+        panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        panGesture.__handlers.update?.({ x: width / 2 + width * 0.2, y: height / 2 })
       })
       // A small step (well under half a lap), so the resulting angle snaps back toward 0 once
       // stopped, the same "nearest multiple of 360" math the dedicated rotation reset tests cover.
@@ -2345,10 +2287,11 @@ describe('SwirlScreen gestures', () => {
       expect(getLastSpiralProps().epicenterX.value).not.toBe(0)
       expect(getLastSpiralProps().rotation.value).not.toBe(0)
 
-      // Stopped, so the rotation half of reset actually fires — see the tests above for why an
-      // actively-rotating pattern would otherwise leave rotation as-is.
+      // Stopped (rotationSpeed 0), so the rotation half of reset actually fires — see the tests above
+      // for why an actively-rotating pattern would otherwise leave rotation as-is.
+      mockSettings({ rotationSpeed: 0 })
       await act(async () => {
-        getLastControlsProps().onToggleFrozen()
+        rerender(<SwirlScreen />)
       })
 
       await act(async () => {
@@ -2382,7 +2325,7 @@ describe('SwirlScreen gestures', () => {
 
     it('snaps the mirror rotation to the nearer of {0, 1} full laps once mirrorRotationSpeed is stopped, not an unconditional 0', async () => {
       mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 2 })
-      await renderScreen()
+      const { rerender } = await renderScreen()
       // BASE_ROTATION_DURATION_MS is 12000 (index.tsx) — at speed 2 that's a 6000ms lap. Stepping
       // 5900ms lands mirrorProgress just short of a full lap (progress ≈ 0.983), closer to 1 than 0.
       await act(async () => {
@@ -2390,8 +2333,9 @@ describe('SwirlScreen gestures', () => {
       })
       expect(getLastSpiralProps().mirrorRotation.value).toBeGreaterThan(300) // well past the 180° halfway point
 
+      mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 0 })
       await act(async () => {
-        getLastControlsProps().onToggleFrozen()
+        rerender(<SwirlScreen />)
       })
 
       await act(async () => {
@@ -2413,10 +2357,12 @@ describe('SwirlScreen gestures', () => {
       })
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
-        // The mirror anchor has no wedge of its own (see useEpicenter.ts's onUpdate comment), so it
-        // tracks this touch point directly — no separate hit-test offset needed the way pattern's own
-        // wedge correction would.
-        panGesture.__handlers.start?.({ x: width / 2 + width * 0.2, y: height / 2 })
+        // Starts within the outer-field grab radius (see useEpicenter.ts's GRAB_RADIUS_PX) so this
+        // still counts as a direct grab of the mirror anchor, then drags on out — see resetPattern's
+        // own recentre test above for the same reasoning. The mirror anchor has no wedge of its own
+        // (see useEpicenter.ts's onUpdate comment), so it tracks the live touch position directly.
+        panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        panGesture.__handlers.update?.({ x: width / 2 + width * 0.2, y: height / 2 })
       })
       expect(getLastSpiralProps().mirrorAnchorX.value).toBeCloseTo(0.2, 5)
 
@@ -2473,14 +2419,19 @@ describe('SwirlScreen gestures', () => {
       expect(cancelAnimation).not.toHaveBeenCalled()
     })
 
-    // flipDirections (the two-finger long press — see the gesture describe block above) only negates
+    // stopAndSnapGesture (the two-finger long press — see the gesture describe block above) zeroes
     // settings.rotationSpeed/zoomSpeed, which effectiveRotationSpeed's audio-reactive branch ignores
-    // entirely (it's mapped straight from treble instead) — so without audioRotationReversed, flipping
-    // would have no visible effect at all while the mic is on. treble 1 maps to MAX_ROTATION_SPEED (10)
-    // and quantizes cleanly back to itself (stepSize = 10/12, 10/stepSize = 12 exactly), so
+    // entirely (it's mapped straight from treble instead) — so without audioRotationReversed, the long
+    // press would have no visible effect at all while the mic is on. treble 1 maps to MAX_ROTATION_SPEED
+    // (10) and quantizes cleanly back to itself (stepSize = 10/12, 10/stepSize = 12 exactly), so
     // effectiveRotationSpeed starts at +10.
     it('a two-finger long press also reverses audio-reactive rotation direction, not just the sliders', async () => {
-      mockSettings({ audioReactiveEnabled: true })
+      // polygonSides: 0 disables trySnapPatternRotation's own snap-to-increment (90 / 0 is not
+      // finite — see its own guard in index.tsx) — this test is about direction persistence, not
+      // snapping, and the mocked withSpring here never invokes its finished callback, so a real snap
+      // would leave baseRotationPaused stuck true for the rest of the test and mask every assertion
+      // after it.
+      mockSettings({ audioReactiveEnabled: true, polygonSides: 0 })
       mockedUseAudioReactive.mockReturnValue({ bass: { value: 0 } as any, mid: 0, treble: 1, loudness: 0 })
       await renderScreen()
 
@@ -2515,7 +2466,8 @@ describe('SwirlScreen gestures', () => {
     })
 
     it('persists the reversed audio-reactive direction across the mic turning off and back on', async () => {
-      mockSettings({ audioReactiveEnabled: true })
+      // polygonSides: 0 disables the pattern snap — see the same comment on the test above.
+      mockSettings({ audioReactiveEnabled: true, polygonSides: 0 })
       mockedUseAudioReactive.mockReturnValue({ bass: { value: 0 } as any, mid: 0, treble: 1, loudness: 0 })
       const { rerender } = await renderScreen()
 
@@ -2524,12 +2476,12 @@ describe('SwirlScreen gestures', () => {
       })
       // audioRotationReversed is now true.
 
-      mockSettings({ audioReactiveEnabled: false }) // mic off
+      mockSettings({ audioReactiveEnabled: false, polygonSides: 0 }) // mic off
       await act(async () => {
         rerender(<SwirlScreen />)
       })
 
-      mockSettings({ audioReactiveEnabled: true }) // mic back on
+      mockSettings({ audioReactiveEnabled: true, polygonSides: 0 }) // mic back on
       await act(async () => {
         rerender(<SwirlScreen />)
       })
@@ -2602,22 +2554,26 @@ describe('SwirlScreen gestures', () => {
       expect(getLastControlsProps().activeTargets).toEqual(new Set(['pattern']))
     })
 
-    // At mirrorLines === 0 there's no wedge for 'mirror' to visibly move, but the gesture target
-    // itself is never locked out anymore (see index.tsx's mirrorAvailable comment) — selecting it
-    // still moves the mirror anchor, same as any other mirrorLines value, just with nothing on
-    // screen to show for it yet.
-    it("selecting 'mirror' alone while mirroring is off still drags the mirror anchor, not the pattern epicentre", async () => {
+    // At mirrorLines === 0 there's no wedge for 'mirror' to visibly move — the gesture target itself
+    // is never locked out (see index.tsx's mirrorAvailable comment; mirror can still be selected in
+    // the fan), but the drag it now dispatches redirects to the pattern epicentre instead of quietly
+    // moving an anchor with nothing to show for it (see useEpicenter.ts's own targetsPattern/
+    // targetsMirror fallback).
+    it("selecting 'mirror' alone while mirroring is off falls back to dragging the pattern epicentre, not the mirror anchor", async () => {
       const { width, height } = Dimensions.get('window')
       await renderScreen()
       await selectGestureTarget('mirror')
 
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
-        panGesture.__handlers.start?.({ x: width / 2 + width * 0.2, y: height / 2 })
+        // Starts within the outer-field grab radius (see useEpicenter.ts's GRAB_RADIUS_PX) so this
+        // still counts as a direct grab, then drags on out.
+        panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        panGesture.__handlers.update?.({ x: width / 2 + width * 0.2, y: height / 2 })
       })
-      // Moves the mirror anchor, not the pattern epicentre — epicenterX stays put.
-      expect(getLastSpiralProps().mirrorAnchorX.value).toBeCloseTo(0.2, 5)
-      expect(getLastSpiralProps().epicenterX.value).toBe(0)
+      // Moves the pattern epicentre, not the mirror anchor — mirrorAnchorX stays put.
+      expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.2, 5)
+      expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
     })
 
     it("in 'mirror' mode, dragging moves the mirror anchor and leaves the pattern epicentre untouched", async () => {
@@ -2629,8 +2585,10 @@ describe('SwirlScreen gestures', () => {
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
         // The mirror anchor has no wedge of its own (see useEpicenter.ts's onUpdate comment), so it
-        // tracks this touch point directly.
-        panGesture.__handlers.start?.({ x: width / 2 + width * 0.2, y: height / 2 })
+        // tracks this touch point directly. Starts within the grab radius (see the sibling test above)
+        // then drags on out.
+        panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        panGesture.__handlers.update?.({ x: width / 2 + width * 0.2, y: height / 2 })
       })
 
       const props = getLastSpiralProps()
@@ -2659,10 +2617,11 @@ describe('SwirlScreen gestures', () => {
       // reflected (see the pattern-side test above for the full reasoning). Touching down there only
       // fixes dragCopyIndex — the update below (a touch due east of center, at exactly the same
       // height) is the absolute position mirror actually ends up tracking, since it applies no
-      // wedge correction to undo.
+      // wedge correction to undo. 30px radius (not 100) keeps the start within GRAB_RADIUS_PX (see
+      // useEpicenter.ts) while preserving the angle.
       const angleRad = (60 * Math.PI) / 180
       await act(async () => {
-        panGesture.__handlers.start?.({ x: width / 2 + 100 * Math.cos(angleRad), y: height / 2 + 100 * Math.sin(angleRad) })
+        panGesture.__handlers.start?.({ x: width / 2 + 30 * Math.cos(angleRad), y: height / 2 + 30 * Math.sin(angleRad) })
         panGesture.__handlers.update?.({ x: width / 2 + width * 0.1, y: height / 2 })
       })
 
@@ -2687,8 +2646,10 @@ describe('SwirlScreen gestures', () => {
 
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
-        // Dragged way past the top-right corner in both axes.
-        panGesture.__handlers.start?.({ x: width / 2 + width * 5, y: height / 2 - height * 5 })
+        // See the recentre test near the top of this file for why this starts near center then drags
+        // out — dragged way past the top-right corner in both axes.
+        panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        panGesture.__handlers.update?.({ x: width / 2 + width * 5, y: height / 2 - height * 5 })
       })
 
       const props = getLastSpiralProps()
@@ -2916,53 +2877,6 @@ describe('SwirlScreen gestures', () => {
       expect(getLastSpiralProps().gravityCenterX.value).not.toBe(afterManyFrames)
     })
 
-    // Same decoupling as the pattern-epicentre test above, for the gravity handle's own throw this
-    // time: frozen used to stop this dead too (useDragPointPhysics's own `frozen` argument), which
-    // meant pressing speed mode's stop mid-throw would freeze the well itself, not just rotation/zoom/
-    // color cycling. It's scoped to just those now, so the throw has to keep decaying right through it.
-    it("stopping speed (frozen) does not stop the gravity handle's own throw physics", async () => {
-      const { width, height } = Dimensions.get('window')
-      mockSettings({ tiltEnabled: false, bounceFriction: 1 })
-      await renderScreen()
-      await selectGestureTarget('gravity')
-
-      const panGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        panGesture.__handlers.start?.({ x: width / 2, y: height / 2 })
-        panGesture.__handlers.end?.({ velocityX: width * 1, velocityY: 0 })
-      })
-
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-      expect(getLastControlsProps().frozen).toBe(true)
-
-      const beforeStep = getLastSpiralProps().gravityCenterX.value
-      await act(async () => {
-        stepGravityBounce(16)
-      })
-      // Still moving despite frozen — a no-op step (the old, gravity-freezing behavior) would have
-      // left this exactly at beforeStep.
-      expect(getLastSpiralProps().gravityCenterX.value).not.toBe(beforeStep)
-    })
-
-    // The well's own swirling-dust clock (see index.tsx's gravityParticleProgress) is gravity's own
-    // visual effect too, same as the handle's throw physics above — never gated on frozen at all now.
-    it("stopping speed (frozen) does not stop the gravity well's own particle clock", async () => {
-      await renderScreen()
-
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-      expect(getLastControlsProps().frozen).toBe(true)
-
-      const before = getLastSpiralProps().gravityParticleProgress.value
-      await act(async () => {
-        stepGravityParticleProgress(16)
-      })
-      expect(getLastSpiralProps().gravityParticleProgress.value).not.toBe(before)
-    })
-
     // Dragging the gravity well by hand is only a temporary override for precise placement, not a
     // standing claim that outlives the touch — the instant a finger lifts, tilt reclaims the well
     // regardless of how far away or how fast it was released. Tilt is on here (the default, mocked at
@@ -3037,10 +2951,12 @@ describe('SwirlScreen gestures', () => {
       // index.tsx rebuilds panGesture fresh on every render, so a mode switch needs a fresh reference.
       const patternPanGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
-        // Within SNAP_DISTANCE (0.05) of the gravity object dropped above, released gently — close
-        // enough to click home to *it*, not the unrelated screen center a fixed-origin check would
-        // still measure this same release against.
-        patternPanGesture.__handlers.start?.({ x: width / 2 + width * 0.31, y: height / 2 })
+        // Starts within the outer-field grab radius (see useEpicenter.ts's GRAB_RADIUS_PX) so this
+        // still counts as a direct grab, then drags on out to within SNAP_DISTANCE (0.05) of the
+        // gravity object dropped above, released gently — close enough to click home to *it*, not the
+        // unrelated screen center a fixed-origin check would still measure this same release against.
+        patternPanGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        patternPanGesture.__handlers.update?.({ x: width / 2 + width * 0.31, y: height / 2 })
         patternPanGesture.__handlers.end?.({ velocityX: 0, velocityY: 0 })
       })
 
@@ -3072,9 +2988,12 @@ describe('SwirlScreen gestures', () => {
       await selectGestureTarget('pattern')
       const patternPanGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
-        // Far enough from the gravity object that the release, even at zero velocity, is well outside
-        // the snap shortcut's SNAP_DISTANCE — this hands off to the ordinary decaying bounce instead.
-        patternPanGesture.__handlers.start?.({ x: width / 2 - width * 0.3, y: height / 2 })
+        // Starts within the outer-field grab radius (see useEpicenter.ts's GRAB_RADIUS_PX) so this
+        // still counts as a direct grab, then drags on out — far enough from the gravity object that
+        // the release, even at zero velocity, is well outside the snap shortcut's SNAP_DISTANCE — this
+        // hands off to the ordinary decaying bounce instead.
+        patternPanGesture.__handlers.start?.({ x: width / 2 - 20, y: height / 2 })
+        patternPanGesture.__handlers.update?.({ x: width / 2 - width * 0.3, y: height / 2 })
         patternPanGesture.__handlers.end?.({ velocityX: 0, velocityY: 0 })
       })
 
@@ -3090,53 +3009,16 @@ describe('SwirlScreen gestures', () => {
       expect(distanceFromGravityAfter).toBeLessThan(distanceFromGravityBefore)
     })
 
-    // Speed mode's own stop (frozen — see OnScreenControls' pause FAB) used to also freeze this same
-    // bounce dead, since useDragPointPhysics took `frozen` as an argument for every draggable point,
-    // gravity's pull included. It no longer does (see useEpicenter.ts/index.tsx's own gravityHandle
-    // comment) — frozen is scoped to exactly the speed values now (rotation/mirror rotation/zoom/color
-    // cycling), so gravity's own pull on the pattern epicentre has to keep running right through it.
-    it("stopping speed (frozen) does not stop gravity's own pull on the pattern epicentre", async () => {
-      const { width, height } = Dimensions.get('window')
-      mockSettings({ gravity: 4, bounceFriction: 0.5, tiltEnabled: false })
-      await renderScreen()
-
-      const patternPanGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        // Off-center and released with no velocity — well outside the snap shortcut's SNAP_DISTANCE
-        // from the (0, 0) gravity center, so this hands off to the ordinary decaying/gravity-pulled
-        // bounce, same shape as the off-center test above but pulling toward the default origin.
-        patternPanGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
-        patternPanGesture.__handlers.end?.({ velocityX: 0, velocityY: 0 })
-      })
-
-      // Speed's own stop — toggled directly, the same way OnScreenControls' pause FAB does, regardless
-      // of which gesture target happens to be active right now (the FAB itself only ever shows in
-      // 'speed' mode, but the underlying frozen state isn't gated on that).
-      await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-      expect(getLastControlsProps().frozen).toBe(true)
-
-      const distanceFromGravityBefore = Math.abs(getLastSpiralProps().epicenterX.value)
-      for (let frame = 0; frame < 50; frame++) {
-        await act(async () => {
-          stepBounce(16)
-        })
-      }
-      const distanceFromGravityAfter = Math.abs(getLastSpiralProps().epicenterX.value)
-
-      // Still visibly falling toward the gravity center despite frozen — a no-op bounce (the old,
-      // gravity-freezing behavior) would have left this exactly where it started.
-      expect(distanceFromGravityAfter).toBeLessThan(distanceFromGravityBefore)
-    })
-
     it("in 'pattern' mode (the default), dragging moves the pattern epicentre and leaves the mirror anchor untouched", async () => {
       const { width, height } = Dimensions.get('window')
       await renderScreen()
 
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
-        panGesture.__handlers.start?.({ x: width / 2 + width * 0.2, y: height / 2 })
+        // Starts within the outer-field grab radius (see useEpicenter.ts's GRAB_RADIUS_PX) so this
+        // still counts as a direct grab, then drags on out.
+        panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        panGesture.__handlers.update?.({ x: width / 2 + width * 0.2, y: height / 2 })
       })
 
       const props = getLastSpiralProps()
@@ -3255,7 +3137,7 @@ describe('SwirlScreen gestures', () => {
       expect(setMirrorLines).toHaveBeenLastCalledWith(3)
     })
 
-    it("in 'mirror' mode, a two-finger long press flips mirrorRotationSpeed instead of rotationSpeed/zoomSpeed", async () => {
+    it("in 'mirror' mode, a two-finger long press stops mirrorRotationSpeed instead of rotationSpeed/zoomSpeed", async () => {
       mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 2 })
       await renderScreen()
       await selectGestureTarget('mirror')
@@ -3264,9 +3146,30 @@ describe('SwirlScreen gestures', () => {
         twoFingerLongPress().__handlers.start?.()
       })
 
-      expect(setMirrorRotationSpeed).toHaveBeenCalledWith(-2)
+      expect(setMirrorRotationSpeed).toHaveBeenCalledWith(0)
       expect(setRotationSpeed).not.toHaveBeenCalled()
       expect(setZoomSpeed).not.toHaveBeenCalled()
+    })
+
+    it("in 'gravity' mode, a twist dials bounceFriction instead of tightness/mirrorLines, then commits on release", async () => {
+      mockSettings({ bounceFriction: 1 })
+      await renderScreen()
+      await selectGestureTarget('gravity')
+
+      const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
+      await act(async () => {
+        rotationGesture.__handlers.start?.()
+        rotationGesture.__handlers.end?.({ rotation: Math.PI / 6 })
+      })
+
+      // ROTATION_DEGREES_TO_FRICTION_SCALE is (5 - 0) / 180 ≈ 0.0278, so a 30° twist (Math.PI / 6) moves
+      // bounceFriction up by 30 * 0.0278 ≈ 0.833 above the mocked start of 1 — the friction counterpart
+      // to gravity's own pinch-driven strength control.
+      const [committedFriction] = setBounceFriction.mock.calls[setBounceFriction.mock.calls.length - 1]
+      expect(committedFriction).toBeCloseTo(1 + 30 * (5 / 180), 5)
+      expect(setTightness).not.toHaveBeenCalled()
+      expect(setMirrorLines).not.toHaveBeenCalled()
+      expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
     })
 
     it("in 'mirror' mode, a pinch live-tracks mirrorGap instead of zoomSpeed, then commits on release", async () => {
@@ -3433,65 +3336,10 @@ describe('SwirlScreen gestures', () => {
       expect(setMirrorGap).toHaveBeenLastCalledWith(0)
     })
 
-    // Exercises resetSwirl directly via the mocked OnScreenControls props (getLastControlsProps), not
-    // through the pause FAB's own long press — that FAB only renders in speed mode now (see
-    // OnScreenControls' own showPauseFab comment), so it isn't reachable in 'mirror' mode the way this
-    // test's own mode setup implies. Still a real, useful assertion about resetSwirl's own callback
-    // behavior; the title just shouldn't be read as "the pause FAB is reachable here."
-    it('resetSwirl recentres both points regardless of the active mode (called directly, independent of which mode can currently reach the pause FAB)', async () => {
-      const { width, height } = Dimensions.get('window')
-      mockSettings({ mirrorLines: 4 })
-      await renderScreen()
-      await selectGestureTarget('mirror') // so the drag below only moves the mirror anchor
-
-      const panGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        // The mirror anchor has no wedge of its own, so it tracks this touch point directly.
-        panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
-      })
-      expect(getLastSpiralProps().mirrorAnchorX.value).toBeCloseTo(0.3, 5)
-
-      await act(async () => {
-        getLastControlsProps().onResetSwirl()
-      })
-
-      expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
-      expect(getLastSpiralProps().epicenterX.value).toBe(0)
-    })
-
-    // With tilt unavailable, gravity is the sticky-position exception to "put it all back": once a
-    // throw or drag has parked it somewhere, nothing else moves it again until resetSwirl explicitly
-    // recentres it (with tilt on instead, releasing alone already hands it back — see the "hands
-    // control straight back to tilt" test above). resetSwirl has to be one of the things that still
-    // unconditionally covers it, same as pattern/mirror, even though gestureTarget itself is 'mirror'
-    // by the time this fires (mirroring the mode-independence the test above already proves for
-    // mirror/pattern).
-    it('resetSwirl also recentres a manually-thrown gravity handle when tilt is unavailable to do it on its own', async () => {
-      const { width, height } = Dimensions.get('window')
-      mockSettings({ tiltEnabled: false })
-      await renderScreen()
-      await selectGestureTarget('gravity')
-
-      const gravityPanGesture = gestureTestUtils.getLastGesture('Pan')
-      await act(async () => {
-        gravityPanGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
-        gravityPanGesture.__handlers.end?.({ velocityX: 0, velocityY: 0 })
-      })
-      expect(getLastSpiralProps().gravityCenterX.value).toBeCloseTo(0.3, 5)
-
-      await selectGestureTarget('mirror')
-      await act(async () => {
-        getLastControlsProps().onResetSwirl()
-      })
-
-      expect(getLastSpiralProps().gravityCenterX.value).toBe(0)
-    })
-
-    // Distinct from resetSwirl above: onResetAllSettings is the skip-previous FAB's own long press
-    // (see OnScreenControls), matching the settings drawer's own "Reset all" button exactly —
-    // resetSettings() for every persisted look/tuning field, plus the same resetPattern/resetMirror
-    // position-squaring resetSwirl already covers, but not gravityHandle.recenter()/
-    // gravityManualControl, which are resetSwirl's own addition and not part of the drawer's button.
+    // onResetAllSettings is the skip-previous FAB's own long press (see OnScreenControls), matching
+    // the settings drawer's own "Reset all" button exactly — resetSettings() for every persisted
+    // look/tuning field, plus resetPattern/resetMirror's own position-squaring (but not
+    // gravityHandle.recenter()/gravityManualControl, which aren't part of the drawer's button either).
     it('onResetAllSettings calls resetSettings and recentres both pattern and mirror', async () => {
       const { width, height } = Dimensions.get('window')
       mockSettings({ mirrorLines: 4 })
@@ -3500,7 +3348,9 @@ describe('SwirlScreen gestures', () => {
 
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
-        panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+        // See the recentre test near the top of this file for why this starts near center then drags out.
+        panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        panGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
       })
       expect(getLastSpiralProps().mirrorAnchorX.value).toBeCloseTo(0.3, 5)
 
@@ -3522,19 +3372,21 @@ describe('SwirlScreen gestures', () => {
         const panGesture = gestureTestUtils.getLastGesture('Pan')
         await act(async () => {
           // Straight out along the positive x-axis from center is wedge 0 (identity correction), so
-          // the pattern epicentre tracks this touch point directly too.
-          panGesture.__handlers.start?.({ x: width / 2 + width * 0.2, y: height / 2 })
+          // the pattern epicentre tracks this touch point directly too. Starts within the outer-field
+          // grab radius (see useEpicenter.ts's GRAB_RADIUS_PX) so this still counts as a direct grab.
+          panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + width * 0.2, y: height / 2 })
         })
         const epicenterBefore = getLastSpiralProps().epicenterX.value
         expect(epicenterBefore).not.toBe(0)
 
         await selectGestureTarget('mirror')
-        // index.tsx rebuilds panGesture fresh on every render, so a mode switch needs a fresh reference
-        // — the same reasoning as the "resetSwirl" test above.
+        // index.tsx rebuilds panGesture fresh on every render, so a mode switch needs a fresh reference.
         const mirrorPanGesture = gestureTestUtils.getLastGesture('Pan')
         await act(async () => {
           // The mirror anchor has no wedge of its own, so it tracks this touch point directly.
-          mirrorPanGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+          mirrorPanGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+          mirrorPanGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
         })
         expect(getLastSpiralProps().mirrorAnchorX.value).toBeCloseTo(0.3, 5)
 
@@ -3547,287 +3399,682 @@ describe('SwirlScreen gestures', () => {
       })
     })
 
-    // 'speed' has no draggable point of its own (see useEpicenter.ts's GestureTarget comment) — these
-    // repurpose the same physical pan/long-press/pinch/rotation recognizers for setting rotationSpeed/
-    // mirrorRotationSpeed/zoomSpeed/cycle speed instead, rather than gliding/bouncing anything.
-    describe("'speed' mode", () => {
-      it("selecting 'speed' alone leaves both the pattern epicentre and the mirror anchor untouched by a drag", async () => {
+    // Rotation/zoom no longer have a dedicated 'speed' mode to switch into — the same one-finger drag
+    // that moves the pattern/mirror when it starts near their own center instead spins/zooms them when
+    // it starts further out (see useEpicenter.ts's GRAB_RADIUS_PX and panGesture's own onStart). These
+    // tests exercise that outer field directly, in plain 'pattern'/'mirror' mode.
+    describe('outer-field drag (rotate/zoom without a dedicated mode)', () => {
+      it('a touch within the grab radius still moves the epicentre directly', async () => {
         const { width, height } = Dimensions.get('window')
-        mockSettings({ mirrorLines: 4 })
         await renderScreen()
-        await selectGestureTarget('speed')
 
         const panGesture = gestureTestUtils.getLastGesture('Pan')
         await act(async () => {
-          panGesture.__handlers.start?.({ x: width / 2 + width * 0.2, y: height / 2 })
-          panGesture.__handlers.end?.({ velocityX: 0, velocityY: 0 })
+          // 40px is comfortably inside GRAB_RADIUS_PX (56).
+          panGesture.__handlers.start?.({ x: width / 2 + 40, y: height / 2 })
         })
 
-        expect(getLastSpiralProps().epicenterX.value).toBe(0)
-        expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
+        expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(40 / width, 5)
       })
 
-      // "Stop all speed settings" — every genuinely stoppable one goes to exactly 0, regardless of
-      // which the Pattern speed/Mirror speed toggle currently selects (see index.tsx's own
-      // stopAllSpeeds comment). foreground/backgroundCycleSpeed have no true "stopped" value of their
-      // own (MIN_CYCLE_SPEED is 0.1, never 0), so those two floor out at MIN_CYCLE_SPEED instead.
-      it("in 'speed' mode, a one-finger long press stops rotationSpeed, mirrorRotationSpeed, and zoomSpeed outright, and floors both cycle speeds", async () => {
-        mockSettings({ rotationSpeed: 3, mirrorRotationSpeed: -2, zoomSpeed: 4, foregroundCycleSpeed: 2, backgroundCycleSpeed: 3 })
-        await renderScreen()
-        await selectGestureTarget('speed')
-
-        const longPress = oneFingerLongPress()
-        await act(async () => {
-          longPress.__handlers.start?.({ x: 0, y: 0 })
-        })
-
-        expect(setRotationSpeed).toHaveBeenCalledWith(0)
-        expect(setMirrorRotationSpeed).toHaveBeenCalledWith(0)
-        expect(setZoomSpeed).toHaveBeenCalledWith(0)
-        expect(setForegroundCycleSpeed).toHaveBeenCalledWith(MIN_CYCLE_SPEED)
-        expect(setBackgroundCycleSpeed).toHaveBeenCalledWith(MIN_CYCLE_SPEED)
-      })
-
-      // "Grab and spin": the drag directly rotates the pattern around its own epicentre, live, the
-      // whole time it's held (see the dedicated live-drag tests further down) — release just hands off
-      // to whatever angular rate it was spinning at when you let go, the standard r×v/|r|² conversion
-      // from linear release velocity to angular velocity around a pivot (see useEpicenter.ts's own
-      // panGesture onEnd). Defaults to Pattern speed (speedTargetsMirror false) until the transport
-      // row's own alternating button says otherwise (see the sibling test below).
-      it("in 'speed' mode, a drag/swipe release sets rotationSpeed from the release's own angular velocity around the epicentre, when Pattern speed is selected", async () => {
+      it('a touch outside the grab radius spins the pattern instead of moving it, tracking the swept angle', async () => {
         const { width, height } = Dimensions.get('window')
         await renderScreen()
-        await selectGestureTarget('speed')
-
-        const panGesture = gestureTestUtils.getLastGesture('Pan')
-        await act(async () => {
-          // Released 1px to the right of the epicentre (screen center, since nothing's dragged it
-          // elsewhere) with a pure-vertical velocity — r=(1,0), v=(0,π) — so the cross product r×v
-          // reduces to exactly π, and DEGREES_PER_SECOND_TO_ROTATION_SPEED (1/30) turns that into a
-          // clean 6: ω = π rad/s = 180°/s, rotationSpeed = 180/30 = 6.
-          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 0, velocityY: Math.PI })
-        })
-
-        expect(setRotationSpeed).toHaveBeenCalledWith(expect.closeTo(6, 5))
-        expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
-      })
-
-      it("in 'speed' mode, a drag/swipe release sets mirrorRotationSpeed instead once Mirror speed is selected", async () => {
-        const { width, height } = Dimensions.get('window')
-        await renderScreen()
-        await selectGestureTarget('speed')
-        // onToggleSpeedTarget alternates — one press from the default (Pattern speed) lands on Mirror.
-        await act(async () => {
-          getLastControlsProps().onToggleSpeedTarget()
-        })
-
-        const panGesture = gestureTestUtils.getLastGesture('Pan')
-        await act(async () => {
-          // Same geometry as the Pattern speed test above, just spun the other way (negative
-          // velocityY) — same magnitude, opposite sign: -6.
-          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 0, velocityY: -Math.PI })
-        })
-
-        expect(setMirrorRotationSpeed).toHaveBeenCalledWith(expect.closeTo(-6, 5))
-        expect(setRotationSpeed).not.toHaveBeenCalled()
-      })
-
-      it("in 'speed' mode, a release landing exactly on the epicentre sets no speed at all (angular velocity is undefined there)", async () => {
-        const { width, height } = Dimensions.get('window')
-        await renderScreen()
-        await selectGestureTarget('speed')
-
-        const panGesture = gestureTestUtils.getLastGesture('Pan')
-        await act(async () => {
-          panGesture.__handlers.end?.({ x: width / 2, y: height / 2, velocityX: 500, velocityY: 500 })
-        })
-
-        expect(setRotationSpeed).not.toHaveBeenCalled()
-        expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
-      })
-
-      // The pause FAB (see OnScreenControls) eases rotation to a stop rather than disabling the
-      // gesture — grabbing and spinning the pattern still works live while frozen (it writes directly
-      // to baseRotation, see panGesture's own onUpdate), and letting go hands off to applySpeedRelease
-      // the same as an ordinary unfrozen release. This is the other half: the release itself has to
-      // actually lift frozen too, or the newly-set speed would never get to animate — baseRotationRate's
-      // own effect eases straight back to 0 on every render frozen stays true, regardless of what speed
-      // is current (see index.tsx's own comment on applySpeedRelease).
-      it("in 'speed' mode, releasing a drag/swipe resumes rotation even if speed was stopped (frozen) first", async () => {
-        const { width, height } = Dimensions.get('window')
-        // tiltEnabled: false so effectiveRotationSpeed falls back to the plain rotationSpeed setting
-        // (1) instead of speed mode's own tilt throttle (see speedTiltActive/speedTiltRotationRatio in
-        // index.tsx), which would otherwise read 0 here with no tilt input mocked — this test is about
-        // frozen/release, not tilt, so it isolates that the same way the off-center gravity tests above
-        // already do.
-        mockSettings({ tiltEnabled: false })
-        await renderScreen() // rotationSpeed 1
-        await selectGestureTarget('speed')
-
-        // Stop it — same as pressing the pause FAB.
-        await act(async () => {
-          getLastControlsProps().onToggleFrozen()
-        })
-        expect(getLastControlsProps().frozen).toBe(true)
-
-        // Confirms it's actually stopped before the release: frozen eases baseRotationRate to 0 (see
-        // index.tsx), so stepping the accumulator now should move nothing.
-        const beforeGrab = getLastSpiralProps().rotation.value
-        await act(async () => {
-          stepBaseRotation(1000)
-        })
-        expect(getLastSpiralProps().rotation.value).toBe(beforeGrab)
-
-        // Same release geometry as the plain (unfrozen) release test above — ω = π rad/s, rotationSpeed
-        // = 6.
-        const panGesture = gestureTestUtils.getLastGesture('Pan')
-        await act(async () => {
-          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 0, velocityY: Math.PI })
-        })
-
-        expect(setRotationSpeed).toHaveBeenCalledWith(expect.closeTo(6, 5))
-        // The release itself lifts frozen — letting go while spinning means "start it going again,"
-        // not a stop that quietly survives the release.
-        expect(getLastControlsProps().frozen).toBe(false)
-
-        // And it actually resumes: stepping the accumulator again now moves it, since frozen no longer
-        // eases baseRotationRate back to 0 every render.
-        const afterRelease = getLastSpiralProps().rotation.value
-        await act(async () => {
-          stepBaseRotation(1000)
-        })
-        expect(getLastSpiralProps().rotation.value).not.toBe(afterRelease)
-      })
-
-      // The live half of "grab and spin" — see index.tsx's own useEpicenter call site for
-      // baseRotation/mirrorProgress/mirrorRotationSign, threaded in specifically so this can write to
-      // them directly during the drag, not just on release.
-      it("in 'speed' mode, dragging live-rotates the pattern around the epicentre as the cursor moves, following the cursor's own angular position", async () => {
-        const { width, height } = Dimensions.get('window')
-        await renderScreen()
-        await selectGestureTarget('speed')
         const initialRotation = getLastSpiralProps().rotation.value
 
         const panGesture = gestureTestUtils.getLastGesture('Pan')
         await act(async () => {
-          // Starts due east of the epicentre (0°) and sweeps to due south (90° in this screen-Y-down
-          // atan2 convention) — a quarter turn, clockwise.
+          // Starts due east of the epicentre (0°, 100px out — well past GRAB_RADIUS_PX) and sweeps to
+          // due south at the same radius (90° in this screen-Y-down atan2 convention) — a pure
+          // tangential quarter-turn, no radial component.
           panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
           panGesture.__handlers.update?.({ x: width / 2, y: height / 2 + 100 })
         })
 
         expect(getLastSpiralProps().rotation.value).toBeCloseTo(initialRotation + 90, 5)
+        // The point itself never moved — this was a spin, not a drag.
+        expect(getLastSpiralProps().epicenterX.value).toBe(0)
+        expect(getLastSpiralProps().epicenterY.value).toBe(0)
       })
 
-      // The user's own example, verified directly: starting above the epicentre and dragging left
-      // traces a counterclockwise arc, which should read as *negative* rotation (see kaleidoscope.ts's
-      // own rotationMatrix — positive angleDeg is clockwise in this screen-space convention, same as
-      // atan2's own increasing-angle direction here).
-      it("in 'speed' mode, dragging left while above the epicentre rotates counterclockwise", async () => {
+      // Without this, baseRotation's own ambient per-frame accumulator (see index.tsx's frame
+      // callback) keeps adding its own stale, pre-drag motion underneath the live "grab and spin"
+      // write above — so what you'd see is the old rotationSpeed plus your finger, not your finger
+      // taking full control, only catching up to your intended new rate once release finally calls
+      // setRotationSpeed. Default rotationSpeed is 1 (see mockSettings' own default), so the ambient
+      // accumulator would normally keep moving on its own here if it weren't suspended.
+      it('while an outer-field drag is live, it takes over completely — the ambient auto-spin is suspended, not added to', async () => {
         const { width, height } = Dimensions.get('window')
         await renderScreen()
-        await selectGestureTarget('speed')
-        const initialRotation = getLastSpiralProps().rotation.value
-
-        const panGesture = gestureTestUtils.getLastGesture('Pan')
-        await act(async () => {
-          panGesture.__handlers.start?.({ x: width / 2, y: height / 2 - 100 })
-          panGesture.__handlers.update?.({ x: width / 2 - 100, y: height / 2 - 100 })
-        })
-
-        expect(getLastSpiralProps().rotation.value).toBeLessThan(initialRotation)
-        expect(getLastSpiralProps().rotation.value).toBeCloseTo(initialRotation - 45, 5)
-      })
-
-      it("in 'speed' mode, dragging live-rotates the mirror assembly instead once Mirror speed is selected, leaving the pattern's own rotation untouched", async () => {
-        const { width, height } = Dimensions.get('window')
-        mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 1 })
-        await renderScreen()
-        await selectGestureTarget('speed')
-        await act(async () => {
-          getLastControlsProps().onToggleSpeedTarget()
-        })
-        const initialRotation = getLastSpiralProps().rotation.value
-        const initialMirrorRotation = getLastSpiralProps().mirrorRotation.value
 
         const panGesture = gestureTestUtils.getLastGesture('Pan')
         await act(async () => {
           panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
-          panGesture.__handlers.update?.({ x: width / 2, y: height / 2 + 100 })
+        })
+        const duringDrag = getLastSpiralProps().rotation.value
+
+        await act(async () => {
+          // stepBaseRotation steps the same frame callback the ambient auto-spin runs on (index 0 —
+          // see its own comment) — if baseRotationPaused weren't set, this alone would move rotation.
+          stepBaseRotation(1000)
+        })
+        expect(getLastSpiralProps().rotation.value).toBe(duringDrag)
+
+        await act(async () => {
+          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 0, velocityY: Math.PI })
+        })
+        const afterRelease = getLastSpiralProps().rotation.value
+
+        await act(async () => {
+          stepBaseRotation(1000)
+        })
+        // Resumed: the ambient accumulator picks back up once the drag's own release has landed.
+        expect(getLastSpiralProps().rotation.value).not.toBe(afterRelease)
+      })
+
+      // Same fix as the rotation test above, for pattern's own ambient zoom (basePulse) instead of
+      // baseRotation. Default zoomSpeed is 1, so basePulse would normally keep advancing on its own.
+      it('while an outer-field drag is live, the ambient zoom is suspended too, not added to', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+        })
+        const duringDrag = getLastSpiralProps().pulse.value
+
+        await act(async () => {
+          // stepBasePulse steps the same frame callback zoomSpeed's own ambient rate runs on (index 2).
+          stepBasePulse(1000)
+        })
+        expect(getLastSpiralProps().pulse.value).toBe(duringDrag)
+      })
+
+      it('a purely radial outer-field sweep zooms the pattern live without rotating it', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+        const initialRotation = getLastSpiralProps().rotation.value
+        const initialPulse = getLastSpiralProps().pulse.value
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          // Same angle (due east) throughout, radius growing from 100 to 250 — a pure radial sweep, no
+          // tangential component. RADIAL_PIXELS_TO_PULSE_SCALE is 1 / (width * 9), so a 150px radial
+          // sweep nudges pulse by 150 / (width * 9).
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + 250, y: height / 2 })
         })
 
-        expect(getLastSpiralProps().mirrorRotation.value).toBeCloseTo(initialMirrorRotation + 90, 5)
+        expect(getLastSpiralProps().pulse.value - initialPulse).toBeCloseTo(150 / (width * 9), 5)
         expect(getLastSpiralProps().rotation.value).toBe(initialRotation)
       })
 
-      it("in 'speed' mode, a pinch adjusts zoomSpeed linearly from its current value, live, then commits on release", async () => {
-        mockSettings({ zoomSpeed: 2 })
+      it('a diagonal outer-field sweep blends rotation and zoom from a single swipe', async () => {
+        const { width, height } = Dimensions.get('window')
         await renderScreen()
-        await selectGestureTarget('speed')
+        const initialRotation = getLastSpiralProps().rotation.value
+        const initialPulse = getLastSpiralProps().pulse.value
 
-        const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
         await act(async () => {
-          pinchGesture.__handlers.start?.()
-          // PINCH_SCALE_TO_ZOOM_SPEED_SCALE is MAX_ZOOM_SPEED / 1.5 ≈ 6.667, so (1.15 - 1) * 6.667 = 1
-          // above the mocked zoomSpeed of 2.
-          pinchGesture.__handlers.update?.({ scale: 1.15 })
+          // 0°/100px out to 30°/130px out — both the angle and the radius change in the same sweep,
+          // close enough in magnitude (see AXIS_SNAP_DOMINANCE_RATIO's own comment: the 30° sweep's own
+          // tangential arc length at the new 130px radius is (30° in rad) * 130 ≈ 68px, versus the 30px
+          // radial change — under the 3x dominance ratio, so this is a genuine blend, not a snap.
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + 130 * Math.cos((30 * Math.PI) / 180), y: height / 2 + 130 * Math.sin((30 * Math.PI) / 180) })
         })
-        const [liveZoomSpeed] = setZoomSpeed.mock.calls[setZoomSpeed.mock.calls.length - 1]
-        expect(liveZoomSpeed).toBeCloseTo(3, 5)
 
-        await act(async () => {
-          pinchGesture.__handlers.end?.({ scale: 1.15, velocity: 10 })
-        })
-        const [committedZoomSpeed] = setZoomSpeed.mock.calls[setZoomSpeed.mock.calls.length - 1]
-        expect(committedZoomSpeed).toBeCloseTo(3, 5)
+        expect(getLastSpiralProps().rotation.value).toBeCloseTo(initialRotation + 30, 5)
+        expect(getLastSpiralProps().pulse.value - initialPulse).toBeCloseTo(30 / (width * 9), 5)
       })
 
-      // The fix: unlike gravity's own strength pinch (still magnitude-only, sign fixed for the whole
-      // gesture — see PINCH_SCALE_TO_GRAVITY_SCALE), zoom speed's pinch is a direct linear offset from
-      // its own current value, the same full-range mapping the Zoom speed slider already uses — so
-      // pinching far enough carries it straight through zero into the opposite direction instead of
-      // sticking at 0.
-      it("in 'speed' mode, a pinch can cross zero into the opposite direction, following the same linear mapping the Zoom speed slider uses", async () => {
-        mockSettings({ zoomSpeed: -1 })
+      // See AXIS_SNAP_DOMINANCE_RATIO's own comment — a swipe overwhelmingly dominated by one axis
+      // snaps fully to it, so a swipe you're trying to keep purely radial (say, straight toward the
+      // epicentre, aiming for pure zoom) doesn't leak a little unwanted rotation from ordinary hand
+      // imprecision.
+      it('a swipe overwhelmingly dominated by radial motion snaps rotation to exactly 0, even with a tiny angular component', async () => {
+        const { width, height } = Dimensions.get('window')
         await renderScreen()
-        await selectGestureTarget('speed')
+        const initialRotation = getLastSpiralProps().rotation.value
+        const initialPulse = getLastSpiralProps().pulse.value
 
-        const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
         await act(async () => {
-          pinchGesture.__handlers.start?.()
-          // PINCH_SCALE_TO_ZOOM_SPEED_SCALE is MAX_ZOOM_SPEED / 1.5 ≈ 6.667, so (1.3 - 1) * 6.667 ≈ 2 —
-          // enough above the mocked zoomSpeed of -1 to cross zero into positive.
-          pinchGesture.__handlers.update?.({ scale: 1.3 })
+          // 0°/100px out to 2°/250px out — a 150px radial sweep against only a 2° wobble (whose own
+          // tangential arc length at 250px radius is under 9px, far under the 3x dominance threshold
+          // against 150px of radial motion).
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + 250 * Math.cos((2 * Math.PI) / 180), y: height / 2 + 250 * Math.sin((2 * Math.PI) / 180) })
         })
 
-        const [liveZoomSpeed] = setZoomSpeed.mock.calls[setZoomSpeed.mock.calls.length - 1]
-        expect(liveZoomSpeed).toBeCloseTo(1, 5)
+        expect(getLastSpiralProps().rotation.value).toBe(initialRotation)
+        expect(getLastSpiralProps().pulse.value - initialPulse).toBeCloseTo(150 / (width * 9), 5)
       })
 
-      // "Both together" — a single twist moves foreground and background cycle speed by the same
-      // delta, preserving whatever gap already existed between the two rather than forcing them equal.
-      it("in 'speed' mode, a twist nudges foreground and background cycle speed together, preserving their existing gap", async () => {
-        mockSettings({ foregroundCycleSpeed: 1, backgroundCycleSpeed: 2 })
+      it('a swipe overwhelmingly dominated by tangential motion snaps zoom to exactly 0, even with a tiny radial component', async () => {
+        const { width, height } = Dimensions.get('window')
         await renderScreen()
-        await selectGestureTarget('speed')
+        const initialRotation = getLastSpiralProps().rotation.value
+        const initialPulse = getLastSpiralProps().pulse.value
 
-        const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
         await act(async () => {
-          rotationGesture.__handlers.start?.()
-          // ROTATION_DEGREES_TO_CYCLE_SPEED_SCALE is (MAX_CYCLE_SPEED - MIN_CYCLE_SPEED) / 180 ≈
-          // 0.02722, so a 90° twist adds ≈2.45 to each.
-          rotationGesture.__handlers.update?.({ rotation: Math.PI / 2 })
+          // 0°/100px out to 90°/105px out — a 90° tangential sweep (arc length ≈165px at the new 105px
+          // radius) against only a 5px radial wobble, far under the 3x dominance threshold the other way.
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + 105 * Math.cos((90 * Math.PI) / 180), y: height / 2 + 105 * Math.sin((90 * Math.PI) / 180) })
         })
 
-        const [liveForeground] = setForegroundCycleSpeed.mock.calls[setForegroundCycleSpeed.mock.calls.length - 1]
-        const [liveBackground] = setBackgroundCycleSpeed.mock.calls[setBackgroundCycleSpeed.mock.calls.length - 1]
-        expect(liveForeground).toBeCloseTo(3.45, 2)
-        expect(liveBackground).toBeCloseTo(4.45, 2)
-        // The 1-unit gap from the mocked starting settings survives the shared nudge.
-        expect(liveBackground - liveForeground).toBeCloseTo(1, 5)
+        expect(getLastSpiralProps().rotation.value).toBeCloseTo(initialRotation + 90, 5)
+        expect(getLastSpiralProps().pulse.value).toBe(initialPulse)
+      })
+
+      it("in 'mirror' mode, an outer-field sweep's angular half only ever rotates the mirror assembly — mirror has no zoom of its own for the radial half to drive (see the cycle-speed tests below for what it drives instead)", async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 4 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+        const initialMirrorRotation = getLastSpiralProps().mirrorRotation.value
+        const initialPulse = getLastSpiralProps().pulse.value
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          // Sweeps both angle (0° -> 90°) and radius (100 -> 250px) at once, same as the pattern-side
+          // blend test above — mirror should still only respond to the angular half.
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2, y: height / 2 + 250 })
+        })
+
+        expect(getLastSpiralProps().mirrorRotation.value).toBeCloseTo(initialMirrorRotation + 90, 5)
+        expect(getLastSpiralProps().pulse.value).toBe(initialPulse)
+        expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
+      })
+
+      // At 0 mirror lines the fallback only covers position and rotation (see useEpicenter.ts's own
+      // targetsPattern/targetsMirror comment) — the radial half keeps driving colour-cycle speed exactly
+      // as it would with mirroring on, since cycling still visibly changes the single unmirrored copy's
+      // own colour regardless of mirrorLines. So a single sweep here splits: its angular half spins the
+      // *pattern* (mirror has no wedge left to spin), its radial half still fades the *mirror's* own
+      // cycle rate (never redirected to pattern zoom) — two different sinks from the one gesture.
+      it("at 0 mirror lines, an outer-field sweep's angular half falls back to rotating the pattern while its radial half still drives the mirror's own colour-cycle speed", async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 0 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+        const initialRotation = getLastSpiralProps().rotation.value
+        const initialMirrorRotation = getLastSpiralProps().mirrorRotation.value
+        const initialPulse = getLastSpiralProps().pulse.value
+        const beforeForeground = getLastSpiralProps().foregroundCycleProgress.value
+        const beforeBackground = getLastSpiralProps().backgroundCycleProgress.value
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          // Same 0° -> 90°, 100 -> 250px sweep as the mirroring-on test just above.
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2, y: height / 2 + 250 })
+          stepForegroundCycleProgress(1000)
+          stepBackgroundCycleProgress(1000)
+        })
+
+        // Rotation redirected to the pattern, not the (wedge-less) mirror.
+        expect(getLastSpiralProps().rotation.value).toBeCloseTo(initialRotation + 90, 5)
+        expect(getLastSpiralProps().mirrorRotation.value).toBe(initialMirrorRotation)
+        // Zoom never enters the picture — the radial half didn't redirect to pattern's zoom axis.
+        expect(getLastSpiralProps().pulse.value).toBe(initialPulse)
+        // The mirror's own colour-cycle speed is still live, exactly as if mirroring were on.
+        expect(getLastSpiralProps().foregroundCycleProgress.value).not.toBeCloseTo(beforeForeground, 5)
+        expect(getLastSpiralProps().backgroundCycleProgress.value).not.toBeCloseTo(beforeBackground, 5)
+      })
+
+      // Same fix as the pattern-side rotation/zoom tests above, for mirrorProgress's own ambient
+      // rotation instead — a nonzero mirrorRotationSpeed would normally keep it spinning on its own.
+      it('while an outer-field drag targeting mirror is live, its ambient rotation is suspended too, not added to', async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 2 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+        })
+        const duringDrag = getLastSpiralProps().mirrorRotation.value
+
+        await act(async () => {
+          // stepMirrorProgress steps the same frame callback mirrorRotationSpeed's own ambient rate
+          // runs on (index 1).
+          stepMirrorProgress(1000)
+        })
+        expect(getLastSpiralProps().mirrorRotation.value).toBe(duringDrag)
+      })
+
+      // Mirror's own outer-field radial axis has no zoom to spend it on (see the test just above), so it
+      // drives foreground/background colour-cycle speed instead — a live fader keyed off radial
+      // VELOCITY (how far the touch moved radially since the last frame), not absolute reach (see
+      // useEpicenter.ts's onUpdate) — holding still drops it back to a full stop, the same "follow the
+      // finger" feel rotation/zoom already have. Signed now, matching foreground/backgroundCycleSpeed's
+      // own bipolar range (see MIN_CYCLE_SPEED's own comment): sweeping inward (toward the outer-field
+      // origin) reads as positive/forward, sweeping outward as negative/reverse (see useEpicenter.ts's
+      // onUpdate for the sign flip). CYCLE_SPEED_VELOCITY_RANGE_PX is 12: a 6px single-frame radial move
+      // is exactly half that, landing the live rate at the midpoint of 0..MAX_CYCLE_SPEED (0..5): (0 + 5)
+      // / 2 = 2.5, i.e. 2.5 / 6000 laps/ms (BASE_CYCLE_DURATION_MS). Over a 1000ms frame step that's 5/12
+      // of a lap — same math the live-rate-write tests above use.
+      it('mirror mode: an outer-field radial sweep away from center live-drives both cycle progresses together in reverse, proportional to how fast it is currently moving', async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 4 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+        const beforeForeground = getLastSpiralProps().foregroundCycleProgress.value
+        const beforeBackground = getLastSpiralProps().backgroundCycleProgress.value
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          // Same angle (due east) throughout — a pure radial sweep, isolated from mirror rotation. 100
+          // -> 106px is a single 6px radial step outward (away from center), half of
+          // CYCLE_SPEED_VELOCITY_RANGE_PX.
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + 106, y: height / 2 })
+          stepForegroundCycleProgress(1000)
+          stepBackgroundCycleProgress(1000)
+        })
+
+        // Negative progress wraps the same way useLoopingProgress's own frame callback wraps it
+        // (next - Math.floor(next)) — a reverse rate crossing back below 0 lands near 1, not negative.
+        const expectedForeground = beforeForeground - 5 / 12
+        const expectedBackground = beforeBackground - 5 / 12
+        expect(getLastSpiralProps().foregroundCycleProgress.value).toBeCloseTo(expectedForeground - Math.floor(expectedForeground), 5)
+        expect(getLastSpiralProps().backgroundCycleProgress.value).toBeCloseTo(expectedBackground - Math.floor(expectedBackground), 5)
+        expect(setForegroundCycleSpeed).not.toHaveBeenCalled()
+        expect(setBackgroundCycleSpeed).not.toHaveBeenCalled()
+      })
+
+      it('mirror mode: an outer-field radial sweep toward center live-drives both cycle progresses together forward, the opposite direction from sweeping outward', async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 4 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+        const beforeForeground = getLastSpiralProps().foregroundCycleProgress.value
+        const beforeBackground = getLastSpiralProps().backgroundCycleProgress.value
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          // Same angle (due east), same 6px radial step as the outward test just above, just starting
+          // further out and swiping in instead of out: 106 -> 100 is a single 6px radial step inward
+          // (toward center).
+          panGesture.__handlers.start?.({ x: width / 2 + 106, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + 100, y: height / 2 })
+          stepForegroundCycleProgress(1000)
+          stepBackgroundCycleProgress(1000)
+        })
+
+        expect(getLastSpiralProps().foregroundCycleProgress.value).toBeCloseTo(beforeForeground + 5 / 12, 5)
+        expect(getLastSpiralProps().backgroundCycleProgress.value).toBeCloseTo(beforeBackground + 5 / 12, 5)
+        expect(setForegroundCycleSpeed).not.toHaveBeenCalled()
+        expect(setBackgroundCycleSpeed).not.toHaveBeenCalled()
+      })
+
+      it('mirror mode: holding the touch radially still drops the live cycle rate back to a full stop', async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 4 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          // A brisk sweep first (proves the rate really was up, not just never moved)...
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + 200, y: height / 2 })
+        })
+        const before = getLastSpiralProps().foregroundCycleProgress.value
+        await act(async () => {
+          stepForegroundCycleProgress(1000)
+        })
+        expect(getLastSpiralProps().foregroundCycleProgress.value).not.toBe(before)
+
+        await act(async () => {
+          // ...then holding at the exact same radius (deltaRadius === 0) without releasing.
+          panGesture.__handlers.update?.({ x: width / 2 + 200, y: height / 2 })
+        })
+        const stillBefore = getLastSpiralProps().foregroundCycleProgress.value
+        await act(async () => {
+          stepForegroundCycleProgress(1000)
+        })
+        // A held-still touch (deltaRadius === 0) drives the rate to exactly 0 regardless of direction —
+        // useLoopingProgress's own frame callback skips accumulating entirely once rate.value === 0, so
+        // progress doesn't move at all, not just slowly.
+        expect(getLastSpiralProps().foregroundCycleProgress.value).toBe(stillBefore)
+      })
+
+      it('mirror mode: a fast single-frame radial jump outward live-drives cycle speed down to -MAX_CYCLE_SPEED, clamped past it', async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 4 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+        const before = getLastSpiralProps().foregroundCycleProgress.value
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          // 100px in a single frame is well past CYCLE_SPEED_VELOCITY_RANGE_PX (12) — clamped to
+          // -MAX_CYCLE_SPEED (-5) rather than continuing to climb the faster the touch moves outward.
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + 200, y: height / 2 })
+          stepForegroundCycleProgress(1000)
+        })
+
+        // -MAX_CYCLE_SPEED (-5) / BASE_CYCLE_DURATION_MS (6000) * 1000ms = -5/6. Wrapped the same way
+        // useLoopingProgress's own frame callback wraps it (next - Math.floor(next)) — a reverse rate
+        // crossing back below 0 lands near 1, not negative.
+        const expected = before - 5 / 6
+        expect(getLastSpiralProps().foregroundCycleProgress.value).toBeCloseTo(expected - Math.floor(expected), 5)
+      })
+
+      it('mirror mode: releasing an outer-field radial drag commits the live signed rate to both foreground and background cycle speed together', async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 4 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          // Same 6px outward radial step as the live-drive test above — midpoint reverse speed -2.5.
+          panGesture.__handlers.update?.({ x: width / 2 + 106, y: height / 2 })
+          panGesture.__handlers.end?.({ x: width / 2 + 106, y: height / 2, velocityX: 0, velocityY: 0 })
+        })
+
+        expect(setForegroundCycleSpeed).toHaveBeenCalledWith(expect.closeTo(-2.5, 5))
+        expect(setBackgroundCycleSpeed).toHaveBeenCalledWith(expect.closeTo(-2.5, 5))
+      })
+
+      // The standard r×v/|r|² conversion from linear release velocity to angular velocity around a
+      // pivot (see useEpicenter.ts's own panGesture onEnd) — same math the app already uses elsewhere,
+      // just triggered by an outer-field release instead of a dedicated mode.
+      it('a fast flick release commits a sustained rotationSpeed from the angular velocity around the epicentre', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          // Released 1px to the right of the epicentre with a pure-vertical velocity — r=(1,0),
+          // v=(0,π) — so the cross product r×v reduces to exactly π, and
+          // DEGREES_PER_SECOND_TO_ROTATION_SPEED (1/30) turns that into a clean 6: ω = π rad/s =
+          // 180°/s, rotationSpeed = 180/30 = 6.
+          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 0, velocityY: Math.PI })
+        })
+
+        expect(setRotationSpeed).toHaveBeenCalledWith(expect.closeTo(6, 5))
+      })
+
+      // Default rotationSpeed is 1 (positive) in the settings mock, and setRotationSpeed here is just a
+      // spy — it never actually updates the settings this component reads, so the ambient accumulator's
+      // own rate (baseRotationRate) can only reflect the release's new, negative direction if
+      // applyPatternRotationRelease wrote it there directly and synchronously, rather than waiting on a
+      // settings round-trip that (in this test) never even arrives. Before the fix, this frame step
+      // would still use the stale positive rate and move rotation forward — a snap in the old direction
+      // that would then correct once (if) the real update landed.
+      it('immediately after a flick release that reverses direction, the ambient accumulator reflects the new rate right away, with no stale-rate snap back', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          // Opposite velocity from the flick test above — computes rotationSpeed -6, reversing the
+          // ambient rotationSpeed 1 the settings mock still (unchangingly) reports.
+          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 0, velocityY: -Math.PI })
+        })
+        expect(setRotationSpeed).toHaveBeenCalledWith(expect.closeTo(-6, 5))
+
+        const afterRelease = getLastSpiralProps().rotation.value
+        await act(async () => {
+          stepBaseRotation(1000)
+        })
+        expect(getLastSpiralProps().rotation.value).toBeLessThan(afterRelease)
+      })
+
+      // mirrorRotation is mirrorProgress (an unsigned 0..1 accumulator) * 360 * mirrorRotationSign — a
+      // release that reverses direction has to flip mirrorRotationSign, and without compensating
+      // mirrorProgress at the same time, that flip alone jumps the visual angle by a full swing of
+      // whatever fraction mirrorProgress currently holds (the exact "hard jerk" the mirrorRotationSign
+      // sync effect's own comment already describes for a related case). Verified via sin/cos rather
+      // than the raw degree value, since the fix can correctly land on an angle that's some multiple of
+      // 360° away from the pre-release one — visually identical, numerically different.
+      it("in 'mirror' mode, a flick release that reverses direction doesn't jump the mirror's current visual orientation", async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 4 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          // Sweeps a quarter turn (0° -> 90°) at the default positive mirrorRotationSign, landing
+          // mirrorProgress at a nontrivial 0.25 — enough that an uncompensated sign flip would be
+          // obviously visible, not lost in rounding near 0.
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2, y: height / 2 + 100 })
+        })
+        const beforeAngle = getLastSpiralProps().mirrorRotation.value
+
+        await act(async () => {
+          // Same reversed-velocity flick as the pattern-side reversal test above — computes a negative
+          // mirrorRotationSpeed, flipping mirrorRotationSign from its current +1.
+          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 0, velocityY: -Math.PI })
+        })
+        expect(setMirrorRotationSpeed).toHaveBeenCalledWith(expect.closeTo(-6, 5))
+
+        const afterAngle = getLastSpiralProps().mirrorRotation.value
+        const toRad = (deg: number) => (deg * Math.PI) / 180
+        expect(Math.cos(toRad(afterAngle))).toBeCloseTo(Math.cos(toRad(beforeAngle)), 5)
+        expect(Math.sin(toRad(afterAngle))).toBeCloseTo(Math.sin(toRad(beforeAngle)), 5)
+      })
+
+      it('a fast flick release also commits a sustained zoomSpeed from the radial velocity, with no rotation', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          // r=(1,0), v=(375,0) — purely radial (parallel to r), so the angular component is exactly 0
+          // and the whole release velocity goes into zoom instead.
+          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 375, velocityY: 0 })
+        })
+
+        expect(setRotationSpeed).toHaveBeenCalledWith(0)
+        const [zoomSpeedArg] = setZoomSpeed.mock.calls[setZoomSpeed.mock.calls.length - 1]
+        expect(zoomSpeedArg).toBeGreaterThan(0.15)
+      })
+
+      // RNGH's own velocity tracker doesn't always collapse to exactly 0 the instant a touch that was
+      // moving comes to a genuine stop — a release that felt completely still to the finger can still
+      // report a small nonzero velocity (see MIN_FLICK_RADIAL_VELOCITY_PX_PER_SEC's own comment in
+      // useEpicenter.ts). 20px/s is comfortably under that 30px/s floor, so it's filtered to exactly 0
+      // in useEpicenter.ts before ever reaching index.tsx's own MIN_FLICK_SPEED check.
+      it('a release with only residual (below-threshold) radial velocity commits zoomSpeed to exactly 0, not a small nonzero value', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 20, velocityY: 0 })
+        })
+
+        expect(setZoomSpeed).toHaveBeenCalledWith(0)
+      })
+
+      // Same dominant-axis snap as the live-drag tests above (see dominantAxisSnap's own comment in
+      // useEpicenter.ts), now applied to the release velocity itself — a release can carry its own
+      // small cross-axis component even when the live drag leading up to it was already cleanly
+      // snapped the whole way, since RNGH's own release-velocity tracker is a separate computation
+      // from anything onUpdate already did. r=(1,0) makes the release velocity's own components read
+      // directly: velocityY becomes the tangential (rotation) component, velocityX the radial (zoom)
+      // one. 50px/s alone clears MIN_FLICK_RADIAL_VELOCITY_PX_PER_SEC's own 30px/s noise floor (so
+      // this isn't just that fix again) but is still under a third of the 300px/s tangential velocity
+      // — overwhelmingly dominated, so it snaps to exactly 0 rather than nudging zoomSpeed at all.
+      it('a fast, mostly-tangential flick release commits zoomSpeed to exactly 0 despite a non-negligible radial component', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 50, velocityY: 300 })
+        })
+
+        expect(setZoomSpeed).toHaveBeenCalledWith(0)
+        const [rotationSpeedArg] = setRotationSpeed.mock.calls[setRotationSpeed.mock.calls.length - 1]
+        expect(rotationSpeedArg).toBeGreaterThan(0)
+      })
+
+      // The fix: a slow, deliberate release used to leave a barely-perceptible residual rate rather
+      // than actually stopping (see MIN_FLICK_SPEED's own comment in index.tsx) — below that deadzone,
+      // the release now commits to an exact, hard 0 instead.
+      it('a slow, deliberate release commits rotationSpeed to exactly 0 rather than a tiny residual rate', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          // r=(1,0), v=(0,0.01) — tiny enough that the resulting rotationSpeed (≈0.019) sits well under
+          // MIN_FLICK_SPEED (0.15).
+          panGesture.__handlers.end?.({ x: width / 2 + 1, y: height / 2, velocityX: 0, velocityY: 0.01 })
+        })
+
+        expect(setRotationSpeed).toHaveBeenCalledWith(0)
+      })
+
+      // 90° ÷ polygonSides (4 in defaultMockSettings, so 22.5° increments) — a slow release landing
+      // close enough to one snaps onto it.
+      it('a slow release near a valid snap angle springs the pattern onto it', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        const angleRad = (20 * Math.PI) / 180
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          // Tangential-only sweep from 0° to 20° — within SNAP_ANGLE_TOLERANCE_DEG (8) of the 22.5°
+          // increment.
+          panGesture.__handlers.update?.({ x: width / 2 + 100 * Math.cos(angleRad), y: height / 2 + 100 * Math.sin(angleRad) })
+        })
+        expect(getLastSpiralProps().rotation.value).toBeCloseTo(20, 5)
+
+        await act(async () => {
+          // A tiny, near-zero release velocity — well under MIN_FLICK_SPEED, so this settles rather
+          // than keeps spinning.
+          panGesture.__handlers.end?.({ x: width / 2 + 100 * Math.cos(angleRad), y: height / 2 + 100 * Math.sin(angleRad), velocityX: 0.001, velocityY: 0.001 })
+        })
+
+        expect(getLastSpiralProps().rotation.value).toBeCloseTo(22.5, 5)
+      })
+
+      it('a slow release far from any valid snap angle leaves the pattern exactly where it settled', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        const angleRad = (10 * Math.PI) / 180
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          // 10° is 10° from the 0° increment and 12.5° from the 22.5° one — both past
+          // SNAP_ANGLE_TOLERANCE_DEG (8), so neither should pull it in.
+          panGesture.__handlers.update?.({ x: width / 2 + 100 * Math.cos(angleRad), y: height / 2 + 100 * Math.sin(angleRad) })
+        })
+
+        await act(async () => {
+          panGesture.__handlers.end?.({ x: width / 2 + 100 * Math.cos(angleRad), y: height / 2 + 100 * Math.sin(angleRad), velocityX: 0.001, velocityY: 0.001 })
+        })
+
+        expect(getLastSpiralProps().rotation.value).toBeCloseTo(10, 5)
+      })
+
+      // Same snap formula, mirror's own way: 90° ÷ mirrorLines. A single mirror line snaps every 90°,
+      // so it can lock horizontal or vertical.
+      it('a slow release also snaps the mirror to its own nearest valid angle (90° ÷ mirrorLines)', async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 1 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        const angleRad = (85 * Math.PI) / 180
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + 100 * Math.cos(angleRad), y: height / 2 + 100 * Math.sin(angleRad) })
+        })
+        expect(getLastSpiralProps().mirrorRotation.value).toBeCloseTo(85, 5)
+
+        await act(async () => {
+          panGesture.__handlers.end?.({ x: width / 2 + 100 * Math.cos(angleRad), y: height / 2 + 100 * Math.sin(angleRad), velocityX: 0.001, velocityY: 0.001 })
+        })
+
+        expect(getLastSpiralProps().mirrorRotation.value).toBeCloseTo(90, 5)
+      })
+
+      // At 0 mirror lines there's no wedge for 'mirror' to rotate at all — selecting it now falls back
+      // to pattern instead (see useEpicenter.ts's own targetsPattern/targetsMirror fallback), so this
+      // whole gesture, start through release, acts on the pattern's own rotation and never touches the
+      // mirror assembly.
+      it("falls back to pattern's own rotation release at 0 mirror lines instead of the mirror's", async () => {
+        const { width, height } = Dimensions.get('window')
+        mockSettings({ mirrorLines: 0 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        const angleRad = (85 * Math.PI) / 180
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.update?.({ x: width / 2 + 100 * Math.cos(angleRad), y: height / 2 + 100 * Math.sin(angleRad) })
+        })
+
+        await act(async () => {
+          panGesture.__handlers.end?.({ x: width / 2 + 100 * Math.cos(angleRad), y: height / 2 + 100 * Math.sin(angleRad), velocityX: 0.001, velocityY: 0.001 })
+        })
+
+        expect(setRotationSpeed).toHaveBeenCalledWith(0)
+        expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
+        expect(getLastSpiralProps().mirrorRotation.value).toBe(0)
+      })
+
+      it('a release landing exactly on the epicentre sets no rotation or zoom at all (angular/radial velocity is undefined there)', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.start?.({ x: width / 2 + 100, y: height / 2 })
+          panGesture.__handlers.end?.({ x: width / 2, y: height / 2, velocityX: 500, velocityY: 500 })
+        })
+
         expect(setRotationSpeed).not.toHaveBeenCalled()
-        expect(setTightness).not.toHaveBeenCalled()
-        expect(setMirrorLines).not.toHaveBeenCalled()
+        expect(setZoomSpeed).not.toHaveBeenCalled()
+      })
+
+      // "Teleport, then keep dragging" — a long press ignores the grab radius entirely and glides the
+      // epicentre straight to wherever you're pressing (see useEpicenter.ts's longPressGesture, which
+      // already runs glideTargetsTo unconditionally), ready to keep tracking a following drag from
+      // there exactly like any other grab.
+      it('a long press outside the grab radius teleports the epicentre to the touch, ready to keep dragging', async () => {
+        const { width, height } = Dimensions.get('window')
+        await renderScreen()
+
+        const longPress = oneFingerLongPress()
+        await act(async () => {
+          longPress.__handlers.start?.({ x: width / 2 + 200, y: height / 2 })
+        })
+        expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(200 / width, 5)
+
+        const panGesture = gestureTestUtils.getLastGesture('Pan')
+        await act(async () => {
+          panGesture.__handlers.update?.({ x: width / 2 + 300, y: height / 2 })
+        })
+        expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(300 / width, 5)
       })
     })
   })
@@ -3948,8 +4195,10 @@ describe('SwirlScreen gestures', () => {
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
         // Touch overrides tilt's own pull outright while held — lands exactly on the finger regardless
-        // of wherever tilt had it rolling toward.
-        panGesture.__handlers.start?.({ x: width / 2 + width * 0.4, y: height / 2 })
+        // of wherever tilt had it rolling toward. Starts within the outer-field grab radius (see
+        // useEpicenter.ts's GRAB_RADIUS_PX) so this still counts as a direct grab, then drags on out.
+        panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        panGesture.__handlers.update?.({ x: width / 2 + width * 0.4, y: height / 2 })
         panGesture.__handlers.end?.({ velocityX: 0, velocityY: 0 })
       })
       // No release velocity, and 0.4 is well outside SNAP_DISTANCE of the gravity center (0, the
@@ -3971,7 +4220,9 @@ describe('SwirlScreen gestures', () => {
 
       const panGesture = gestureTestUtils.getLastGesture('Pan')
       await act(async () => {
-        panGesture.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+        // See the recentre test near the top of this file for why this starts near center then drags out.
+        panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
+        panGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
         panGesture.__handlers.end?.({ velocityX: 0, velocityY: 0 })
       })
       expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.3, 5)
@@ -3993,112 +4244,6 @@ describe('SwirlScreen gestures', () => {
         stepBounce(16)
       })
       expect(getLastSpiralProps().epicenterX.value).toBeGreaterThan(0)
-    })
-
-    // Commits straight into the real settings now (the same "commit on every update" shape the zoom
-    // pinch already uses), not a local override — so unlike the old single-target, ephemeral throttle,
-    // this persists past a mode switch. Tilt drives whichever of rotationSpeed/mirrorRotationSpeed
-    // speedTargetsMirror already has selected — the same target, same direction, the manual pan-drag/
-    // flick gestures already use — rather than driving both at once. Rings has a zoom dimension, so
-    // rawTiltY (left at 0 here) stays out of the rotation ratio entirely — see the zoomless-pattern
-    // test below for the fold-in case.
-    it("in 'speed' mode, tilting left/right spins the pattern (the default speed target) and persists into rotationSpeed, leaving mirrorRotationSpeed untouched", async () => {
-      mockSettings({ pattern: 'rings' })
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0.6 } as any, rawTiltY: { value: 0 } as any })
-      await renderScreen()
-      await act(async () => {
-        getLastControlsProps().onSelectGestureTarget('speed')
-      })
-
-      await act(async () => {
-        animatedReactionTestUtils.runAll()
-      })
-
-      // MAX_ROTATION_SPEED is 10 — 0.6 tilt lands at 6.
-      const [rotation] = setRotationSpeed.mock.calls[setRotationSpeed.mock.calls.length - 1]
-      expect(rotation).toBeCloseTo(6, 5)
-      expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
-      // Rings has a zoom dimension, so zoomSpeed is still live-written every reaction (same "commit on
-      // every update" shape as the rest) — just at 0, since no up/down tilt was applied.
-      const [zoom] = setZoomSpeed.mock.calls[setZoomSpeed.mock.calls.length - 1]
-      expect(zoom).toBeCloseTo(0, 5)
-    })
-
-    it("in 'speed' mode, tilting left/right spins the mirror instead once Mirror speed is selected — same direction as it would drive the pattern, not reversed — leaving rotationSpeed untouched", async () => {
-      mockSettings({ pattern: 'rings' })
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0.6 } as any, rawTiltY: { value: 0 } as any })
-      await renderScreen()
-      await act(async () => {
-        getLastControlsProps().onSelectGestureTarget('speed')
-        getLastControlsProps().onToggleSpeedTarget()
-      })
-
-      await act(async () => {
-        animatedReactionTestUtils.runAll()
-      })
-
-      // Same 0.6 tilt as the pattern-target test above, same MAX_MIRROR_ROTATION_SPEED of 10, same
-      // sign — 6, not -6: tilt is just another way of driving whichever target speedTargetsMirror
-      // already selected, not an independent control of both at once.
-      const [mirrorRotation] = setMirrorRotationSpeed.mock.calls[setMirrorRotationSpeed.mock.calls.length - 1]
-      expect(mirrorRotation).toBeCloseTo(6, 5)
-      expect(setRotationSpeed).not.toHaveBeenCalled()
-    })
-
-    it("in 'speed' mode, tilting up/down drives zoom speed on a zoom-capable pattern, and always also drives color-transition speed", async () => {
-      mockSettings({ pattern: 'rings' })
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0 } as any, rawTiltY: { value: 0.4 } as any })
-      await renderScreen()
-      await act(async () => {
-        getLastControlsProps().onSelectGestureTarget('speed')
-      })
-
-      await act(async () => {
-        animatedReactionTestUtils.runAll()
-      })
-
-      // MAX_ZOOM_SPEED is 10 — 0.4 tilt lands at 4.
-      const [zoom] = setZoomSpeed.mock.calls[setZoomSpeed.mock.calls.length - 1]
-      expect(zoom).toBeCloseTo(4, 5)
-
-      // Color-transition speed has no direction of its own (see MIN/MAX_CYCLE_SPEED), so only the
-      // magnitude matters — MAX_CYCLE_SPEED is 5, so 0.4 tilt lands at 2, well above the 0.1 floor.
-      const [foreground] = setForegroundCycleSpeed.mock.calls[setForegroundCycleSpeed.mock.calls.length - 1]
-      const [background] = setBackgroundCycleSpeed.mock.calls[setBackgroundCycleSpeed.mock.calls.length - 1]
-      expect(foreground).toBeCloseTo(2, 5)
-      expect(background).toBeCloseTo(2, 5)
-
-      // No left/right tilt — the selected (default, Pattern speed) target still gets a live 0 write,
-      // and Mirror speed was never selected, so mirrorRotationSpeed is never touched at all.
-      const [rotation] = setRotationSpeed.mock.calls[setRotationSpeed.mock.calls.length - 1]
-      expect(rotation).toBeCloseTo(0, 5)
-      expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
-    })
-
-    it("in 'speed' mode, on a zoomless pattern up/down folds into the same rotation pull left/right already applies to whichever target is selected, leaving zoomSpeed alone", async () => {
-      mockSettings({ pattern: 'spiral' })
-      mockedUseTiltGravityCenter.mockReturnValue({ gravityCenterX: { value: 0 } as any, gravityCenterY: { value: 0 } as any, rawTiltX: { value: 0.3 } as any, rawTiltY: { value: 0.2 } as any })
-      await renderScreen()
-      await act(async () => {
-        getLastControlsProps().onSelectGestureTarget('speed')
-      })
-
-      await act(async () => {
-        animatedReactionTestUtils.runAll()
-      })
-
-      // Spiral has no zoom dimension (see isZoomlessPattern) — x and y combine into one rotation ratio
-      // instead (0.3 + 0.2 = 0.5 of MAX_ROTATION_SPEED's 10 = 5), applied to the selected (default,
-      // Pattern speed) target only; zoomSpeed is left alone entirely.
-      const [rotation] = setRotationSpeed.mock.calls[setRotationSpeed.mock.calls.length - 1]
-      expect(rotation).toBeCloseTo(5, 5)
-      expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
-      expect(setZoomSpeed).not.toHaveBeenCalled()
-
-      // Up/down still always drives color-transition speed regardless of pattern — MAX_CYCLE_SPEED is
-      // 5, so 0.2 tilt lands at 1.
-      const [foreground] = setForegroundCycleSpeed.mock.calls[setForegroundCycleSpeed.mock.calls.length - 1]
-      expect(foreground).toBeCloseTo(1, 5)
     })
   })
 
@@ -4426,6 +4571,82 @@ describe('SwirlScreen gestures', () => {
       expect(setMirrorLines).toHaveBeenLastCalledWith(2)
     })
 
+    // The buttons now walk the same signed mirrorLines/mirrorAlternateColors scale the Focus twist
+    // gesture already dials through (see rotationGesture's own targetsMirrorRotation branch) — dialing
+    // past 0 crosses into "negative" territory (mirrorAlternateColors on) instead of dead-ending, and
+    // the long-press bonuses treat 0 as a "pass through first" stop before their own far extreme.
+    it('onRemoveMirrorLine crosses 0 into negative territory, turning alternate colors on', async () => {
+      mockSettings({ mirrorLines: 0, mirrorAlternateColors: false })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onRemoveMirrorLine()
+      })
+      expect(setMirrorLines).toHaveBeenCalledWith(1)
+      expect(setMirrorAlternateColors).toHaveBeenCalledWith(true)
+    })
+
+    it('onAddMirrorLine crosses back to 0 from negative territory, turning alternate colors back off', async () => {
+      mockSettings({ mirrorLines: 1, mirrorAlternateColors: true })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onAddMirrorLine()
+      })
+      expect(setMirrorLines).toHaveBeenCalledWith(0)
+      expect(setMirrorAlternateColors).toHaveBeenCalledWith(false)
+    })
+
+    it('onMaxMirrorLines jumps only to 0 from negative territory, not all the way to MAX_MIRROR_LINES', async () => {
+      mockSettings({ mirrorLines: 3, mirrorAlternateColors: true })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onMaxMirrorLines()
+      })
+      expect(setMirrorLines).toHaveBeenCalledWith(0)
+      expect(setMirrorAlternateColors).toHaveBeenCalledWith(false)
+    })
+
+    it('onMinMirrorLines jumps to the far negative extreme when already at 0', async () => {
+      mockSettings({ mirrorLines: 0, mirrorAlternateColors: false })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onMinMirrorLines()
+      })
+      expect(setMirrorLines).toHaveBeenCalledWith(MAX_MIRROR_LINES)
+      expect(setMirrorAlternateColors).toHaveBeenCalledWith(true)
+    })
+
+    // The long-press bonuses are wired to useHoldToRepeat in OnScreenControls, so continuing to hold
+    // past the first stop calls these again — once the dial's already sitting at the target, this is
+    // what keeps that a genuine no-op instead of pushing a fresh no-op history entry (and firing a
+    // haptic) on every single tick for as long as the hold continues past reaching the far extreme.
+    it('onMaxMirrorLines is a no-op once already at +MAX_MIRROR_LINES', async () => {
+      mockSettings({ mirrorLines: MAX_MIRROR_LINES, mirrorAlternateColors: false })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onMaxMirrorLines()
+      })
+      expect(setMirrorLines).not.toHaveBeenCalled()
+      expect(setMirrorAlternateColors).not.toHaveBeenCalled()
+      expect(getLastControlsProps().backDisabled).toBe(true)
+    })
+
+    it('onMinMirrorLines is a no-op once already at the far negative extreme', async () => {
+      mockSettings({ mirrorLines: MAX_MIRROR_LINES, mirrorAlternateColors: true })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onMinMirrorLines()
+      })
+      expect(setMirrorLines).not.toHaveBeenCalled()
+      expect(setMirrorAlternateColors).not.toHaveBeenCalled()
+      expect(getLastControlsProps().backDisabled).toBe(true)
+    })
+
     it('onReverseGravity pushes history before flipping the sign, so onGoBack restores the original gravity', async () => {
       mockSettings({ gravity: 2 })
       await renderScreen()
@@ -4506,27 +4727,16 @@ describe('SwirlScreen gestures', () => {
     })
 
     // Guards the exclusion list itself, not just the inclusion list above — nothing stops a future
-    // edit from reflexively copy-pasting the "pushHistory() first" hot-key pattern onto one of these,
-    // which would start polluting the undo stack with ephemeral, non-Look state (frozen/paused,
-    // canvas position/rotation, which gesture target a drag currently controls) that captureLook
-    // wouldn't even serialize correctly. onResetSwirl/onRecenter reset ephemeral SharedValue rotation/
-    // position, not SwirlSettings; onToggleFrozen/onToggleSpeedTarget mutate local useState, not
-    // SwirlSettings at all.
-    it('never pushes to history: onToggleFrozen, onResetSwirl, onRecenter, onToggleSpeedTarget', async () => {
+    // edit from reflexively copy-pasting the "pushHistory() first" hot-key pattern onto this one,
+    // which would start polluting the undo stack with ephemeral, non-Look state (canvas position/
+    // rotation) that captureLook wouldn't even serialize correctly. onRecenter resets ephemeral
+    // SharedValue rotation/position, not SwirlSettings.
+    it('never pushes to history: onRecenter', async () => {
       await renderScreen()
       expect(getLastControlsProps().backDisabled).toBe(true)
 
       await act(async () => {
-        getLastControlsProps().onToggleFrozen()
-      })
-      await act(async () => {
-        getLastControlsProps().onResetSwirl()
-      })
-      await act(async () => {
         getLastControlsProps().onRecenter()
-      })
-      await act(async () => {
-        getLastControlsProps().onToggleSpeedTarget()
       })
 
       expect(getLastControlsProps().backDisabled).toBe(true)

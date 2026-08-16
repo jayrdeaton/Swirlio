@@ -18,21 +18,17 @@ import { BounceBoundary, DragClamp, DragPointPhysics, reflectOffAxis, SNAP_DISTA
 // same way — ease toward wherever the touch currently is, re-targeted every frame from onStart clear
 // through onUpdate (see glideTo's own comment in useDragPointPhysics.ts) — rather than moving by however
 // far you've dragged, so wherever any of them is sitting is always exactly wherever you last touched,
-// never a guess. 'speed' is the odd one out: there's no point for it to drag (glideTargetsTo/
-// releaseTargets below both simply no-op for it, same as any target that isn't in this Set) — instead,
-// the same one-finger pan directly spins whichever of baseRotation/mirrorProgress index.tsx owns, live,
-// around wherever the pattern's own epicentre currently sits (see panGesture's own onUpdate further
-// down), and the two physical recognizers' onStart/onEnd get repurposed for the "stop"/"release the
-// spin" half of the job — see onStopAllSpeeds/onSpeedRelease's own comments below. Tilt has its own
-// live throttle for 'speed' too (see index.tsx's speedTiltRotationRatio), entirely outside this hook,
-// since there's no point here for it to drive. index.tsx's
-// activeTargets is a Set (not a bare
+// never a guess... unless the touch itself lands outside GRAB_RADIUS_PX of the target's own current
+// position, in which case the same one-finger pan instead spins/zooms it live around that position (see
+// panGesture's own onStart/onUpdate/onEnd further down) rather than dragging it at all — 'pattern' and
+// 'mirror' are the only two targets with this outer-field behavior (zoom only applies to 'pattern', not
+// 'mirror' — see onUpdate/onEnd's own comments for why). index.tsx's activeTargets is a Set (not a bare
 // GestureTarget) purely so every place below can branch on membership (`.has('pattern')`, etc.) with
 // one consistent shape — there used to be a multi-select "combine" mode that populated it with more
 // than one entry at once, which is why the membership-check shape stuck around even though selecting a
 // target always replaces the whole set with exactly one now (see index.tsx's selectGestureTarget).
-export type GestureTarget = 'pattern' | 'mirror' | 'gravity' | 'speed'
-export const GESTURE_TARGET_ORDER: GestureTarget[] = ['pattern', 'mirror', 'gravity', 'speed']
+export type GestureTarget = 'pattern' | 'mirror' | 'gravity'
+export const GESTURE_TARGET_ORDER: GestureTarget[] = ['pattern', 'mirror', 'gravity']
 
 // How hard tilt pulls on whichever of pattern/mirror is its active target — a fixed constant, not a
 // user-facing setting: gravity already has its own slider for "how strong is a pull," and reusing that
@@ -49,12 +45,32 @@ const TILT_PULL_STRENGTH = 12
 
 // How long a still-held one-finger touch takes to "grab" whichever point(s) are active and pull them
 // under your finger — see longPressGesture further down. Matches index.tsx's own LONG_PRESS_MS (the
-// two-finger direction-flip long press, and the primary FAB's own recenter long press) for one
+// two-finger stop-and-snap long press, and the primary FAB's own recenter long press) for one
 // consistent "how long is a long press" feel everywhere in the app — kept as its own local constant
 // rather than imported, the same duplicate-with-a-comment convention OnScreenControls.tsx's own
 // TRANSPORT_LONG_PRESS_MS already uses, since a hook has no business importing from the screen that
 // calls it.
 const LONG_PRESS_MS = 400
+
+// How close a touch has to land to the pattern epicentre / mirror anchor's own current screen position
+// to count as "grabbing" it directly (see panGesture's own onStart below) — anywhere further out is the
+// outer field instead, where the same one-finger drag spins (and, for pattern, zooms) it live rather
+// than moving it. Matches LabeledFab's own FAB_HEIGHT_MEDIUM (56) — the app's existing "comfortable
+// touch target" size — rather than an arbitrary number. Retune by feel on a real device, same disclaimer
+// as every other gesture-calibration constant here.
+const GRAB_RADIUS_PX = 56
+
+// Below this raw release speed (RNGH's own event.velocityX/Y magnitude, in px/s — a physical quantity,
+// not yet run through any of index.tsx's own unit conversions), a pattern-targeting release's radial
+// component is treated as exactly stationary rather than whatever small nonzero value RNGH's own
+// velocity tracker happened to report — see onEnd's own comment for why a release that felt completely
+// still can still carry residual velocity there. Filtered here, in raw pixels, rather than after
+// index.tsx's own RADIAL_PIXELS_TO_PULSE_SCALE * zoomBaseDurationMs conversion (which amplifies by a
+// factor that grows with tightness), so a genuinely still release reads as still regardless of the
+// current spacing — the same noise reaching rotation's own, much smaller DEGREES_PER_SECOND_TO_
+// ROTATION_SPEED conversion stays comfortably under MIN_FLICK_SPEED there without needing this. Retune
+// by feel on a real device, same disclaimer as every other gesture-calibration constant here.
+const MIN_FLICK_RADIAL_VELOCITY_PX_PER_SEC = 30
 
 export type Epicenter = {
   epicenterX: SharedValue<number>
@@ -112,28 +128,76 @@ export function useEpicenter(
   // handoff via withSpring rather than teleporting). A drag is a temporary override for precise
   // placement, not a standing claim tilt has to be explicitly reset to win back.
   gravityManualControl: SharedValue<boolean>,
-  // 'speed' mode's own two canvas actions — see longPressGesture/panGesture's own onEnd below for where
-  // each fires. Both are plain index.tsx callbacks (session/settings state, JS-thread concerns), crossed
-  // via runOnJS the same way every other gesture-driven commit in this file already does.
-  onStopAllSpeeds: () => void,
-  // The release's own angular velocity around the epicentre — degrees per second, a physical screen-
-  // space quantity (see panGesture's own onEnd for the derivation) — not yet converted into
-  // rotationSpeed/mirrorRotationSpeed's own app-specific unit, since that conversion (see index.tsx's
-  // DEGREES_PER_SECOND_TO_ROTATION_SPEED) depends on BASE_ROTATION_DURATION_MS, a presentation-layer
-  // constant this hook has no business knowing about.
-  onSpeedRelease: (angularVelocityDegPerSec: number) => void,
-  // Speed mode's own live "grab and spin" drag (see panGesture's own onUpdate below) — written to
+  // The outer-field drag's own release actions — see panGesture's own onEnd further down for where
+  // each fires. All three are plain index.tsx callbacks (settings state, JS-thread concerns), crossed
+  // via runOnJS the same way every other gesture-driven commit in this file already does. The angular
+  // velocity handed to the first two is degrees per second around whichever target's own center — a
+  // physical screen-space quantity — not yet converted into rotationSpeed/mirrorRotationSpeed's own
+  // app-specific unit, since that conversion (see index.tsx's DEGREES_PER_SECOND_TO_ROTATION_SPEED)
+  // depends on BASE_ROTATION_DURATION_MS, a presentation-layer constant this hook has no business
+  // knowing about. Likewise onPatternZoomRelease hands back laps-per-second (radial px/s already
+  // converted through RADIAL_PIXELS_TO_PULSE_SCALE below), not zoomSpeed's own unit.
+  onPatternRotationRelease: (angularVelocityDegPerSec: number) => void,
+  onMirrorRotationRelease: (angularVelocityDegPerSec: number) => void,
+  onPatternZoomRelease: (lapsPerSecond: number) => void,
+  // Mirror's own outer-field radial axis has no zoom concept of its own to spend it on (see onUpdate's
+  // own comment), so it drives foreground/background colour-cycle speed instead — the one other pair of
+  // "speed" settings still worth reaching from a gesture. Unlike rotation/zoom's release-velocity flick,
+  // this is a live fader: cycleRate.value already sits at its final, clamped value the moment a finger
+  // lifts (see onUpdate), so onEnd just hands that straight back rather than computing anything from the
+  // release event itself. Laps per ms — foregroundCycleRate/backgroundCycleRate's own unit — not
+  // foregroundCycleSpeed/backgroundCycleSpeed's, for the same "this hook has no business knowing about
+  // a presentation-layer constant" reason onPatternZoomRelease's own comment gives.
+  onMirrorCycleRelease: (rateLapsPerMs: number) => void,
+  // The outer-field drag's own live "grab and spin" (see panGesture's own onUpdate below) — written to
   // directly, the same live-SharedValue-write shape tightness/mirrorGap/strokeWidth already use for
   // their own pinch-driven values, so the pattern (or the whole kaleidoscope assembly, via mirror's own
   // rotation) visibly follows the cursor's angular position during the drag, not just on release.
-  // speedTargetsMirror decides which of the two actually gets touched; mirrorRotationSign is needed
-  // because mirrorRotation is *derived* (mirrorProgress * 360 * sign — see index.tsx's own mirrorRotation
-  // comment), not a raw accumulator the way baseRotation already is, so nudging mirrorProgress by a raw
-  // angle has to factor in the current sign to land on the intended net rotation.
+  // Which of baseRotation/mirrorProgress actually gets touched is decided by activeTargets, same as
+  // every other point above; mirrorRotationSign is needed because mirrorRotation is *derived*
+  // (mirrorProgress * 360 * sign — see index.tsx's own mirrorRotation comment), not a raw accumulator
+  // the way baseRotation already is, so nudging mirrorProgress by a raw angle has to factor in the
+  // current sign to land on the intended net rotation.
   baseRotation: SharedValue<number>,
+  // Suspends baseRotation's own ambient per-frame accumulator (see index.tsx's frame callback) for the
+  // duration of an outer-field drag targeting pattern — the same SharedValue resetRotation/
+  // trySnapPatternRotation already use to protect their own reset spring from that accumulator, reused
+  // here for a second reason: without this, the ambient auto-spin keeps adding its own (stale, pre-drag)
+  // motion underneath the live "grab and spin" write below every single frame, so what you actually see
+  // is the old rate plus your finger, not your finger alone — the drag reads as "sluggish to respond,"
+  // fully catching up to your intended new rate only once release finally calls setRotationSpeed. Pausing
+  // on entry (see onStart below) and resuming on release (onEnd) — after the new rate's own commit has
+  // already been dispatched — is what makes a live drag read as fully taking over, not merely nudging
+  // whatever was already spinning. mirrorPaused/basePulsePaused just below are the exact same fix for
+  // mirror's own rotation and pattern's own zoom, respectively.
+  baseRotationPaused: SharedValue<boolean>,
   mirrorProgress: SharedValue<number>,
+  mirrorPaused: SharedValue<boolean>,
   mirrorRotationSign: SharedValue<number>,
-  speedTargetsMirror: boolean,
+  // The outer-field drag's own live "zoom" for pattern only (mirrors have no zoom concept — see
+  // onUpdate's own comment) — the exact same manualPulseOffset/basePulse pair pinchGesture's own
+  // pattern-targeting branch already drives in index.tsx, just fed from radial drag motion here
+  // instead of pinch scale. onEnd folds manualPulseOffset into basePulse on release, the same way
+  // pinchGesture's own onEnd already does.
+  manualPulseOffset: SharedValue<number>,
+  basePulse: SharedValue<number>,
+  // Same take-over-not-add-to fix as baseRotationPaused above, for pattern's own zoom.
+  basePulsePaused: SharedValue<boolean>,
+  // Mirror's own outer-field radial axis (see onUpdate's own comment) — the exact same
+  // foregroundCycleRate/backgroundCycleRate SharedValues index.tsx's own speed-rate bridge already
+  // writes live for the sliders' fast path (see writeForegroundCycleRateLive/writeBackgroundCycleRateLive
+  // there), driven here instead by how far/which way the drag currently sweeps radially. Both always
+  // move together — there's nothing on a single radial axis to tell the two lists apart by, so one
+  // gesture speeds up both at once. maxCycleRate is MAX_CYCLE_SPEED converted to this same laps-per-ms
+  // unit by index.tsx (dividing by BASE_CYCLE_DURATION_MS); minCycleRate is its negation there, matching
+  // the setting's own bipolar MIN_CYCLE_SPEED — sweeping the touch inward reads as a positive rate,
+  // outward as negative (see onUpdate's own comment for the sign flip). Passed in as plain numbers, not
+  // SharedValues, since neither ever changes at runtime, the same "static app constant" shape
+  // mirrorLines' own wedgeAngleDeg/copyCount above already assumes for its own params.
+  foregroundCycleRate: SharedValue<number>,
+  backgroundCycleRate: SharedValue<number>,
+  minCycleRate: number,
+  maxCycleRate: number,
   // Tilt's own eased, screen-edge-scaled output (see useTiltGravityCenter.ts) — the same pair gravity's
   // own effectiveGravityCenterX/Y already reads directly in index.tsx, fed in here too so pattern/mirror
   // can read it the same live way. tiltEnabled mirrors settings.tiltEnabled/web-availability the same
@@ -152,17 +216,70 @@ export function useEpicenter(
   const wedgeAngleDeg = wedgeAngleDegrees(mirrorLines)
   const copyCount = copyCountForMirrorLines(mirrorLines)
 
+  // How many pixels of outward radial drag (see panGesture's own onUpdate/onEnd) sweep one full zoom
+  // lap — shared by both the *live* drag (a position: how far the finger has actually swept, fed
+  // straight into manualPulseOffset every frame) and the *release* velocity (radial px/s, fed into
+  // zoomSpeed) below, deliberately the same scale for both rather than one calibrated separately for
+  // each: a release velocity is just the live drag's own average rate over its last stretch, so
+  // reusing this one number is what makes "however fast it's zooming while you're still touching it"
+  // and "however fast it keeps going once you let go" agree, with no seam between the two — a release
+  // mid-flick should never suddenly speed up or slow down relative to what you were just watching it
+  // do. Width * 9 (not the tighter width * 0.5 an arm's-length live-scrub alone might otherwise want)
+  // is calibrated toward the release side of that shared feel: RNGH's own release-velocity tracker
+  // reports comfortably in the hundreds-to-low-thousands of px/s for perfectly ordinary flicks, and at
+  // the old, tighter scale essentially any perceptible flick sent zoomSpeed straight past
+  // MAX_ZOOM_SPEED, leaving no usable range at all for a slow, deliberate zoom either live or on
+  // release. Expressed as its inverse (pixels -> fraction of a lap) since that's the direction every
+  // call site below actually needs. Retune by feel on a real device, same disclaimer as every other
+  // gesture-calibration constant here.
+  const RADIAL_PIXELS_TO_PULSE_SCALE = 1 / (width * 9)
+
+  // How many pixels of per-frame radial movement (see onUpdate's own deltaRadius) sweep the whole
+  // minCycleRate..maxCycleRate range, for mirror's own outer-field radial axis — how fast the touch is
+  // currently sweeping in/out, not how far out it's reached (see onUpdate's own comment for why: a
+  // velocity, not a position, is what makes holding still actually mean "stopped"). A much smaller
+  // number than RADIAL_PIXELS_TO_PULSE_SCALE's own range is: that one calibrates a *cumulative* sweep
+  // across a whole zoom lap, this one a *single frame's* worth of movement. Retune by feel on a real
+  // device, same disclaimer as every other gesture-calibration constant here.
+  const CYCLE_SPEED_VELOCITY_RANGE_PX = 12
+
+  // How much one of tangential/radial motion has to outweigh the other, this frame, before onUpdate
+  // below snaps fully to it and zeroes the minor one out — see its own comment for the full mechanism.
+  // No real swipe is ever perfectly tangential or perfectly radial; without this, a swipe you're
+  // deliberately trying to keep purely one or the other (say, straight up toward the epicentre, aiming
+  // for pure zoom) still leaks a little of the other axis (a bit of unwanted rotation) from ordinary
+  // hand imprecision. 3 (the dominant axis needs to be at least 3x the minor one) is a first guess at
+  // "obviously, overwhelmingly one direction" without being so strict that a real diagonal swipe (both
+  // axes genuinely intended, see the blend test) gets snapped when it shouldn't. Retune by feel on a
+  // real device, same disclaimer as every other gesture-calibration constant here.
+  const AXIS_SNAP_DOMINANCE_RATIO = 3
+
   // Which point(s) the one-finger drag/twist itself moves — plain Set membership, one independent
   // boolean per target. Every consumer below (onStart/onUpdate/onEnd, each branching `if (targetsX)`
   // independently rather than picking one mutually-exclusive case) already treats these as
   // "does this point participate," not "which single mode are we in," so multiple being true at once
   // — dragging pattern, mirror, and the gravity handle all together — falls out for free.
-  const targetsPattern = activeTargets.has('pattern')
-  const targetsMirror = activeTargets.has('mirror')
+  //
+  // At 0 mirror lines there's no wedge for the mirror anchor to move or spin — a single, unmirrored
+  // copy has no boundary to speak of (wedgeAngleDeg/copyCount above already special-case this). Rather
+  // than let a drag/long-press targeting 'mirror' quietly act on a point with nothing to show for it,
+  // it's redirected to 'pattern' here instead — once, at the source, so every branch below (outer-field
+  // rotate, the inner grab-and-carry, tilt's own pull strength, and the release/snap path) picks up the
+  // fallback automatically instead of needing its own mirrorLines check.
+  //
+  // This fallback is deliberately scoped to position and rotation only — it does NOT reach the outer
+  // field's own RADIAL axis (mirror's colour-cycle speed, see onUpdate/onEnd's own mirror branch
+  // further down): cycling still visibly changes the single unmirrored copy's own colour regardless of
+  // mirrorLines, so unlike the wedge itself, there's nothing dead about that axis to redirect away
+  // from. rawTargetsMirror/rawTargetsPattern (plain activeTargets membership, untouched by the wedge
+  // fallback below) are what gate that axis specifically — see onStart/onUpdate/onEnd's own mirror
+  // branches, each of which independently picks targetsMirror (rotation) vs rawTargetsMirror (radial).
+  const rawTargetsMirror = activeTargets.has('mirror')
+  const rawTargetsPattern = activeTargets.has('pattern')
+  const mirrorHasWedge = mirrorLines > 0
+  const targetsPattern = rawTargetsPattern || (rawTargetsMirror && !mirrorHasWedge)
+  const targetsMirror = rawTargetsMirror && mirrorHasWedge
   const targetsGravity = activeTargets.has('gravity')
-  // Not read by glideTargetsTo at all (see GestureTarget's own comment on why 'speed' has no point to
-  // glide) — only longPressGesture's onStart and releaseTargets below branch on it.
-  const targetsSpeed = activeTargets.has('speed')
 
   // Mirrored into SharedValues for the same reason tiltEnabled itself already is one (see index.tsx's
   // tiltEnabledShared) — read inside useDragPointPhysics's own worklet-context reactions, where a plain
@@ -353,18 +470,14 @@ export function useEpicenter(
   // Shared by panGesture's onEnd below and longPressGesture's own onEnd further down — the same
   // snap-vs-bounce release decision either way, just fed a real release velocity from a drag or a
   // plain (0, 0) from a long press that never turned into one (see longPressGesture's own comment for
-  // why it only ever calls this when panGesture itself never took over).
+  // why it only ever calls this when panGesture itself never took over). Never called for an
+  // outer-field release (see panGesture's own onEnd) — nothing was dragged there, so there's no
+  // point position to snap or bounce.
   const releaseTargets = (velocityX: number, velocityY: number) => {
     'worklet'
     // The haptic fires once if *any* point snapped home, not only when all of them agree — same
     // shared flag pattern/mirror already used before gravity got its own version of this check.
     let anySnapped = false
-
-    // Speed mode's own release action lives directly in panGesture's own onEnd instead (see its own
-    // comment) — it needs the release event's raw x/y alongside velocityX/Y to compute an angular
-    // velocity around the epicentre, which this shared function (fed only a velocity, no position, since
-    // longPressGesture's own onEnd calls it with a synthetic (0, 0) that has no real position behind it
-    // either) has no way to supply.
 
     // Gravity gets the exact same snap-or-throw treatment pattern/mirror do below, just measured
     // against the fixed origin rather than wherever gravity currently sits — gravity has no other
@@ -417,24 +530,42 @@ export function useEpicenter(
   // reads this to decide whether it needs to run releaseTargets itself — see its own comment for why.
   const panActive = useSharedValue(false)
 
-  // Speed mode's own live "grab and spin" — the cursor's angle around the epicentre at the last frame
-  // (or at touch-down, freshly), so onUpdate can compute a per-frame delta rather than a delta-from-
-  // gesture-start (which would need to keep re-applying the whole accumulated angle every frame instead
-  // of just the newest slice of it). Degrees, matching baseRotation's own unit.
-  const speedDragAngle = useSharedValue(0)
+  // Whether the touch that started this pan landed outside GRAB_RADIUS_PX of the active target's own
+  // center — decided once, in onStart, and held for the rest of the gesture (a drag that starts in the
+  // outer field stays an outer-field drag even if it later sweeps back over the center, and vice versa
+  // — re-deciding mid-drag would make the gesture unpredictably change what it's doing under your
+  // finger). Only ever meaningful for 'pattern'/'mirror' (see onStart below) — always false for
+  // 'gravity', which has no outer-field behavior of its own.
+  const outerFieldActive = useSharedValue(false)
+  // The outer-field drag's own live "grab and spin"/"grab and zoom" — the cursor's angle and distance
+  // around the active target's own center at the last frame (or at touch-down, freshly), so onUpdate
+  // can compute a per-frame delta rather than a delta-from-gesture-start (which would need to keep
+  // re-applying the whole accumulated delta every frame instead of just the newest slice of it).
+  // Degrees (matching baseRotation's own unit) and pixels respectively.
+  const outerFieldAngle = useSharedValue(0)
+  const outerFieldRadius = useSharedValue(0)
 
-  // The angle (in degrees) from the pattern's own epicentre to a screen point — shared by panGesture's
-  // onStart/onUpdate/onEnd below, all three of which need this exact same "where is the touch, angularly,
-  // relative to whatever the pattern is currently rotating around" computation. Reads pattern.x/y.value
-  // fresh each call rather than capturing it once, since epicentre position doesn't move during a speed
-  // drag anyway (targetsPattern is false whenever targetsSpeed is true — see selectGestureTarget in
-  // index.tsx, which always replaces the whole activeTargets set with a single entry) but there's no
-  // reason to assume that if this ever changes.
-  const angleAroundEpicenter = (x: number, y: number) => {
+  // The active target's own center, in real screen pixels — mirror's is already exactly
+  // mirrorOriginScreen() above; pattern's is the epicentre itself. Only ever called while exactly one
+  // of targetsPattern/targetsMirror is true (see every call site below, all gated on
+  // `targetsPattern || targetsMirror`), so the fallthrough to pattern's own position when neither is
+  // true never actually matters in practice.
+  const outerFieldOrigin = () => {
     'worklet'
-    const epicenterScreenX = centerX + pattern.x.value * width
-    const epicenterScreenY = centerY + pattern.y.value * height
-    return (Math.atan2(y - epicenterScreenY, x - epicenterScreenX) * 180) / Math.PI
+    if (targetsMirror) return mirrorOriginScreen()
+    return { x: centerX + pattern.x.value * width, y: centerY + pattern.y.value * height }
+  }
+
+  // The angle (in degrees) and distance (in pixels) from the active target's own center to a screen
+  // point — shared by panGesture's onStart/onUpdate/onEnd below, all three of which need this exact
+  // same "where is the touch, relative to whatever the pattern/mirror is currently pivoting around"
+  // computation.
+  const polarAroundOuterFieldOrigin = (x: number, y: number) => {
+    'worklet'
+    const { x: originX, y: originY } = outerFieldOrigin()
+    const dx = x - originX
+    const dy = y - originY
+    return { angleDeg: (Math.atan2(dy, dx) * 180) / Math.PI, radius: Math.hypot(dx, dy) }
   }
 
   // atan2 wraps at ±180°, so a plain currentAngle - previousAngle can jump by ~360° the instant the
@@ -447,26 +578,142 @@ export function useEpicenter(
     return ((((deltaDeg + 180) % 360) + 360) % 360) - 180
   }
 
+  // Which of tangential/radial motion this frame or release overwhelmingly dominates the other — see
+  // AXIS_SNAP_DOMINANCE_RATIO's own comment for the full "no real swipe is ever perfectly one or the
+  // other" reasoning. Shared by onUpdate's own live per-frame delta and onEnd's own release velocity,
+  // since both boil down to the exact same comparison — a tangential quantity against a radial one, in
+  // the same unit — just fed a position delta (px) in one case and a velocity (px/s) in the other; the
+  // comparison itself doesn't care which, so this returns which axis (if either) to zero out rather
+  // than the values themselves, leaving each call site to apply that to its own native unit.
+  const dominantAxisSnap = (tangentialPx: number, radialPx: number) => {
+    'worklet'
+    if (Math.abs(tangentialPx) > Math.abs(radialPx) * AXIS_SNAP_DOMINANCE_RATIO) return { snapTangential: false, snapRadial: true }
+    if (Math.abs(radialPx) > Math.abs(tangentialPx) * AXIS_SNAP_DOMINANCE_RATIO) return { snapTangential: true, snapRadial: false }
+    return { snapTangential: false, snapRadial: false }
+  }
+
   // One finger only, so a two-finger pinch or twist doesn't drag either point along with it.
   const panGesture = Gesture.Pan()
     .maxPointers(1)
     .onBegin(() => {
       panActive.value = false
+      outerFieldActive.value = false
     })
     .onStart((event) => {
       panActive.value = true
+      // Only pattern/mirror have an outer field — gravity has no zoom/spin concept of its own, so a
+      // touch anywhere always just grabs it directly, same as every target used to work before this.
+      if (targetsPattern || targetsMirror) {
+        const { angleDeg, radius } = polarAroundOuterFieldOrigin(event.x, event.y)
+        outerFieldActive.value = radius > GRAB_RADIUS_PX
+        if (outerFieldActive.value) {
+          outerFieldAngle.value = angleDeg
+          outerFieldRadius.value = radius
+          // Suspends whichever ambient accumulator(s) this drag is about to take live control of — see
+          // baseRotationPaused's own param comment for why. Resumed in onEnd below, once the drag's own
+          // new rate has already been committed. Rotation's own pause follows the wedge-fallback-aware
+          // targetsMirror/targetsPattern (mirror's rotation redirects to pattern's at 0 lines — see their
+          // own comment above); basePulsePaused follows rawTargetsPattern instead, since zoom itself
+          // never redirects — a mirror-targeted drag's radial axis stays on colour-cycle speed, which
+          // needs no pause at all (see onUpdate's own comment on that branch).
+          if (targetsMirror) {
+            // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+            mirrorPaused.value = true
+          } else if (targetsPattern) {
+            // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+            baseRotationPaused.value = true
+          }
+          if (rawTargetsPattern) {
+            // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+            basePulsePaused.value = true
+          }
+          runOnJS(onDragChange)()
+          return
+        }
+      }
       // Every active target eases toward the touch-down point (see glideTargetsTo's own comment
       // above) rather than waiting for you to actually move before doing anything — touching down is
       // already a deliberate grab. Live 1:1 tracking (see onUpdate below) takes over the moment you
       // actually move, interrupting this if it's still mid-flight.
       glideTargetsTo(event.x, event.y)
-      // Speed mode's own "grab" — the starting angle onUpdate's own per-frame delta is measured from.
-      if (targetsSpeed) {
-        speedDragAngle.value = angleAroundEpicenter(event.x, event.y)
-      }
       runOnJS(onDragChange)()
     })
     .onUpdate((event) => {
+      if (outerFieldActive.value) {
+        // Live, not just on release: the pattern (or the whole kaleidoscope assembly, via mirror's own
+        // rotation) directly follows the cursor's angular position around its own center, the same
+        // "it's under your finger the whole time" feel every other drag target in this file already
+        // has — just decomposed into a tangential component (rotation) and a radial one (zoom for
+        // pattern; foreground/background colour-cycle speed for mirror, which has no zoom of its own to
+        // spend this axis on — see the mirror branch below). Per-frame angle/radius deltas *are* the
+        // polar decomposition here — no vector projection needed, since rotation alone can't change
+        // radius and radial motion alone can't change angle. wrapAngleDeltaDeg is what keeps the angular
+        // half correct across atan2's own ±180° seam — see its own comment.
+        const { angleDeg, radius } = polarAroundOuterFieldOrigin(event.x, event.y)
+        const rawDeltaAngleDeg = wrapAngleDeltaDeg(angleDeg - outerFieldAngle.value)
+        const rawDeltaRadius = radius - outerFieldRadius.value
+        // No real swipe is ever perfectly tangential or perfectly radial — a swipe you're deliberately
+        // trying to keep purely one or the other still carries a little of the other from ordinary hand
+        // imprecision, which otherwise leaks through as unwanted rotation during an intended zoom (or
+        // vice versa). Comparing in the same unit (pixels) is what makes the two comparable in the
+        // first place: arc length = radius × angle in radians is the tangential component's own
+        // physical distance, the same unit deltaRadius already is. See dominantAxisSnap's own comment
+        // — this exact same snap also runs on onEnd's own release velocity, not just this live delta,
+        // since a release can carry its own small cross-axis component even when every onUpdate frame
+        // along the way was already cleanly snapped.
+        const tangentialArcPx = ((rawDeltaAngleDeg * Math.PI) / 180) * radius
+        const { snapTangential, snapRadial } = dominantAxisSnap(tangentialArcPx, rawDeltaRadius)
+        const deltaAngleDeg = snapTangential ? 0 : rawDeltaAngleDeg
+        const deltaRadius = snapRadial ? 0 : rawDeltaRadius
+        // Tangential (rotation) and radial (zoom/colour-cycle) each pick their own sink independently
+        // rather than as a single mirror-or-pattern pair: tangential follows targetsMirror/targetsPattern
+        // (the wedge-fallback-aware pair — mirror's rotation redirects to pattern's at 0 lines), while
+        // radial follows rawTargetsMirror/rawTargetsPattern (plain activeTargets membership, never
+        // redirected — see this file's own targetsPattern/targetsMirror comment for why). At 0 mirror
+        // lines with 'mirror' selected, that's what lets a single drag's tangential half spin the
+        // pattern while its radial half still fades colour-cycle speed, rather than the whole gesture
+        // moving as one unit.
+        if (targetsMirror) {
+          // mirrorRotation is derived (mirrorProgress * 360 * sign — see index.tsx's own comment), not
+          // a raw accumulator, so landing on a net +deltaAngleDeg change in the *displayed* rotation
+          // means dividing by 360 and re-applying the current sign, not just adding deltaAngleDeg
+          // outright the way baseRotation's own branch below can.
+          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+          mirrorProgress.value += (deltaAngleDeg / 360) * mirrorRotationSign.value
+        } else if (targetsPattern) {
+          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+          baseRotation.value += deltaAngleDeg
+        }
+        if (rawTargetsMirror) {
+          // A fader keyed off radial VELOCITY (how far the touch moved radially since the last frame),
+          // not absolute reach — holding the touch still (deltaRadius ≈ 0) drops the rate to 0, the same
+          // "stop when you stop" feel baseRotationPaused/basePulsePaused give rotation/zoom (see their
+          // own param comment), just reached a different way: cycle speed has no orientation of its own
+          // to preserve across a release the way those accumulated values do, so there's nothing to
+          // pause or fold back in — only ever a rate that continuously tracks however fast (and which
+          // way) the finger is currently sweeping. Signed now, not Math.abs: foreground/
+          // backgroundCycleSpeed itself is bipolar (negative reverses — see MIN_CYCLE_SPEED's own
+          // comment), and this radial axis now carries a direction of its own to match — sweeping
+          // inward (deltaRadius < 0, radius shrinking toward the outer-field origin) reads as
+          // positive/forward, sweeping outward as negative/reverse, hence the negated sign below.
+          // minCycleRate/maxCycleRate are symmetric (minCycleRate === -maxCycleRate — see its own param
+          // comment), so scaling the signed fraction against whichever bound it's currently heading
+          // toward reaches exactly that bound at full reach. foreground and background always move
+          // together — a single radial axis has nothing to tell them apart by.
+          const cycleReachFraction = clamp(-deltaRadius / CYCLE_SPEED_VELOCITY_RANGE_PX, -1, 1)
+          const cycleRate = cycleReachFraction >= 0 ? cycleReachFraction * maxCycleRate : cycleReachFraction * -minCycleRate
+          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+          foregroundCycleRate.value = cycleRate
+          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+          backgroundCycleRate.value = cycleRate
+        } else if (rawTargetsPattern) {
+          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+          manualPulseOffset.value += deltaRadius * RADIAL_PIXELS_TO_PULSE_SCALE
+        }
+        outerFieldAngle.value = angleDeg
+        outerFieldRadius.value = radius
+        return
+      }
       // Same wedge pivot as onStart above, re-read fresh every frame in case mirror is *also* being
       // dragged simultaneously and has itself moved since the last one.
       const { x: wedgeOriginX, y: wedgeOriginY } = mirrorOriginScreen()
@@ -492,27 +739,6 @@ export function useEpicenter(
       if (targetsGravity) {
         gravityHandle.glideTo((event.x - centerX) / width, (event.y - centerY) / height)
       }
-      // Speed mode's own "grab and spin" — live, not just on release: the pattern (or the whole
-      // kaleidoscope assembly, via mirror's own rotation) directly follows the cursor's angular position
-      // around the epicentre, the same "it's under your finger the whole time" feel every other drag
-      // target in this file already has, just applied to rotation instead of position. wrapAngleDeltaDeg
-      // is what keeps this correct across atan2's own ±180° seam — see its own comment.
-      if (targetsSpeed) {
-        const currentAngle = angleAroundEpicenter(event.x, event.y)
-        const deltaDeg = wrapAngleDeltaDeg(currentAngle - speedDragAngle.value)
-        if (speedTargetsMirror) {
-          // mirrorRotation is derived (mirrorProgress * 360 * sign — see index.tsx's own comment), not a
-          // raw accumulator, so landing on a net +deltaDeg change in the *displayed* rotation means
-          // dividing by 360 and re-applying the current sign, not just adding deltaDeg outright the way
-          // baseRotation's own branch below can.
-          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
-          mirrorProgress.value += (deltaDeg / 360) * mirrorRotationSign.value
-        } else {
-          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
-          baseRotation.value += deltaDeg
-        }
-        speedDragAngle.value = currentAngle
-      }
     })
     .onEnd((event) => {
       // Fired again on release, not just on start: this is what gives the on-screen controls a
@@ -520,23 +746,110 @@ export function useEpicenter(
       // a drag longer than the hide window) could run out and reveal the controls while a finger is
       // still on the screen.
       runOnJS(onDragChange)()
-      // Speed mode's own release: "let go while spinning" hands off to that exact angular rate as the
-      // new sustained rotationSpeed/mirrorRotationSpeed (see index.tsx's own onSpeedRelease/
-      // DEGREES_PER_SECOND_TO_ROTATION_SPEED for the unit conversion) — the standard physics conversion
-      // from linear release velocity to angular velocity around a pivot: ω = (r × v) / |r|², where r is
-      // the release point's position relative to the epicentre and v is RNGH's own release velocity: the
-      // 2D scalar cross product r_x*v_y - r_y*v_x divided by |r|² (guarded against a release landing
-      // exactly on the epicentre, where the angle — and so the rotation rate around it — is undefined).
-      if (targetsSpeed) {
-        const epicenterScreenX = centerX + pattern.x.value * width
-        const epicenterScreenY = centerY + pattern.y.value * height
-        const rx = event.x - epicenterScreenX
-        const ry = event.y - epicenterScreenY
+      if (outerFieldActive.value) {
+        // "Let go while spinning" hands off to that exact angular rate as the new sustained
+        // rotationSpeed/mirrorRotationSpeed (see index.tsx's own onPatternRotationRelease/
+        // onMirrorRotationRelease and DEGREES_PER_SECOND_TO_ROTATION_SPEED for the unit conversion) —
+        // the standard physics conversion from linear release velocity to angular velocity around a
+        // pivot: ω = (r × v) / |r|², where r is the release point's position relative to the active
+        // target's own center and v is RNGH's own release velocity: the 2D scalar cross product
+        // r_x*v_y - r_y*v_x divided by |r|² (guarded against a release landing exactly on the center,
+        // where the angle — and so the rotation rate around it — is undefined). Pattern also gets a
+        // radial release velocity, the dot-product complement (r·v)/|r| — the standard polar
+        // decomposition of a release velocity into its angular and radial parts — converted to
+        // laps-per-second through the same RADIAL_PIXELS_TO_PULSE_SCALE onUpdate's live drag uses (see
+        // its own comment for why sharing one scale is deliberate, not incidental).
+        const { x: originX, y: originY } = outerFieldOrigin()
+        const rx = event.x - originX
+        const ry = event.y - originY
         const distanceSq = rx * rx + ry * ry
         if (distanceSq > 0) {
-          const angularVelocityRadPerSec = (rx * event.velocityY - ry * event.velocityX) / distanceSq
-          runOnJS(onSpeedRelease)((angularVelocityRadPerSec * 180) / Math.PI)
+          // Tangential (rotation) and radial (zoom/colour-cycle) release each pick their own sink the
+          // same independent way onUpdate's own live drag already does — targetsMirror/targetsPattern
+          // (wedge-fallback-aware) for rotation, rawTargetsMirror/rawTargetsPattern (never redirected)
+          // for radial — rather than as a single mirror-or-pattern pair. Both halves of the decomposition
+          // are computed unconditionally, since it's cheap, pure math either way; only which callbacks
+          // actually fire below depends on which sinks are live this gesture.
+          const angularVelocityDegPerSec = ((rx * event.velocityY - ry * event.velocityX) / distanceSq) * (180 / Math.PI)
+          const distance = Math.sqrt(distanceSq)
+          const radialVelocityPxPerSec = (rx * event.velocityX + ry * event.velocityY) / distance
+          // See MIN_FLICK_RADIAL_VELOCITY_PX_PER_SEC's own comment — a release that felt completely
+          // still can still carry small residual velocity from RNGH's own tracker, which reads as
+          // meaningfully nonzero zoomSpeed once index.tsx's own conversion amplifies it.
+          const filteredRadialVelocityPxPerSec = Math.abs(radialVelocityPxPerSec) < MIN_FLICK_RADIAL_VELOCITY_PX_PER_SEC ? 0 : radialVelocityPxPerSec
+          // Same dominant-axis snap as onUpdate's own live drag (see dominantAxisSnap's own comment)
+          // — a release can carry its own small cross-axis component even when every onUpdate frame
+          // along the way was already cleanly snapped, so a fast, mostly-tangential flick doesn't
+          // still ramp up zoom (or vice versa) from whatever residual RNGH's own velocity tracker
+          // reports on the other axis. angularVelocityDegPerSec converted to an equivalent tangential
+          // px/s (arc length per second = radius × angular velocity in rad/s) is what puts it in the
+          // same unit as the radial velocity, so the two are directly comparable.
+          const tangentialVelocityPxPerSec = ((angularVelocityDegPerSec * Math.PI) / 180) * distance
+          const { snapTangential, snapRadial } = dominantAxisSnap(tangentialVelocityPxPerSec, filteredRadialVelocityPxPerSec)
+          if (targetsMirror) {
+            runOnJS(onMirrorRotationRelease)(angularVelocityDegPerSec)
+          } else if (targetsPattern) {
+            runOnJS(onPatternRotationRelease)(snapTangential ? 0 : angularVelocityDegPerSec)
+          }
+          if (rawTargetsPattern) {
+            runOnJS(onPatternZoomRelease)((snapRadial ? 0 : filteredRadialVelocityPxPerSec) * RADIAL_PIXELS_TO_PULSE_SCALE)
+          }
+        } else {
+          // No valid angle at this exact release point (see the ω formula's own comment above), so
+          // neither release callback above fires — nothing pending that a stale-rate resume could race
+          // against (unlike the ordinary case just below, deferred to index.tsx for exactly that
+          // reason), so it's safe to resume the ambient accumulator(s) immediately, right back to
+          // whatever they already were. Without this, a release landing exactly on the epicentre would
+          // leave rotation/zoom paused forever — nothing else would ever clear it.
+          if (targetsMirror) {
+            // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+            mirrorPaused.value = false
+          } else if (targetsPattern) {
+            // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+            baseRotationPaused.value = false
+          }
+          if (rawTargetsPattern) {
+            // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+            basePulsePaused.value = false
+          }
         }
+        if (rawTargetsMirror) {
+          // Unlike rotation just above, this doesn't need the distanceSq > 0 guard: foregroundCycleRate
+          // already sits at its final, live-faded value from the last onUpdate frame regardless of
+          // exactly where the release lands, so there's no undefined-angle case to protect against here.
+          // mirror's own cycle rate needs no pause/resume at all here: it was never paused, since it's a
+          // live overwrite rather than a delta accumulator (see onUpdate's own comment) — mirrorPaused
+          // itself does still need resuming, but not from here (see index.tsx's own
+          // applyMirrorRotationRelease for why: doing it there, synchronously alongside the new rate's
+          // own commit, is what avoids a stale-rate flash the instant this JS round-trip lands). Uses
+          // rawTargetsMirror, not targetsMirror — this axis never redirects to pattern, see this file's
+          // own targetsPattern/targetsMirror comment.
+          runOnJS(onMirrorCycleRelease)(foregroundCycleRate.value)
+        }
+        if (rawTargetsPattern) {
+          const foldedPulse = basePulse.value + manualPulseOffset.value
+          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+          basePulse.value = ((foldedPulse % 1) + 1) % 1
+          // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+          manualPulseOffset.value = 0
+        }
+        // In the ordinary distanceSq > 0 case, baseRotationPaused/mirrorPaused/basePulsePaused (all
+        // paused onStart above) deliberately stay paused here rather than being resumed as soon as this
+        // fires — see index.tsx's own applyPatternRotationRelease/applyMirrorRotationRelease/
+        // applyZoomRelease, which resume them synchronously alongside writing the new ambient rate
+        // directly, once the runOnJS calls above actually land (the distanceSq === 0 branch above is
+        // the one exception, precisely because nothing was dispatched there to eventually resume them).
+        // Resuming here instead (immediately, UI-thread side, ahead of that JS round-trip) would leave a
+        // handful of frames where the ambient accumulator is unpaused but baseRotationRate/
+        // mirrorRotationRate/zoomRate still hold their stale pre-drag value — which reads as the pattern
+        // visibly snapping back to the old rate (often the old direction) for a beat before correcting
+        // to the new one the instant the real rate arrives.
+        // Deliberately does NOT call releaseTargets here — nothing was dragged this gesture (the touch
+        // never entered the grab radius), so there's no point position/velocity of pattern's or
+        // mirror's own to snap or bounce; doing so anyway (with a synthetic velocity that has nothing
+        // to do with either point's own recent motion) would incorrectly disturb whatever independent
+        // bounce/gravity-settle state that point is already in.
+        return
       }
       releaseTargets(event.velocityX, event.velocityY)
     })
@@ -546,7 +859,9 @@ export function useEpicenter(
   // — just gated on holding still for LONG_PRESS_MS instead of on moving at all, so a press that
   // starts well away from whatever you're controlling still grabs it and brings it to you, ready to
   // drag onward from there, rather than requiring you to first find it and drag from its actual
-  // on-screen position.
+  // on-screen position. This is also what "teleport the pattern/mirror to your finger" in the outer
+  // field means in practice: a long press ignores GRAB_RADIUS_PX entirely and always glides the point
+  // straight to wherever you're pressing, however far outside the grab radius that is.
   //
   // Deliberately its own gesture rather than a config tweak on panGesture itself (RNGH's Pan supports
   // activateAfterLongPress, which sounds like exactly this) — that option *replaces* Pan's own
@@ -559,7 +874,12 @@ export function useEpicenter(
   // Gesture.Simultaneous in index.tsx, not exclusive with each other), so if you keep moving your
   // finger after the long press fires, panGesture's own onStart/onUpdate pick up that movement and
   // live-track it exactly like any other drag — nothing here has to hand off control, panGesture was
-  // already watching the whole time.
+  // already watching the whole time. One known edge case worth verifying on a real device: panGesture's
+  // own onStart classifies inner-vs-outer-field by the target's *current* position, which right after a
+  // long-press grab is still mid-spring toward your finger rather than already there — a very fast
+  // follow-up flick, before that spring settles, could misjudge the distance and read as outer-field
+  // instead of a drag continuation. Narrow (needs a hard flick within the spring's own settle time) and
+  // not something to design around speculatively; call out if it turns out to be visible in practice.
   //
   // onEnd only calls releaseTargets itself when panActive is still false — if panGesture ever
   // activated during this same touch (you kept dragging after the long press grabbed the point),
@@ -573,16 +893,6 @@ export function useEpicenter(
     .minDuration(LONG_PRESS_MS)
     .onStart((event) => {
       glideTargetsTo(event.x, event.y)
-      // Speed mode's own "stop" — deliberately only here, not folded into glideTargetsTo (which
-      // panGesture's onStart also calls): a plain drag that starts moving right away should just set a
-      // new speed on release (see releaseTargets' own targetsSpeed branch), not also stop everything a
-      // moment beforehand. Only a genuine held-still long press means "stop," matching "like what pause
-      // does, just don't reposition to center" — unlike every other mode's own long-press action
-      // (recenterGestureTarget, wired at the FAB level in OnScreenControls, not here), this has no
-      // position to put back at all.
-      if (targetsSpeed) {
-        runOnJS(onStopAllSpeeds)()
-      }
       runOnJS(onDragChange)()
     })
     .onEnd(() => {

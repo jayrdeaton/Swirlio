@@ -5,6 +5,7 @@ import { SharedValue, useDerivedValue } from 'react-native-reanimated'
 
 import { buildFlowerPoints } from '@/constants/flowerMath'
 import { gravityHoleRadius } from '@/constants/gravityWellMath'
+import { buildHeartPoints } from '@/constants/heartMath'
 import { copyCountForMirrorLines, rotationMatrix, translateRotateMatrix, wedgeAngleDegrees } from '@/constants/kaleidoscope'
 import { hasPolygonSides, PatternType } from '@/constants/patterns'
 import { buildPolygonPoints } from '@/constants/polygonMath'
@@ -16,6 +17,7 @@ import { MAX_CROP_RADIUS, MAX_GRAVITY } from '@/hooks/useSwirlSettings'
 import { GRAVITY_HOLE_MAX_RADIUS_PX, GRAVITY_HOLE_MIN_RADIUS_PX, GravityWell } from './GravityWell'
 import { KaleidoscopeCopy } from './KaleidoscopeCopy'
 import { FlowerPattern } from './patterns/FlowerPattern'
+import { HeartPattern } from './patterns/HeartPattern'
 import { PolygonPattern } from './patterns/PolygonPattern'
 import { RingsPattern } from './patterns/RingsPattern'
 import { SpiralArms } from './patterns/SpiralArms'
@@ -39,8 +41,13 @@ const NO_CROP_CLIP_RADIUS_MULTIPLIER = 2.5
 // boundary of their own (see hasPolygonSides) and always return null here regardless of the
 // cropShaped/holeShaped settings, which is what lets those toggles stay enabled for every pattern
 // (see useSwirlSettings' own cropShaped/holeShaped comments) without needing a circle special case.
+// Heart is handled as its own case ahead of the hasPolygonSides check rather than folded into it: it
+// does have a closed boundary worth tracing (unlike Rings/Spiral/Starburst), just not a variable
+// side/point/petal count to pass along with it (unlike Polygon/Star/Flower) — see buildHeartPoints'
+// own single-argument signature.
 function shapedClipPoints(pattern: PatternType, sides: number, radius: number) {
   'worklet'
+  if (pattern === 'heart') return buildHeartPoints(radius)
   if (!hasPolygonSides(pattern)) return null
   if (pattern === 'star') return buildStarPoints(sides, radius)
   if (pattern === 'flower') return buildFlowerPoints(sides, radius)
@@ -367,6 +374,11 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
           <RingsPattern radius={radius} pulse={pulse} tightness={tightness} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
             {renderCopies}
           </RingsPattern>
+        )}
+        {pattern === 'heart' && (
+          <HeartPattern radius={radius} pulse={pulse} tightness={tightness} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
+            {renderCopies}
+          </HeartPattern>
         )}
         {pattern === 'polygon' && (
           <PolygonPattern radius={radius} pulse={pulse} tightness={tightness} sides={sides} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>

@@ -6,6 +6,7 @@ import { copyCountForMirrorLines, MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/c
 import { PatternType } from '@/constants/patterns'
 import { POLYGON_SIDE_NAMES } from '@/constants/polygonMath'
 import { BOTTOM_SHEET_FOOTER_CLEARANCE } from '@/constants/sheetLayout'
+import { controlsAutoHideDelayMs, MAX_CONTROLS_AUTO_HIDE_SPEED, MIN_CONTROLS_AUTO_HIDE_SPEED } from '@/constants/swirlSettingsRanges'
 import { useControlGroups } from '@/hooks/controlGroups'
 import { useSpeedRateBridge } from '@/hooks/speedRateBridge'
 import { MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED, useSwirlSettings } from '@/hooks/useSwirlSettings'
@@ -68,7 +69,7 @@ const SIDES_SLIDER_LABELS: Partial<Record<PatternType, string>> = {
 export function ControlGroupBottomSheetContent() {
   const insets = useSafeAreaInsets()
   const { activeGroup } = useControlGroups()
-  const { settings, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setFollowSpeed, setForegroundCycleSpeed, setGravity, setHoleRadius, setMicSensitivity, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
+  const { settings, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setFollowSpeed, setForegroundCycleSpeed, setGravity, setHoleRadius, setMicSensitivity, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
   // A low-latency fast path alongside the onChange/setXSpeed calls above — see speedRateBridge.tsx's
   // own comment for why these exist and why they're not a replacement for the settings setters.
   const { writeRotationRate, writeMirrorRotationRate, writeZoomRate, writeForegroundCycleRate, writeBackgroundCycleRate, writeGravityParticleRate } = useSpeedRateBridge()
@@ -99,7 +100,10 @@ export function ControlGroupBottomSheetContent() {
             {/* Spins the whole wedge assembly as one rigid unit around the epicentre — independent of
             Pattern's own Rotation speed, which only spins the pattern content drawn inside each fixed
             wedge. See Spiral.tsx's outer AnimatedG. 0 is the original, still-default fixed-wedge look
-            — snapToZero (see FREE_STEP's own comment) is what makes that easy to get back to by feel. */}
+            — snapToZero (see FREE_STEP's own comment) is what makes that easy to get back to by feel.
+            Also settable live from the canvas's own outer-field drag while 'mirror' is the active
+            gesture target (see useEpicenter.ts) — this slider and that gesture both just write
+            mirrorRotationSpeed, so either one moves the other. */}
             <SettingSlider label='Mirror rotation speed' icon='rotate-orbit' value={settings.mirrorRotationSpeed} displayValue={`${settings.mirrorRotationSpeed.toFixed(2)}x`} minimumValue={MIN_MIRROR_ROTATION_SPEED} maximumValue={MAX_MIRROR_ROTATION_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setMirrorRotationSpeed} onLiveValue={writeMirrorRotationRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
           </>
         )}
@@ -111,8 +115,8 @@ export function ControlGroupBottomSheetContent() {
             color gets added, instead of a returning user having to remember to also come back and
             set this. Matches the Mirror group's own Alternate colors toggle and Mirror gap slider,
             left enabled ahead of having anything to act on for the same reason. */}
-            <SettingSlider label='Foreground cycle speed' icon='palette' value={settings.foregroundCycleSpeed} displayValue={`${settings.foregroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={FREE_STEP} disabled={settings.audioReactiveEnabled} onChange={setForegroundCycleSpeed} onLiveValue={writeForegroundCycleRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
-            <SettingSlider label='Background cycle speed' icon='palette-swatch' value={settings.backgroundCycleSpeed} displayValue={`${settings.backgroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={FREE_STEP} disabled={settings.audioReactiveEnabled} onChange={setBackgroundCycleSpeed} onLiveValue={writeBackgroundCycleRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
+            <SettingSlider label='Foreground cycle speed' icon='palette' value={settings.foregroundCycleSpeed} displayValue={`${settings.foregroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setForegroundCycleSpeed} onLiveValue={writeForegroundCycleRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
+            <SettingSlider label='Background cycle speed' icon='palette-swatch' value={settings.backgroundCycleSpeed} displayValue={`${settings.backgroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setBackgroundCycleSpeed} onLiveValue={writeBackgroundCycleRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
           </>
         )}
 
@@ -134,7 +138,10 @@ export function ControlGroupBottomSheetContent() {
             {/* Folded in here rather than kept as its own group — Rotation/Zoom speed used to be
             pulled out into a standalone 'speed' group, but Mirror and Colors each already keep their
             own speed settings internal to their own group, so having the pattern's own speed live
-            anywhere else was the one inconsistency, not a deliberate distinction. */}
+            anywhere else was the one inconsistency, not a deliberate distinction. Also settable live
+            from the canvas's own outer-field drag while 'pattern' is the active gesture target (see
+            useEpicenter.ts) — these two sliders and that gesture all just write rotationSpeed/
+            zoomSpeed, so any one of them moves the others. */}
             <SettingSlider label='Rotation speed' icon='speedometer' value={settings.rotationSpeed} displayValue={`${settings.rotationSpeed.toFixed(2)}x`} minimumValue={MIN_ROTATION_SPEED} maximumValue={MAX_ROTATION_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setRotationSpeed} onLiveValue={writeRotationRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
             <SettingSlider label='Zoom speed' icon='magnify' value={settings.zoomSpeed} displayValue={`${settings.zoomSpeed.toFixed(2)}x`} minimumValue={MIN_ZOOM_SPEED} maximumValue={MAX_ZOOM_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setZoomSpeed} onLiveValue={writeZoomRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
           </>
@@ -152,6 +159,19 @@ export function ControlGroupBottomSheetContent() {
 
         {group === 'gravity' && (
           <>
+            {/* How fast the pattern epicentre/mirror anchor/gravity handle catch up to your finger and
+            spring home on release/recenter — see useSwirlSettings.tsx's own comment for why one shared
+            setting covers both rather than a separate tuning for each. Grouped with Friction/Gravity
+            rather than under Settings: it's the same kind of physics-feel tuning as those two, not an
+            app preference — even though, like Tilt below in the top sheet, its effect isn't scoped to
+            gravity alone. Left out of this group's own Randomize (see the top sheet's own comment) —
+            unlike Friction/Gravity it's deliberate tuning, not a look-based surprise, same reasoning
+            rotation/zoom/mirror-rotation/color-cycle speed are excluded for (see useRerollUnits.tsx).
+            Leads the group, paired with Friction right below it — both are positive-only ranges, unlike
+            Gravity's own bipolar one (see its own comment), so grouping the two one-directional sliders
+            together and trailing with the slider whose "off" sits at a true middle reads as a deliberate
+            order, not an arbitrary one. */}
+            <SettingSlider label='Follow speed' icon='run-fast' value={settings.followSpeed} displayValue={`${settings.followSpeed.toFixed(2)}x`} minimumValue={MIN_FOLLOW_SPEED} maximumValue={MAX_FOLLOW_SPEED} step={FREE_STEP} onChange={setFollowSpeed} />
             {/* Damps a released epicentre's free movement overall, every frame it's active — not just
             its bounce off the drag boundary, despite the internal bounceFriction name (see the frame
             callback in useEpicenter.ts) — so plain 'Friction' reads truer than 'Bounce friction' ever
@@ -163,7 +183,10 @@ export function ControlGroupBottomSheetContent() {
             than replacing it — see useEpicenter's bounceFrame. 0 is the original bounce with no pull
             at all; negative repels instead (see MIN_GRAVITY's own comment in useSwirlSettings.tsx) —
             snapToZero (see FREE_STEP's own comment) gives "off" a magnetic stop to land on by feel,
-            same as the three ±speed sliders, now that this one is bipolar too. */}
+            same as the three ±speed sliders, now that this one is bipolar too. Trails Follow speed/
+            Friction rather than leading — its own "off" already sits at a felt middle (0, via
+            snapToZero) the way the other two's minimum edge doesn't, so it reads as the odd one out,
+            anchored at the end instead of grouped in front with them. */}
             <SettingSlider label='Gravity' icon='magnet' value={settings.gravity} displayValue={settings.gravity.toFixed(1)} minimumValue={MIN_GRAVITY} maximumValue={MAX_GRAVITY} step={FREE_STEP} snapToZero onChange={setGravity} />
           </>
         )}
@@ -174,11 +197,25 @@ export function ControlGroupBottomSheetContent() {
             anything to act on, same reasoning as Mirror gap/Mirror rotation speed in the mirror group
             above, rather than gating it behind the mode it only affects. */}
             <SettingSlider label='Mic sensitivity' icon='microphone-plus' value={settings.micSensitivity} displayValue={`${settings.micSensitivity.toFixed(2)}x`} minimumValue={MIN_MIC_SENSITIVITY} maximumValue={MAX_MIC_SENSITIVITY} step={FREE_STEP} onChange={setMicSensitivity} />
-            {/* How fast the pattern epicentre/mirror anchor/gravity handle catch up to your finger and
-            spring home on release/recenter — see useSwirlSettings.tsx's own comment for why one shared
-            setting covers both rather than a separate tuning for each. Lives here now that Gravity's
-            own group (Friction/Gravity above) freed up the room this used to have to compete for. */}
-            <SettingSlider label='Follow speed' icon='run-fast' value={settings.followSpeed} displayValue={`${settings.followSpeed.toFixed(2)}x`} minimumValue={MIN_FOLLOW_SPEED} maximumValue={MAX_FOLLOW_SPEED} step={FREE_STEP} onChange={setFollowSpeed} />
+            {/* Drives the idle-fade timer in index.tsx, not tap-to-dismiss (see hideControls' own call
+            sites there) — this only governs how long the controls linger with zero activity before
+            fading away on their own. Value is a rate (0 = never, 5 = as fast as this goes), the same
+            shape as Friction in the physics group's own sheet, not a raw duration — see
+            controlsAutoHideDelayMs's own comment for why — so the seconds shown here are derived for
+            display rather than read straight off settings. */}
+            <SettingSlider
+              label='Auto-hide delay'
+              icon='timer-outline'
+              value={settings.controlsAutoHideSpeed}
+              displayValue={(() => {
+                const delayMs = controlsAutoHideDelayMs(settings.controlsAutoHideSpeed)
+                return delayMs == null ? 'Off' : `${(delayMs / 1000).toFixed(1)}s`
+              })()}
+              minimumValue={MIN_CONTROLS_AUTO_HIDE_SPEED}
+              maximumValue={MAX_CONTROLS_AUTO_HIDE_SPEED}
+              step={FREE_STEP}
+              onChange={setControlsAutoHideSpeed}
+            />
           </>
         )}
       </View>

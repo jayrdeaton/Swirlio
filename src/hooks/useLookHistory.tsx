@@ -208,11 +208,16 @@ export function useLookHistory() {
 
   // The one primitive every undoable action in index.tsx goes through — captures the look as it stands
   // right now, before the caller's own mutation actually runs, so a single goBack always undoes
-  // exactly what that mutation is about to do. extra is only ever passed by resetAllSettings (its own
-  // captureExtraResetFields) — every other caller pushes a plain Look, same as before ExtraResetFields
-  // existed.
+  // exactly what that mutation is about to do. extra is a Partial, not the full ExtraResetFields, since
+  // not every caller that needs one of these nine fields carried along needs all of them:
+  // resetAllSettings passes every field (its own captureExtraResetFields, since resetSettings touches
+  // all of them), while the colors group's own randomize (see index.tsx's randomizeGroup) passes just
+  // foregroundCycleSpeed/backgroundCycleSpeed — the two ExtraResetFields it can actually touch now that
+  // cycle speed is one of its own reroll units — rather than dragging seven unrelated fields' current
+  // (unchanged) values along just to satisfy a full-object type. Every other caller still pushes a
+  // plain Look with no extra at all, same as before ExtraResetFields existed.
   const pushHistory = useCallback(
-    (extra?: ExtraResetFields) => {
+    (extra?: Partial<ExtraResetFields>) => {
       // Capped at MAX_LOOK_HISTORY, oldest entry dropped first — this is a big part of what makes
       // persisting lookHistory to disk (see the hydrate/save effect below) reasonable at all: without a
       // cap, a long sitting full of hot-key taps and randomizes would grow this array, and the blob

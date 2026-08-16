@@ -7,11 +7,13 @@ import Animated, { Easing, useAnimatedStyle, withTiming } from 'react-native-rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { contrastColor, DISABLED_ON_CANVAS_SCRIM_COLOR, disabledOnCanvasFabTheme, TOGGLE_OFF_BLUR_TINT_OPACITY, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
-import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
+import { RANDOMIZE_HOLD_REPEAT_MS } from '@/constants/holdToRepeat'
+import { MAX_MIRROR_LINES, signedMirrorLines } from '@/constants/kaleidoscope'
 import { ControlGroup, useControlGroups, useControlGroupSheetDrawer, useOpenControlGroup } from '@/hooks/controlGroups'
 import { useGravityMarkerVisibility } from '@/hooks/gravityMarkerVisibility'
+import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { GESTURE_TARGET_ORDER, GestureTarget } from '@/hooks/useEpicenter'
-import { useHoldToRepeat } from '@/hooks/useHoldToRepeat'
+import { useHoldToRepeat, useHoldToRepeatByKey } from '@/hooks/useHoldToRepeat'
 import { useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { DashStyleIcon } from './DashStyleIcon'
@@ -25,10 +27,10 @@ import { PatternIcon } from './PatternIcon'
 const FAB_EDGE_MARGIN = 16
 // Matches the canvas's own two-finger/long-press gesture threshold (see index.tsx's LONG_PRESS_MS) —
 // one consistent "how long is a hold" feel everywhere in the app. Shared by every transport-row FAB that
-// layers a hold on top of its ordinary tap — skip-previous (onResetAllSettings), play/pause
-// (onResetSwirl), forward (onGoForwardBatch), Cycle line type (reset to solid), Cycle shape
-// (onCycleSides), and the primary gesture-target FAB (onRecenter) — not a separate tuning for any one
-// of them.
+// layers a hold on top of its ordinary tap — skip-previous (onResetAllSettings), Add/Remove mirror
+// (onMaxMirrorLines/onMinMirrorLines), forward (onGoForwardBatch), Cycle line type (reset to solid),
+// Cycle shape (onCycleSides), and the primary gesture-target FAB (onRecenter) — not a separate tuning
+// for any one of them.
 const TRANSPORT_LONG_PRESS_MS = 400
 // How fast Cycle shape and Forward's own long-presses (see useHoldToRepeat) keep stepping for as long
 // as they're held, once the initial TRANSPORT_LONG_PRESS_MS hold has already fired the first step via
@@ -46,14 +48,20 @@ const FADE_DURATION_MS = 250
 const SIBLINGS_COLLAPSE_OFFSET = 24
 
 // One trigger FAB per group sheet (see controlGroups.ts) — order top-to-bottom (under the menu FAB
-// that starts the stack) matches how often each is likely to get reached for: Mirror and Colors are
-// the two that used to have permanent on-screen real estate (the old mirror row, and color swap/
-// reset living only in the drawer before this), Pattern/Line are the settings that used to be
-// drawer-only sliders with zero on-screen quick access at all. Pattern carries the shape itself
-// (type, sides/points/petals, tightness, fixed spacing) plus its own rotation/zoom speed — Line
-// carries how that shape's outline actually renders (dash style, stroke width, crop). See
-// controlGroups.tsx's own comment for why these used to be one combined group (and a separate
-// 'speed' group) and aren't anymore.
+// that starts the stack) is now a deliberate two-cluster split rather than a single frequency
+// ranking. Gravity leads (right under the cog that starts the stack, see the 'settings' entry
+// prepended at the call site below): Settings and Gravity are both "how it behaves" tuning — device/
+// global toggles and physics feel (Friction/Gravity/Follow speed/Tilt) — not "what it looks like",
+// so they read as their own pair up top regardless of how often either gets reached for. Colors/Line/
+// Pattern/Mirror follow as the look-editing cluster, ordered by ascending how-often-reached-for
+// toward the bottom of the stack: Colors first (swap/reset, the lightest of the four), then Line
+// (dash style/stroke width/crop), then Pattern and Mirror last — the two with by far the most
+// settings and the two reached for most, so they land closest to hand at the bottom rather than
+// buried above three lighter groups. Pattern carries the shape itself (type, sides/points/petals,
+// tightness, fixed spacing) — rotation/zoom now live entirely on the canvas's own outer-field drag (see
+// useEpicenter.ts), not a slider here. Line carries how that shape's outline actually renders (dash
+// style, stroke width, crop). See controlGroups.tsx's own comment for why Pattern/Line used to be one
+// combined group (and a separate 'speed' group) and aren't anymore.
 // Pattern's own trigger renders the same spiral glyph as the Spiral option inside its own top sheet
 // (see PatternIcon) rather than a generic MaterialCommunityIcons stand-in ('shape') — the app's own
 // default pattern reads as a much clearer "this is the pattern group" mark than an arbitrary polygon.
@@ -64,17 +72,20 @@ const SIBLINGS_COLLAPSE_OFFSET = 24
 // mock sees it. Every entry here carries its own testID explicitly rather than relying on that
 // fallback (see the Jest FAB mock's own comment).
 const GROUP_TRIGGERS: { group: ControlGroup; icon: IconOrRenderFn; testID?: string }[] = [
-  { group: 'mirror', icon: 'mirror', testID: 'fab-mirror' },
+  // Not the same glyph as the Gravity slider/gravity gesture-target anymore (see
+  // GESTURE_TARGET_ICONS below and ControlGroupBottomSheetContent) — this trigger now opens a sheet
+  // covering Friction/Gravity/Follow speed/Tilt, not just the well itself, so a gravity-specific
+  // magnet stopped fitting once those other physics controls joined it. 'atom' reads as "physics in
+  // general" without implying it's only about the magnetic pull.
+  { group: 'gravity', icon: 'atom', testID: 'fab-atom' },
   { group: 'colors', icon: 'palette', testID: 'fab-palette' },
-  { group: 'pattern', icon: ({ size, color }) => <PatternIcon pattern='spiral' color={color} size={size} />, testID: 'fab-pattern' },
   // Render-function icon rather than the plain string every other entry here uses — a trial fix for
   // the off-center-glyph bug (see MdIcon's own comment): this is the exact icon a real-device
   // screenshot proved visibly off-center, so it's the one call site converted first to confirm the fix
   // actually helps on-device before rolling it out to every other icon in the app.
   { group: 'line', icon: ({ size, color }) => <MdIcon name='format-line-weight' color={color} size={size} />, testID: 'fab-format-line-weight' },
-  // Same icon the Gravity slider itself uses (see ControlGroupBottomSheetContent) — one consistent
-  // "this is the gravity group" mark between the trigger and its own sheet content.
-  { group: 'gravity', icon: 'magnet', testID: 'fab-magnet' }
+  { group: 'pattern', icon: ({ size, color }) => <PatternIcon pattern='spiral' color={color} size={size} />, testID: 'fab-pattern' },
+  { group: 'mirror', icon: 'mirror', testID: 'fab-mirror' }
 ]
 
 // One icon per real gestureTarget (see useEpicenter.ts) — shown on the transport row's primary FAB
@@ -85,28 +96,35 @@ const GROUP_TRIGGERS: { group: ControlGroup; icon: IconOrRenderFn; testID?: stri
 const GESTURE_TARGET_ICONS: Record<GestureTarget, IconOrRenderFn> = {
   pattern: ({ size, color }) => <PatternIcon pattern='spiral' color={color} size={size} />,
   mirror: 'mirror',
-  // Same icon the gravity group trigger and its own Gravity slider use — one consistent "this is
-  // gravity" mark across the trigger stack, this FAB, and the sheet content itself.
-  gravity: 'magnet',
-  speed: 'speedometer'
+  // Same icon the Gravity slider itself uses (see ControlGroupBottomSheetContent) — this is about
+  // the on-screen draggable well specifically, not the broader physics group's own trigger icon
+  // (see GROUP_TRIGGERS above, now 'atom'), so it keeps the magnet regardless of that split.
+  gravity: 'magnet'
 }
 
 type OnScreenControlsProps = {
   visible: boolean
-  frozen: boolean
   // Which point(s) the one-finger drag/twist currently apply to — a plain Set, any combination of
   // pattern/mirror/gravity. 'mirror' is always selectable here regardless of mirrorLines (see
-  // index.tsx's own mirrorAvailable comment) — a drag targeting it just has nothing visible to move
-  // yet until there's an actual wedge, same "pre-arm ahead of having anything to act on" reasoning as
-  // Mirror gap/rotation speed already get at 0 lines.
+  // index.tsx's own mirrorAvailable comment) — a drag targeting it while there's no actual wedge yet
+  // falls back to moving the pattern epicentre instead (see useEpicenter.ts's own targetsPattern/
+  // targetsMirror fallback), same "pre-arm ahead of having anything to act on" reasoning as Mirror
+  // gap/rotation speed already get at 0 lines.
   activeTargets: ReadonlySet<GestureTarget>
   // True whenever the back/forward look-history stack (see index.tsx's lookHistory) is empty — there's
   // nothing for a "back" to undo to yet. Forward has no equivalent disabled state: a tweak is always
   // possible regardless of history, it's only ever back that can run out of somewhere to go.
   backDisabled: boolean
+  // Corner Pause/Play — see the pauseFab's own comment further down for what "frozen" actually means
+  // (every speed forced to 0, not a mode-scoped thing). onToggleFrozen is the only way to set it from
+  // here; index.tsx's own release handlers (a live rotation/zoom/mirror-cycle drag) are the only other
+  // way it ever changes, clearing it back off rather than fighting a still-frozen 0.
+  frozen: boolean
   onToggleFrozen: () => void
-  onRandomize: () => void
-  onResetSwirl: () => void
+  // The same FAB's own long-press bonus — recentres AND reorients every point at once (pattern, mirror,
+  // gravity), unconditionally, regardless of which gesture target happens to be active. Distinct from
+  // onRecenter below, which only touches whichever target(s) activeTargets currently holds.
+  onRecenterEverything: () => void
   // Tapping a fan item — replaces activeTargets outright with just this one.
   onSelectGestureTarget: (target: GestureTarget) => void
   // Whether the gesture-target fan is spread out — lifted up and controlled by index.tsx (rather than
@@ -134,15 +152,20 @@ type OnScreenControlsProps = {
   onGoForwardBatch: () => void
   // The transport row's two contextual slots (see the render body's own comment for the full mode
   // table) — everything below this point is for whichever single-target or linked pair is currently
-  // showing there. mirrorLines/MIN_MIRROR_LINES/MAX_MIRROR_LINES drive Add/Remove mirror's boundary-
-  // disabled treatment, the same disableableSmallFabWrapper pattern skip-previous already uses for
-  // backDisabled.
+  // showing there. mirrorLines/mirrorAlternateColors together drive Add/Remove mirror's boundary-
+  // disabled treatment (see signedMirrorLines — the pair is treated as one signed dial, disabled only
+  // at its true +/-MAX_MIRROR_LINES extremes, never at the 0 midpoint), the same disableableSmallFabWrapper
+  // pattern skip-previous already uses for backDisabled.
   mirrorLines: number
+  mirrorAlternateColors: boolean
   onAddMirrorLine: () => void
   onRemoveMirrorLine: () => void
-  // Add/Remove mirror's own long-press bonus — jumps straight to MAX_MIRROR_LINES/MIN_MIRROR_LINES
-  // instead of the single ±1 step a tap gives, same tap/hold-does-something-else convention Cycle
-  // shape's onCycleSides already uses.
+  // Add/Remove mirror's own long-press bonus — each treats 0 as a "pass through first" stop in the
+  // direction it points before reaching the far signed extreme (see index.tsx's maxMirrorLines/
+  // minMirrorLines), rather than a plain jump straight to MAX_MIRROR_LINES/MIN_MIRROR_LINES the way
+  // every other "jump to boundary" long press on this row still does. Wired through useHoldToRepeat
+  // (see maxMirrorLinesHold/minMirrorLinesHold below), so continuing to hold past the first stop
+  // carries straight on to the far extreme instead of requiring a release and a second long-press.
   onMaxMirrorLines: () => void
   onMinMirrorLines: () => void
   // Pattern mode's pair — onCycleShape reuses index.tsx's existing nextPattern; onCycleLineType is the
@@ -163,27 +186,24 @@ type OnScreenControlsProps = {
   // gesture mode now, rather than mode-scoped like everything else on this row.
   gravityRepelling: boolean
   onReverseGravity: () => void
-  // Speed mode's own flank button — which of rotationSpeed/mirrorRotationSpeed the canvas's own
-  // drag/swipe (see useEpicenter.ts's onSpeedRelease) currently sets. A single button that alternates
-  // between the two on each press (see slotA/slotB's own comment for where it renders and why), rather
-  // than a separate toggle per option — there's no meaningful "both" or "neither" here, only "which
-  // one," so one button showing the current pick reads more clearly than two. speedTargetsMirror false
-  // means Pattern speed is selected (the default, and what a press while true switches back to); true
-  // means Mirror speed is (and what a press while false switches to).
-  speedTargetsMirror: boolean
-  onToggleSpeedTarget: () => void
+  // The collapse toggle's own long-press bonus while expanded (chevron-up) — see its own onLongPress
+  // comment further down. index.tsx's hideControls straight through, the same function EdgeRevealZones'
+  // onReveal/revealControls pair undoes.
+  onHideControls: () => void
 }
 
 // A transport row sits at bottom-center: skip-previous, a mode-specific contextual pair flanking the
 // gesture-target cluster, and skip-next — the only things here with no group-sheet equivalent at all
 // (the contextual pair's actions do have sheet equivalents — Mirror lines, the pattern/dash pickers,
-// Gravity — this is just a faster, mode-scoped shortcut to a couple of them). Play/pause isn't a fixed
-// member of this row at all anymore — it only exists in speed mode, in slotA's usual left-flank position
-// (see showPauseFab's own comment further down for why), gone entirely from every other mode rather than
-// just moved. And, unlike the trigger stack below, none of this row is kept reachable while a sheet is
-// open: it fades out together with the dice FAB instead (see sheetFadeStyle below), since the bottom
-// sheet ends up covering it either way. Everything else — pattern switching, side count, mirror toggles,
-// stroke width/
+// Gravity — this is just a faster, mode-scoped shortcut to a couple of them). No play/pause FAB on
+// this row — that lives in the top-left corner instead (see pauseFab further down), since it's a
+// single global toggle that stops everything at once rather than a mode-scoped action a live drag
+// already covers per-target (rotation/zoom stop by releasing an outer-field drag slowly or two-finger
+// long-pressing the canvas itself — see useEpicenter.ts/index.tsx's stopAndSnapGesture). And, unlike
+// the trigger stack below, none of this row is kept reachable while a sheet is open: it fades out
+// together with the pause FAB instead (see sheetFadeStyle below), since the bottom sheet ends up
+// covering it either way. Everything else —
+// pattern switching, side count, mirror toggles, stroke width/
 // tightness, appearance/device toggles, physics sliders, and every other tunable — lives behind the
 // group-trigger stack instead (see controlGroups.ts/ControlGroupTopSheetContent/
 // ControlGroupBottomSheetContent) — collapsing what would otherwise be an ever-growing row of FABs
@@ -193,12 +213,18 @@ type OnScreenControlsProps = {
 // controls' own hit areas capture anything. Faded via opacity rather than conditionally rendered so
 // hiding/revealing transitions smoothly instead of popping instantly — see EdgeRevealZones for how it
 // comes back once fully hidden and no longer touchable.
-export function OnScreenControls({ visible, frozen, activeTargets, backDisabled, gestureFanOpen, onGestureFanOpenChange, onToggleFrozen, onRandomize, onResetSwirl, onSelectGestureTarget, onRecenter, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, mirrorLines, onAddMirrorLine, onRemoveMirrorLine, onMaxMirrorLines, onMinMirrorLines, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, gravityRepelling, onReverseGravity, speedTargetsMirror, onToggleSpeedTarget }: OnScreenControlsProps) {
+export function OnScreenControls({ visible, activeTargets, backDisabled, frozen, onToggleFrozen, onRecenterEverything, gestureFanOpen, onGestureFanOpenChange, onSelectGestureTarget, onRecenter, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, mirrorLines, mirrorAlternateColors, onAddMirrorLine, onRemoveMirrorLine, onMaxMirrorLines, onMinMirrorLines, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, gravityRepelling, onReverseGravity, onHideControls }: OnScreenControlsProps) {
   const insets = useSafeAreaInsets()
   const { colors, roundness } = useTheme()
   const blurEnabled = useBlur()
   const openGroup = useOpenControlGroup()
   const { activeGroup } = useControlGroups()
+  // Backs each group trigger's own long-press bonus below (randomizeGroup) — the exact same
+  // ref-bridged call ControlGroupTopSheetContent's per-group "Randomize" ActionFab already makes, so
+  // a long press on a trigger and a tap on its sheet's own Randomize button share one implementation
+  // (SwirlScreen's randomizeGroup, registered via useRegisterSwirlRandomize) rather than two copies
+  // that could drift apart.
+  const { randomizeGroup } = useSwirlRandomize()
   // Shared with the gravity group's own top sheet (ControlGroupTopSheetContent) — same context, same
   // value, so the on-canvas toggle below and the drawer's own copy of it always agree; either one
   // flips the other. Read directly from context rather than threaded through props (like
@@ -213,6 +239,22 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
   // this hook existed, then again every HOLD_REPEAT_MS for as long as the hold continues.
   const cycleSidesHold = useHoldToRepeat(onCycleSides, HOLD_REPEAT_MS)
   const goForwardBatchHold = useHoldToRepeat(onGoForwardBatch, HOLD_REPEAT_MS)
+  // Add/Remove mirror's own long-press bonus is a two-stop journey, not an open-ended cycle (see
+  // index.tsx's maxMirrorLines/minMirrorLines) — the same hold-to-repeat mechanism just means holding
+  // past the first stop (0) carries on to the far extreme instead of requiring a release and a second
+  // press-and-hold. index.tsx's own early-return once the dial's already at the target is what keeps
+  // this a no-op rather than churning once the hold outlasts reaching the far extreme.
+  const maxMirrorLinesHold = useHoldToRepeat(onMaxMirrorLines, HOLD_REPEAT_MS)
+  const minMirrorLinesHold = useHoldToRepeat(onMinMirrorLines, HOLD_REPEAT_MS)
+  // Every group trigger's own randomize bonus (including the cog/chevron's 'settings' shortcut) keeps
+  // rerolling for as long as the hold continues, the same "keep going while held" upgrade the above
+  // four already give their own single-shot actions — except one hook call backs all six FABs at once
+  // (see useHoldToRepeatByKey's own comment for why the plain useHoldToRepeat above can't, since these
+  // are rendered from a `.map()` over GROUP_TRIGGERS rather than each getting its own fixed call site).
+  // RANDOMIZE_HOLD_REPEAT_MS rather than this file's own HOLD_REPEAT_MS — a full reroll needs more time
+  // to actually look at than a single Cycle-shape/Forward step does (see that constant's own comment for
+  // why it's shared centrally instead of duplicated the way this file's other timing constants are).
+  const randomizeGroupHold = useHoldToRepeatByKey(randomizeGroup, RANDOMIZE_HOLD_REPEAT_MS)
 
   // Whether the trigger stack's own group triggers (cog + GROUP_TRIGGERS) are showing, independent of
   // anySheetVisible/visible above — a per-stack declutter toggle (see the collapse FAB anchored at the
@@ -274,8 +316,8 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
     opacity: withTiming(visible ? 1 : 0, { duration: FADE_DURATION_MS, easing: Easing.out(Easing.quad) })
   }))
 
-  // Randomize and the transport row both sit where an open sheet ends up covering them anyway (the
-  // dice FAB under the top sheet, the transport row under the bottom one — see controlGroups.tsx's
+  // Pause/Play and the transport row both sit where an open sheet ends up covering them anyway (the
+  // pause FAB under the top sheet, the transport row under the bottom one — see controlGroups.tsx's
   // side: 'top'/'bottom') — fading them out in step with the sheet opening, rather than leaving them
   // sitting there to be abruptly covered or, worse, still tappable underneath it, reads as the two
   // acting together instead of one just happening to land on top of the other. Same duration/easing as
@@ -355,7 +397,7 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
   // own column even though the sheet's *content* is padded to leave that column visible (see
   // ControlGroupTopSheetContent's paddingRight).
   //
-  // Randomize is deliberately NOT part of this portaled stack — unlike the trigger stack, there's
+  // Pause/Play is deliberately NOT part of this portaled stack — unlike the trigger stack, there's
   // nothing wrong with it getting covered while a sheet is open, and keeping it reachable would mean
   // every top sheet has to keep reserving clearance in its top-left corner for a FAB that has nothing
   // to do with whatever's being adjusted. Dropping that clearance is what lets the top sheet's own
@@ -364,12 +406,25 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
   // pointerEvents='none' while faded matters on its own too, not just as a visual nicety: without it,
   // an invisible-but-still-mounted FAB sitting right where the top sheet's own first button renders
   // would otherwise still catch the occasional touch meant for that button.
-  const diceFab = (
-    // A stateless, single-tap "surprise me" — the only other way to trigger this is a physical shake
-    // (see useShakeToRandomize), which isn't available on web/desktop and isn't discoverable at all
-    // without knowing it exists. Top-left, balancing the trigger stack opposite it.
-    <Animated.View testID='dice-fab-fade' style={[styles.fab, sheetFadeStyle, { top: insets.top + FAB_EDGE_MARGIN, left: FAB_EDGE_MARGIN }]} pointerEvents={anySheetVisible ? 'none' : 'auto'}>
-      <FAB testID='fab-dice-multiple' icon={resolveIcon('dice-multiple')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={closeFanFirst(onRandomize)} />
+  //
+  // "Frozen" forces every speed-driven value (rotation/mirror-rotation/zoom/colour-cycle speed) to a
+  // hard 0 without touching the sliders they came from (see index.tsx's own frozen-aware effective
+  // values), so Play always resumes exactly whatever the sliders already said, not whatever the frame
+  // happened to be paused on. Starting a fresh rotation/mirror-rotation/zoom/mirror-cycle drag clears
+  // frozen back off on its own release (see index.tsx's own release handlers) — a screen gesture
+  // always wins over a stale pause rather than getting silently zeroed back out by it, so Pause is a
+  // deliberate "stop everything for now," not a lock on the canvas.
+  //
+  // onLongPress is a bonus on top of the ordinary pause/resume tap — the same tap/hold-does-something-
+  // else convention every other long-press-carrying FAB in this file already uses — recentring AND
+  // reorienting every point at once (see index.tsx's own recenterEverything), unconditionally rather
+  // than scoped to whichever gesture target happens to be active the way the primary FAB's own
+  // onRecenter is. "Pause everything" and "put everything back" read as one matched pair on the same
+  // button, the on-canvas equivalent of the settings sheet's own Reset all — minus the persisted
+  // settings that one also touches.
+  const pauseFab = (
+    <Animated.View testID='pause-fab-fade' style={[styles.fab, sheetFadeStyle, { top: insets.top + FAB_EDGE_MARGIN, left: FAB_EDGE_MARGIN }]} pointerEvents={anySheetVisible ? 'none' : 'auto'}>
+      <FAB testID={frozen ? 'fab-play' : 'fab-pause'} icon={resolveIcon(frozen ? 'play' : 'pause')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={closeFanFirst(onToggleFrozen)} onLongPress={closeFanFirst(onRecenterEverything)} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
     </Animated.View>
   )
 
@@ -400,7 +455,16 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
       a sheet, alongside re-tapping the open group's own trigger below and a plain tap on the exposed
       canvas (see index.tsx's handleCanvasTap and topSheet/bottomSheet's own blockingBackdrop comment in
       controlGroups.tsx for why the backdrop itself doesn't do this). closeGroupSheet no-ops harmlessly
-      when nothing's open. */}
+      when nothing's open. onLongPress depends on which state this FAB is already in: while siblingsVisible
+      (chevron-up, the cog and friends already on screen), a long press collapses AND hides the whole
+      overlay in one hold — onHideControls, the same state index.tsx's own edge-reveal zones bring back
+      (see EdgeRevealZones/index.tsx's hideControls/revealControls) — since the cog right below already
+      covers "randomize everything" via its own long press whenever the stack is expanded, this FAB's
+      long press would otherwise just be a redundant shortcut to the same thing. While collapsed
+      (chevron-down), the cog and siblings aren't reachable at all, so this FAB's long press falls back to
+      randomizeGroup('settings') (see useRerollUnits' own rerollUnitsByGroup, which gives settings every
+      other group's units combined) — the one spot a full randomize stays reachable with the rest of the
+      stack collapsed. */}
       <GlassToggleFab
         icon={siblingsVisible ? 'chevron-up' : 'chevron-down'}
         testID={siblingsVisible ? 'fab-chevron-up' : 'fab-chevron-down'}
@@ -409,6 +473,20 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
           setTriggerStackExpanded(!siblingsVisible)
           closeGroupSheet()
         })}
+        onLongPress={closeFanFirst(() => {
+          if (siblingsVisible) {
+            setTriggerStackExpanded(false)
+            closeGroupSheet()
+            onHideControls()
+          } else {
+            randomizeGroupHold.onLongPress('settings')()
+          }
+        })}
+        // Harmless no-op via the collapse/hide branch above (nothing was ever started for 'settings'
+        // there, and stop() on an untracked key is guarded — see useHoldToRepeatByKey), so this can stay
+        // unconditional rather than needing its own siblingsVisible branch.
+        onPressOut={randomizeGroupHold.onPressOut('settings')}
+        delayLongPress={TRANSPORT_LONG_PRESS_MS}
       />
       {/* Collapsible siblings live in their own wrapper (rather than gap-ing directly under
       styles.triggerStack) so siblingsFadeStyle can fade+nudge the whole group as one unit without
@@ -430,7 +508,17 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
           // rather than closing first, exactly as before.
           // disabled (not just this wrapper's pointerEvents='none') while collapsed — see GlassToggleFab's
           // own comment for why the CSS alone doesn't actually stop a press here.
-          return <GlassToggleFab key={group} icon={icon} testID={testID} active={isOpenGroup} disabled={!siblingsVisible} onPress={closeFanFirst(() => (isOpenGroup ? closeGroupSheet() : openGroup(group)))} />
+          // onLongPress: a shortcut to that group's own Randomize button (see ControlGroupTopSheetContent)
+          // without opening the sheet at all — same tap/hold-does-something-else convention as every
+          // other bonus long press in this file, and closeFanFirst same as the tap above. Settings gets
+          // this too, same as every other group: its own rerollUnitsByGroup slice is every other group's
+          // units combined (see useRerollUnits.tsx), so a long press on the cog is "randomize
+          // everything" — the same reroll the chevron above it and the settings sheet's own Randomize
+          // button now trigger too. Routed through randomizeGroupHold (see its own comment above) rather
+          // than a plain randomizeGroup(group) call, so holding past the initial delayLongPress keeps
+          // rerolling every HOLD_REPEAT_MS instead of stopping after one pass — onPressOut is what stops
+          // it on release.
+          return <GlassToggleFab key={group} icon={icon} testID={testID} active={isOpenGroup} disabled={!siblingsVisible} onPress={closeFanFirst(() => (isOpenGroup ? closeGroupSheet() : openGroup(group)))} onLongPress={closeFanFirst(randomizeGroupHold.onLongPress(group))} onPressOut={randomizeGroupHold.onPressOut(group)} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
         })}
       </Animated.View>
     </View>
@@ -446,19 +534,23 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
     // Plain ±1 steps on mirrorLines (see index.tsx's addMirrorLine/removeMirrorLine) — one-shot
     // actions, not toggles, so these use the same solid FAB look as Recenter/Reset below rather than
     // GlassToggleFab's on/off language. Boundary-disabled the same disableableSmallFabWrapper +
-    // BlurView way skip-previous already is for backDisabled.
-    const mirrorAtMax = mirrorLines >= MAX_MIRROR_LINES
-    const mirrorAtMin = mirrorLines <= MIN_MIRROR_LINES
+    // BlurView way skip-previous already is for backDisabled — mirrorLines/mirrorAlternateColors
+    // treated as one signed dial (see signedMirrorLines), so only the true +/-MAX_MIRROR_LINES extremes
+    // disable either button; the 0 midpoint leaves both enabled, since either direction is still valid
+    // from there.
+    const signedMirror = signedMirrorLines(mirrorLines, mirrorAlternateColors)
+    const mirrorAtMax = signedMirror >= MAX_MIRROR_LINES
+    const mirrorAtMin = signedMirror <= -MAX_MIRROR_LINES
     slotA = (
       <View style={styles.disableableSmallFabWrapper}>
         {mirrorAtMin && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, disabledBackdropStyle]} />}
-        <FAB testID='fab-remove-mirror' icon={resolveIcon('minus')} size='small' disabled={mirrorAtMin} color={solidFabColor} style={disabledAwareFabStyle(mirrorAtMin)} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onRemoveMirrorLine} onLongPress={onMinMirrorLines} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
+        <FAB testID='fab-remove-mirror' icon={resolveIcon('minus')} size='small' disabled={mirrorAtMin} color={solidFabColor} style={disabledAwareFabStyle(mirrorAtMin)} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onRemoveMirrorLine} onLongPress={minMirrorLinesHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={minMirrorLinesHold.onPressOut} />
       </View>
     )
     slotB = (
       <View style={styles.disableableSmallFabWrapper}>
         {mirrorAtMax && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, disabledBackdropStyle]} />}
-        <FAB testID='fab-add-mirror' icon={resolveIcon('plus')} size='small' disabled={mirrorAtMax} color={solidFabColor} style={disabledAwareFabStyle(mirrorAtMax)} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onAddMirrorLine} onLongPress={onMaxMirrorLines} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
+        <FAB testID='fab-add-mirror' icon={resolveIcon('plus')} size='small' disabled={mirrorAtMax} color={solidFabColor} style={disabledAwareFabStyle(mirrorAtMax)} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onAddMirrorLine} onLongPress={maxMirrorLinesHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={maxMirrorLinesHold.onPressOut} />
       </View>
     )
   } else if (activeTargets.has('pattern')) {
@@ -518,44 +610,25 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
     // other and neither can drift out of sync with it.
     slotA = <GlassToggleFab icon='eye' testID='fab-gravity-marker-visible' active={gravityMarkerVisible} onPress={() => setGravityMarkerVisible(!gravityMarkerVisible)} />
     slotB = <GlassToggleFab icon='plus-minus-variant' testID='fab-reverse-gravity' active={gravityRepelling} onPress={onReverseGravity} />
-  } else if (activeTargets.has('speed')) {
-    // A single alternating button, not a toggle pair — see speedTargetsMirror's own prop comment for
-    // why. Shows whichever of pattern/mirror is currently selected via the exact same icons
-    // GESTURE_TARGET_ICONS already uses for those two targets elsewhere (the primary FAB, the fan),
-    // rather than a bespoke glyph, so "which one is this pointed at" reads the same way everywhere in
-    // the app; pressing it advances to the other one, the same cycle-button shape Cycle shape/Cycle
-    // line type above already use. slotA is deliberately left empty here — Pause/Play takes over that
-    // spot instead, and *only* for this mode — see showPauseFab's own comment below.
-    slotB = <FAB testID='fab-speed-target' icon={resolveIcon(GESTURE_TARGET_ICONS[speedTargetsMirror ? 'mirror' : 'pattern'])} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onToggleSpeedTarget} />
   }
-
-  // Pause/Play is speed-mode-only now, in slotA's usual position (left flank, right after
-  // skip-previous) — not just relocated there, gone everywhere else entirely. Every other mode has no
-  // way to reach it at all (and no way to reach its own onLongPress bonus, resetSwirl — "put it all
-  // back" — either, since that lives on the same FAB); only speed mode's own long press
-  // (onStopAllSpeeds, wired in index.tsx) offers anything pause-like there. Pulled out into its own
-  // element (rather than duplicated inline in both flanks) both to avoid ever mounting two real
-  // Pause/Play FABs at once and so this one spot decides whether it renders at all.
-  const showPauseFab = activeTargets.has('speed')
-  const pauseFab = showPauseFab && <FAB testID={frozen ? 'fab-play' : 'fab-pause'} icon={resolveIcon(frozen ? 'play' : 'pause')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onToggleFrozen} onLongPress={onResetSwirl} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
 
   return (
     <>
       <Animated.View testID='on-screen-controls-root' style={[StyleSheet.absoluteFill, animatedStyle]} pointerEvents={visible ? 'box-none' : 'none'}>
-        {diceFab}
+        {pauseFab}
         {!anySheetVisible && triggerStack}
 
-        {/* Fades with the same sheetFadeStyle as the dice FAB (see its own comment above) — the bottom
+        {/* Fades with the same sheetFadeStyle as the pause FAB (see its own comment above) — the bottom
         sheet opens right over this row (controlGroups.tsx's side: 'bottom'), so it fades out in step
         with that sheet instead of sitting there to be covered or caught by a stray touch underneath
         it; pointerEvents='none' while faded is what actually stops that stray touch, not just the
         opacity. */}
         <Animated.View testID='transport-row' style={[styles.transportRow, sheetFadeStyle, { bottom: insets.bottom + FAB_EDGE_MARGIN }]} pointerEvents={anySheetVisible ? 'none' : 'auto'}>
-          {/* Back/forward flank the whole mic/gesture-target/play-pause cluster (rather than sitting
-          right against play/pause itself) — a media-player-style transport bar bookending the group,
-          skipping through the same undo stack the dice FAB below also pushes onto (see
-          pushHistoryAndReroll/goBack/goForward/goForwardBatch in index.tsx) — a dice tap and a shake
-          are just as undoable via back as a forward tweak is. Grouped into its own row (rather than
+          {/* Back/forward flank the whole gesture-target cluster (rather than sitting right against it) —
+          a media-player-style transport bar bookending the group, skipping through the same undo stack
+          a Randomize tap and a shake also push onto (see
+          pushHistoryAndReroll/goBack/goForward/goForwardBatch in index.tsx) — either one is just as
+          undoable via back as a forward tweak is. Grouped into its own row (rather than
           two direct children of the transport row) so fanFlanksStyle can fade this whole flank as one
           unit while the fan is open — see its own comment. Disabled treatment (no history to go back
           to yet) is the BlurView-backdrop pattern documented on disableableSmallFabWrapper's own style
@@ -565,14 +638,11 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
               {backDisabled && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, disabledBackdropStyle]} />}
               <FAB testID='fab-skip-previous' icon={resolveIcon('skip-previous')} size='small' disabled={backDisabled} color={solidFabColor} style={disabledAwareFabStyle(backDisabled)} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onGoBack} onLongPress={onResetAllSettings} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
             </View>
-            {/* Slot A — see slotA/slotB's own comment above for the full mode table this renders from.
-            Speed mode swaps this for Pause/Play instead (see showPauseFab's own comment) — slotA itself
-            stays null for that mode, so this reads as "nothing" rather than showing both. */}
-            {showPauseFab ? pauseFab : slotA}
+            {/* Slot A — see slotA/slotB's own comment above for the full mode table this renders from. */}
+            {slotA}
           </Animated.View>
           {/* The row's primary/biggest FAB (medium, centered) — switching what a drag/twist controls
-          is the thing you're actually doing most of the time in this app, so it gets the emphasis
-          play/pause used to have (see play/pause's own comment below for that swap). Tapping it fans
+          is the thing you're actually doing most of the time in this app. Tapping it fans
           the other targets out in an arc above it (see GestureFanItem) rather than cycling through
           them one at a time — cycling stopped scaling once gravity brought the option count to four,
           and more are coming (particles, camera), which would make "tap N times to reach the one you
@@ -599,8 +669,8 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
           recentring as its own explicit, separate action. closeFanFirst (same as every other button in
           this file that can fire while the fan is open) closes it first if a long press happens to land
           while it's spread out, same as any other action would. React Native's own touchable already
-          treats onLongPress as exclusive of onPress within the same gesture (see the play/pause FAB's
-          own comment below for the same guarantee), so a hold doesn't also toggle the fan open on
+          treats onLongPress as exclusive of onPress within the same gesture (same guarantee every other
+          long-press-carrying FAB in this file relies on), so a hold doesn't also toggle the fan open on
           release. */}
           <View testID='gesture-target-cluster' style={styles.gestureTargetCluster} pointerEvents='box-none'>
             {GESTURE_TARGET_ORDER.map((target, index) => {
@@ -623,15 +693,15 @@ export function OnScreenControls({ visible, frozen, activeTargets, backDisabled,
             })}
             <FAB testID='fab-target' icon={resolveIcon(GESTURE_TARGET_ICONS[[...activeTargets][0]])} size='medium' color={solidFabColor} style={[solidFabStyle, solidFabSizeMedium]} onPress={() => onGestureFanOpenChange(!gestureFanOpen)} onLongPress={closeFanFirst(onRecenter)} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
           </View>
-          {/* Play/pause itself no longer lives here at all — see showPauseFab's own comment further up
-          for why it's speed-mode-only now, rendered in the left flank instead. Grouped with forward into
-          its own row for the same fanFlanksStyle reason as the back/slot-A flank above. */}
+          {/* Grouped with forward into its own row for the same fanFlanksStyle reason as the back/slot-A
+          flank above. */}
           <Animated.View testID='transport-row-flank-right' style={[styles.transportRowFlank, fanFlanksStyle]} pointerEvents={gestureFanOpen ? 'none' : 'auto'}>
             {/* Slot B — see slotA/slotB's own comment above for the full mode table this renders from. */}
             {slotB}
             {/* onLongPress is a bonus gesture layered on the same FAB as forward's ordinary
             tap-to-tweak (see goForward/goForwardBatch in index.tsx for the one-tweak-vs-several
-            distinction) — same onPress/onLongPress mutual exclusivity as play/pause above, and never
+            distinction) — same onPress/onLongPress mutual exclusivity every other long-press-carrying
+            FAB in this file relies on, and never
             disabled: a tweak is always possible regardless of how much history back has to work
             with. Keeps tweaking every HOLD_REPEAT_MS for as long as it's held (see
             goForwardBatchHold/useHoldToRepeat's own comment) rather than firing just once — each tick
@@ -658,7 +728,7 @@ const styles = StyleSheet.create({
   // Sized to react-native-paper's own small-FAB footprint (FAB_HEIGHT_SMALL) so the BlurView backdrop
   // rendered behind a disabled FAB matches its bounds exactly, the same wrapper shape GlassToggleFab
   // uses for its own off-state backdrop. Used by the back FAB (backDisabled) and mirror mode's own
-  // Add/Remove mirror pair (boundary-disabled at MIN/MAX_MIRROR_LINES — see slotA/slotB above).
+  // Add/Remove mirror pair (boundary-disabled at the signed +/-MAX_MIRROR_LINES extremes — see slotA/slotB above).
   disableableSmallFabWrapper: {
     height: FAB_HEIGHT_SMALL,
     width: FAB_HEIGHT_SMALL

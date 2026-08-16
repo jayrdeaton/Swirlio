@@ -18,7 +18,10 @@ import React, { createContext, useContext, useEffect, useMemo, useRef } from 're
 // This exists purely as a low-latency fast path alongside the existing settings → effect sync already
 // in index.tsx — see ControlGroupBottomSheetContent's own onLiveValue wiring for the full reasoning.
 // That existing sync stays the sole source of truth; a write through here just gets there sooner, and
-// gets silently overwritten by the next authoritative render regardless.
+// gets silently overwritten by the next authoritative render regardless. Rotation/Mirror rotation/Zoom
+// speed are also settable straight from the canvas now (see useEpicenter.ts's outer-field drag) — that's
+// an entirely separate write path (through the real settings, not this bridge) that coexists with the
+// sliders here rather than replacing them.
 //
 // Bundled as one object (not 6 separate context fields/params) rather than following
 // SwirlResetContext's flat-fields shape exactly — a flat enumeration stops pulling its weight once
@@ -56,11 +59,10 @@ export function SpeedRateBridgeProvider({ children }: { children: React.ReactNod
 // Called once from SwirlScreen (the only place the real rate SharedValues/formulas live) to hand its
 // own write implementations to whichever slider ends up dragged. Re-registers whenever `writers`
 // changes identity — index.tsx memoizes that bundle itself off the 6 individual write callbacks' own
-// deps, so this only actually re-runs when one of those meaningfully changed (frozen toggling,
-// tightness changing for zoom, etc.), not on every unrelated render. A missing provider is a silent
-// no-op rather than a throw — same reasoning as useRegisterSwirlReset: nothing here is essential to
-// SwirlScreen's own rendering, and it keeps tests that render SwirlScreen alone from needing to stub
-// this out just to avoid a crash.
+// deps, so this only actually re-runs when one of those meaningfully changed, not on every unrelated
+// render. A missing provider is a silent no-op rather than a throw — same reasoning as
+// useRegisterSwirlReset: nothing here is essential to SwirlScreen's own rendering, and it keeps tests
+// that render SwirlScreen alone from needing to stub this out just to avoid a crash.
 export function useRegisterSpeedRateWriters(writers: SpeedRateWriters) {
   const context = useContext(SpeedRateBridgeContext)
   const writersRef = context?.writersRef

@@ -2,6 +2,7 @@ import React from 'react'
 import { Circle, G, Path, Svg } from 'react-native-svg'
 
 import { buildFlowerPath } from '@/constants/flowerMath'
+import { buildHeartPath } from '@/constants/heartMath'
 import { PatternType } from '@/constants/patterns'
 import { buildPolygonPath } from '@/constants/polygonMath'
 import { buildSpiralArmPath, buildSpiralArmPoints, spiralSampleCount } from '@/constants/spiralMath'
@@ -104,5 +105,7 @@ function PatternIconShape({ pattern, color }: { pattern: PatternType; color: str
       return <Path d={buildPolygonPath(POLYGON_SIDES, PREVIEW_RADIUS)} stroke={color} fill='none' strokeWidth={PREVIEW_STROKE_WIDTH} strokeLinejoin='round' />
     case 'flower':
       return <Path d={buildFlowerPath(FLOWER_PETALS, PREVIEW_RADIUS)} stroke={color} fill='none' strokeWidth={PREVIEW_STROKE_WIDTH} strokeLinejoin='round' />
+    case 'heart':
+      return <Path d={buildHeartPath(PREVIEW_RADIUS)} stroke={color} fill='none' strokeWidth={PREVIEW_STROKE_WIDTH} strokeLinejoin='round' />
   }
 }

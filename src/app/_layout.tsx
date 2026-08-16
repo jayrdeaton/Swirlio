@@ -1,11 +1,13 @@
 import 'react-native-reanimated'
 
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons'
 import * as AutoPaper from '@rific/auto-paper'
 import { Provider as AutoPaperProvider, useThemeSettings } from '@rific/auto-paper'
 import { DrawerProvider } from '@rific/drawer'
 import { HapticPressProvider, useHapticSettings } from '@rific/haptic-press'
 import { useUpdater } from '@rific/updater'
 import * as ExpoBlur from 'expo-blur'
+import { useFonts } from 'expo-font'
 import { Stack } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import React, { useEffect } from 'react'
@@ -21,12 +23,15 @@ import { MONOCHROME_BLACK, MONOCHROME_WHITE } from '@/constants/fabTheme'
 import { ControlGroupBottomSheetProvider, ControlGroupProvider, ControlGroupTopSheetProvider } from '@/hooks/controlGroups'
 import { GravityMarkerVisibilityProvider } from '@/hooks/gravityMarkerVisibility'
 import { SpeedRateBridgeProvider } from '@/hooks/speedRateBridge'
+import { useReady } from '@/hooks/splashGate'
 import { SwirlRandomizeProvider } from '@/hooks/swirlRandomize'
 import { SwirlResetProvider } from '@/hooks/swirlReset'
 import { SwirlSettingsProvider, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
-// Held open until SwirlSettingsProvider finishes loading saved settings from AsyncStorage, so the
-// first frame we ever paint is the real one instead of defaults-then-a-sudden-jump.
+// Held open until every named gate in splashGate.ts reports ready — saved settings hydrating from
+// AsyncStorage (see useSwirlSettings' 'persistence' gate) and the MaterialCommunityIcons font every
+// on-screen icon renders through (see FontsGate below) — so the first frame we ever paint is the
+// real one instead of defaults-then-a-sudden-jump, or icons popping in a moment late.
 SplashScreen.preventAutoHideAsync()
 
 // Monochrome to match the swirl itself (black/white by default) rather than a stock accent hue —
@@ -51,6 +56,17 @@ function MonochromeThemeBridge() {
     set({ color: isDark ? MONOCHROME_WHITE : MONOCHROME_BLACK })
   }, [isDark, set])
 
+  return null
+}
+
+// Loads the icon font every MdIcon (and every react-native-paper icon) renders through, and reports
+// into the shared splash gate once it resolves — without this, MaterialCommunityIcons has
+// historically been loaded lazily on first use, letting the splash hide before the font is ready and
+// icons pop in blank-then-glyph a moment later. Rendered outside SwirlSettingsProvider (nothing here
+// depends on it) so the font load can run in parallel with settings hydration rather than after it.
+function FontsGate() {
+  const [fontsLoaded] = useFonts(MaterialCommunityIcons.font)
+  useReady('fonts', fontsLoaded)
   return null
 }
 
@@ -96,6 +112,7 @@ export default function RootLayout() {
       (preview/production builds) than over Metro during dev, where bundle eval is slow enough that
       the native frame usually already landed before first paint. */}
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+        <FontsGate />
         <SwirlSettingsProvider>
           {/* Wraps AutoPaperProvider (not the reverse — see git history), rather than nested inside
           it: AutoPaperProvider renders react-native-paper's own Provider internally, which mounts a

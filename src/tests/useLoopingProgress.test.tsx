@@ -47,6 +47,16 @@ describe('useLoopingProgress', () => {
     expect(result.current.progress.value).toBeCloseTo(0.3, 5)
   })
 
+  // Colour cycle speed is the one caller that ever passes a negative speed straight through (see this
+  // hook's own rate comment) — Math.floor rounds toward -Infinity, so `next - Math.floor(next)` wraps a
+  // negative accumulation into [0,1) exactly the same way it wraps a positive one past 1.
+  it('accumulates backward and wraps into the top of the range for a negative speed', async () => {
+    const { result } = await renderHook(() => useLoopingProgress(6000, -2, false))
+
+    step(300) // 1/10 of a 3000ms lap, in reverse: -0.1 wraps to 0.9
+    expect(result.current.progress.value).toBeCloseTo(0.9, 5)
+  })
+
   it('does not accumulate while frozen', async () => {
     const { result } = await renderHook(() => useLoopingProgress(6000, 1, true))
 
