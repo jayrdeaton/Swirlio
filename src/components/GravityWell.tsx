@@ -11,7 +11,7 @@ import { gravityParticleAngleRad, gravityParticleDotRadius, gravityParticleOpaci
 // (MIN_GRAVITY or MAX_GRAVITY — a pull and a push of the same strength) maps to the larger one, so a
 // more intense effect visibly reads as a bigger hole regardless of which direction it's acting in.
 export const GRAVITY_HOLE_MIN_RADIUS_PX = 14
-export const GRAVITY_HOLE_MAX_RADIUS_PX = 50
+export const GRAVITY_HOLE_MAX_RADIUS_PX = 62
 // Thin foreground-colored ring traced right at the hole's own edge — just enough to read as a distinct
 // shape against a background-colored pattern behind it that's close in value to the hole's fill itself.
 const GRAVITY_HOLE_OUTLINE_WIDTH_PX = 1.5
