@@ -58,27 +58,15 @@ jest.mock('@/hooks/swirlRandomize', () => ({
   useSwirlRandomize: () => ({ randomizeGroup: mockRandomizeGroup })
 }))
 
-// Real @/hooks/gravityMarkerVisibility would need a GravityMarkerVisibilityProvider this tree doesn't
-// render (see the module's own comment — it's shared with ControlGroupTopSheetContent's own copy of
-// this toggle in real use, but that sheet isn't rendered by this test file at all). A real useState
-// here, same reactive-toggle shape as useSwirlSettings' own triggerStackExpanded below, is what lets
-// a press on the on-canvas toggle actually flip what this component reads back.
-jest.mock('@/hooks/gravityMarkerVisibility', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { useState } = require('react')
-  return {
-    useGravityMarkerVisibility: () => {
-      const [gravityMarkerVisible, setGravityMarkerVisible] = useState(false)
-      return { gravityMarkerVisible, setGravityMarkerVisible }
-    }
-  }
-})
-
 // The trigger stack's collapse toggle now reads/writes its expanded state through useSwirlSettings
 // (persisted — see useSwirlSettings.tsx's own triggerStackExpanded comment) rather than a plain
 // useState local to OnScreenControls. A real useState here, rather than a static mock return value,
 // is what lets the collapse-toggle tests below still observe the FAB/siblings actually update after a
 // press — same reactivity the old local state gave them, just sourced from this hook instead.
+// gravityMarkerVisible gets the same real-useState treatment, for the same reason: it used to live in
+// a dedicated GravityMarkerVisibilityProvider this tree doesn't render, but it's a plain persisted
+// field on useSwirlSettings now (see that hook's own comment), and the marker-visibility toggle tests
+// below still need a press to actually flip what this component reads back.
 // pattern/dashStyle back the Cycle shape/Cycle line type FABs' own live-preview icons (see
 // OnScreenControls' own comment) — plain mutable module state, controllable per test the same way
 // mockActiveGroup/mockGroupSheetOpen are below, since these never change reactively within a single
@@ -91,7 +79,8 @@ jest.mock('@/hooks/useSwirlSettings', () => {
   return {
     useSwirlSettings: () => {
       const [triggerStackExpanded, setTriggerStackExpanded] = useState(true)
-      return { settings: { triggerStackExpanded, pattern: mockPattern, dashStyle: mockDashStyle }, setTriggerStackExpanded }
+      const [gravityMarkerVisible, setGravityMarkerVisible] = useState(false)
+      return { settings: { triggerStackExpanded, gravityMarkerVisible, pattern: mockPattern, dashStyle: mockDashStyle }, setTriggerStackExpanded, setGravityMarkerVisible }
     }
   }
 })

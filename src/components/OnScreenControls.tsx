@@ -10,7 +10,6 @@ import { contrastColor, DISABLED_ON_CANVAS_SCRIM_COLOR, disabledOnCanvasFabTheme
 import { RANDOMIZE_HOLD_REPEAT_MS } from '@/constants/holdToRepeat'
 import { MAX_MIRROR_LINES, signedMirrorLines } from '@/constants/kaleidoscope'
 import { ControlGroup, useControlGroups, useControlGroupSheetDrawer, useOpenControlGroup } from '@/hooks/controlGroups'
-import { useGravityMarkerVisibility } from '@/hooks/gravityMarkerVisibility'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { GESTURE_TARGET_ORDER, GestureTarget } from '@/hooks/useEpicenter'
 import { useHoldToRepeat, useHoldToRepeatByKey } from '@/hooks/useHoldToRepeat'
@@ -225,12 +224,6 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // (SwirlScreen's randomizeGroup, registered via useRegisterSwirlRandomize) rather than two copies
   // that could drift apart.
   const { randomizeGroup } = useSwirlRandomize()
-  // Shared with the gravity group's own top sheet (ControlGroupTopSheetContent) — same context, same
-  // value, so the on-canvas toggle below and the drawer's own copy of it always agree; either one
-  // flips the other. Read directly from context rather than threaded through props (like
-  // useSwirlSettings/useControlGroups already are above) since it's genuinely shared app state, not
-  // something specific to whatever gesture/physics SwirlScreen is doing.
-  const { gravityMarkerVisible, setGravityMarkerVisible } = useGravityMarkerVisibility()
 
   // Cycle shape's own "keep spinning while held" effect, and Forward's own "keep tweaking while held"
   // twin — see useHoldToRepeat's own comment for the stale-closure bug this hook exists to avoid (a
@@ -264,7 +257,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // useSwirlSettings.tsx's own triggerStackExpanded comment) rather than plain useState, so a user who
   // collapses the stack once has it stay collapsed on the next launch too, not just for the rest of
   // this session.
-  const { settings, setTriggerStackExpanded } = useSwirlSettings()
+  const { settings, setGravityMarkerVisible, setTriggerStackExpanded } = useSwirlSettings()
   const siblingsVisible = settings.triggerStackExpanded
 
   // Cycle line type/Cycle shape's own icons preview the *current* dashStyle/pattern (see the 'pattern'
@@ -606,9 +599,9 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     // slotA's marker-visibility toggle also has a copy in the gravity group's own top sheet now (see
     // ControlGroupTopSheetContent) — reachable regardless of gesture mode there, unlike this one,
     // which only ever renders while gravity is the active target — but both read/write the exact same
-    // gravityMarkerVisible context value (see gravityMarkerVisibility.tsx), so either one moves the
+    // persisted gravityMarkerVisible setting (see useSwirlSettings.tsx), so either one moves the
     // other and neither can drift out of sync with it.
-    slotA = <GlassToggleFab icon='eye' testID='fab-gravity-marker-visible' active={gravityMarkerVisible} onPress={() => setGravityMarkerVisible(!gravityMarkerVisible)} />
+    slotA = <GlassToggleFab icon='eye' testID='fab-gravity-marker-visible' active={settings.gravityMarkerVisible} onPress={() => setGravityMarkerVisible(!settings.gravityMarkerVisible)} />
     slotB = <GlassToggleFab icon='plus-minus-variant' testID='fab-reverse-gravity' active={gravityRepelling} onPress={onReverseGravity} />
   }
 

@@ -19,7 +19,6 @@ import { MAX_RADIUS_TO_REFERENCE_RATIO, RIPPLE_BASE_COUNT, rippleModulus, ripple
 import { DASH_STYLE_ORDER } from '@/constants/strokeDash'
 import { controlsAutoHideDelayMs } from '@/constants/swirlSettingsRanges'
 import { ControlGroup, useControlGroups, useControlGroupSheetDrawer } from '@/hooks/controlGroups'
-import { useGravityMarkerVisibility } from '@/hooks/gravityMarkerVisibility'
 import { SpeedRateWriters, useRegisterSpeedRateWriters } from '@/hooks/speedRateBridge'
 import { useRegisterSwirlRandomize } from '@/hooks/swirlRandomize'
 import { useRegisterSwirlReset } from '@/hooks/swirlReset'
@@ -804,23 +803,21 @@ export default function SwirlScreen() {
     gravityTargetActiveShared.value = activeTargets.has('gravity')
   }, [activeTargets, gravityTargetActiveShared])
 
-  // Gravity marker's own visibility — session-only, same category as activeTargets above: a
-  // "how I'm working right now" tool mode, not a persisted look preference. Read (not set) here — the
-  // toggle button itself now lives in the gravity group's own top sheet (ControlGroupTopSheetContent),
-  // reachable regardless of which gestureTarget is active, which is the whole point: the marker shows
-  // on every mode while this is on, and stays hidden even while actively controlling gravity once it's
-  // off, no longer tied to gravityActive or activeTargets at all — see gravityMarkerVisibility.tsx's
-  // own comment for why this lives in a sibling-shared context rather than a plain prop. Deliberately
-  // NOT also gated on settings.gravity !== 0 — an earlier version hid the marker at gravity 0 to avoid
-  // a "broken-looking" frozen well, but that made it pop in and out of existence as a direct side
-  // effect of dragging the Gravity slider through zero, which read as far more jarring than a
-  // momentarily-idle well ever did. gravityParticleFrictionSpeed (see index.tsx's own
-  // gravityParticleSpeed) is the real fix for the frozen-particles problem instead: friction alone now
-  // keeps the particles flowing even at gravity 0, so there's nothing left to hide. A plain boolean,
-  // not a SharedValue: GravityWell's mount gate is a plain JS conditional (same reasoning Spiral.tsx's
-  // own showGravityMarker comment gives), not a worklet, so there's nothing here that needs UI-thread
-  // reactivity.
-  const { gravityMarkerVisible } = useGravityMarkerVisibility()
+  // Gravity marker's own visibility — a persisted chrome preference (see useSwirlSettings.tsx's own
+  // gravityMarkerVisible comment), read (not set) here. The toggle button itself lives in the gravity
+  // group's own top sheet (ControlGroupTopSheetContent), reachable regardless of which gestureTarget
+  // is active, which is the whole point: the marker shows on every mode while this is on, and stays
+  // hidden even while actively controlling gravity once it's off, no longer tied to gravityActive or
+  // activeTargets at all. Deliberately NOT also gated on settings.gravity !== 0 — an earlier version
+  // hid the marker at gravity 0 to avoid a "broken-looking" frozen well, but that made it pop in and
+  // out of existence as a direct side effect of dragging the Gravity slider through zero, which read as
+  // far more jarring than a momentarily-idle well ever did. gravityParticleFrictionSpeed (see
+  // index.tsx's own gravityParticleSpeed) is the real fix for the frozen-particles problem instead:
+  // friction alone now keeps the particles flowing even at gravity 0, so there's nothing left to hide.
+  // A plain boolean, not a SharedValue: GravityWell's mount gate is a plain JS conditional (same
+  // reasoning Spiral.tsx's own showGravityMarker comment gives), not a worklet, so there's nothing here
+  // that needs UI-thread reactivity.
+  const gravityMarkerVisible = settings.gravityMarkerVisible
 
   // Gravity mode's other transport button (see OnScreenControls) — a plain sign flip. Rendered as a
   // stateful toggle reflecting current polarity, not a one-shot action (see OnScreenControls' own

@@ -80,6 +80,14 @@ export type SwirlSettings = {
   // default so gravity mode itself (and that ambient pull) does something the moment it's turned on,
   // without also needing this slider raised first.
   gravity: number
+  // Whether the gravity marker (GravityWell in Spiral.tsx) shows at all — independent of
+  // gestureTarget, so it's reachable regardless of which gesture mode is active. Shared by the
+  // on-canvas transport-row toggle and the gravity group's own top-sheet toggle (see
+  // OnScreenControls and ControlGroupTopSheetContent's own 'gravity' branches); either one moves
+  // the other since both read/write this same field. A persisted chrome/interface preference now
+  // rather than session-only state — same bucket as showLabels/triggerStackExpanded (see
+  // resetSettings below, which carries it over on reset the same way).
+  gravityMarkerVisible: boolean
   // Gates the shared HapticSettingsContext flag every haptic call site in the app already reads
   // through — see _layout.tsx's HapticsSettingsBridge for how this value gets pushed into
   // @rific/haptic-press's own runtime context. True by default, matching that package's own
@@ -151,6 +159,7 @@ type SwirlSettingsContextValue = {
   setForegroundCycleSpeed: (speed: number) => void
   setGestureTarget: (target: GestureTarget) => void
   setGravity: (gravity: number) => void
+  setGravityMarkerVisible: (visible: boolean) => void
   setHapticsEnabled: (enabled: boolean) => void
   setHoleRadius: (holeRadius: number) => void
   setHoleShaped: (shaped: boolean) => void
@@ -259,6 +268,7 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setForegroundCycleSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, foregroundCycleSpeed: clamp(speed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : prev)),
       setGestureTarget: (target) => setSettings((prev) => ({ ...prev, gestureTarget: target })),
       setGravity: (gravity) => setSettings((prev) => (Number.isFinite(gravity) ? { ...prev, gravity: clamp(gravity, MIN_GRAVITY, MAX_GRAVITY) } : prev)),
+      setGravityMarkerVisible: (visible) => setSettings((prev) => ({ ...prev, gravityMarkerVisible: visible })),
       setHapticsEnabled: (enabled) => setSettings((prev) => ({ ...prev, hapticsEnabled: enabled })),
       setHoleRadius: (holeRadius) => setSettings((prev) => (Number.isFinite(holeRadius) ? { ...prev, holeRadius: clamp(holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : prev)),
       setHoleShaped: (shaped) => setSettings((prev) => ({ ...prev, holeShaped: shaped })),
@@ -281,23 +291,24 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       // per-field validation to run since defaultSettings is already known-valid, and going through
       // each setter would also mean this drifts out of sync the moment a new field's setter gains its
       // own extra branching (e.g. the empty-list guards on colors) that a plain reset should ignore
-      // anyway. audioReactiveEnabled, controlsAutoHideSpeed, gestureTarget, hapticsEnabled,
-      // shakeEnabled, showLabels, and tiltEnabled are all carried over from whatever they already
-      // were, not reset to their defaults — they're device-capability toggles (is the mic feeding
-      // this, does a shake randomize, does tilting the device warp it, do presses buzz), chrome-
-      // density/interface preferences (showLabels, controlsAutoHideSpeed — same bucket, see its own
-      // field comment), or a tool mode (gestureTarget — which point a drag targets has no bearing on
-      // what the art itself looks like), not look/tuning preferences like everything else this
-      // button touches. audioReactiveEnabled is live session state tied to a mic the user just
-      // granted; shakeEnabled/tiltEnabled/showLabels/controlsAutoHideSpeed/gestureTarget/
-      // hapticsEnabled are explicit choices the user made — either way, a flat reset shouldn't
-      // silently switch them back on/off (or back to 'pattern') underneath someone.
+      // anyway. audioReactiveEnabled, controlsAutoHideSpeed, gestureTarget, gravityMarkerVisible,
+      // hapticsEnabled, shakeEnabled, showLabels, and tiltEnabled are all carried over from whatever
+      // they already were, not reset to their defaults — they're device-capability toggles (is the mic
+      // feeding this, does a shake randomize, does tilting the device warp it, do presses buzz), chrome-
+      // density/interface preferences (showLabels, controlsAutoHideSpeed, gravityMarkerVisible — same
+      // bucket, see its own field comment), or a tool mode (gestureTarget — which point a drag targets
+      // has no bearing on what the art itself looks like), not look/tuning preferences like everything
+      // else this button touches. audioReactiveEnabled is live session state tied to a mic the user
+      // just granted; shakeEnabled/tiltEnabled/showLabels/controlsAutoHideSpeed/gestureTarget/
+      // gravityMarkerVisible/hapticsEnabled are explicit choices the user made — either way, a flat
+      // reset shouldn't silently switch them back on/off (or back to 'pattern') underneath someone.
       resetSettings: () =>
         setSettings((prev) => ({
           ...defaultSettings,
           audioReactiveEnabled: prev.audioReactiveEnabled,
           controlsAutoHideSpeed: prev.controlsAutoHideSpeed,
           gestureTarget: prev.gestureTarget,
+          gravityMarkerVisible: prev.gravityMarkerVisible,
           hapticsEnabled: prev.hapticsEnabled,
           shakeEnabled: prev.shakeEnabled,
           showLabels: prev.showLabels,

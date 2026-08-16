@@ -11,7 +11,6 @@ import { MAX_MIRROR_LINES, wedgeVector } from '@/constants/kaleidoscope'
 import { PatternType } from '@/constants/patterns'
 import { DashStyle } from '@/constants/strokeDash'
 import { useControlGroups, useControlGroupSheetDrawer } from '@/hooks/controlGroups'
-import { useGravityMarkerVisibility } from '@/hooks/gravityMarkerVisibility'
 import { SpeedRateWriters, useRegisterSpeedRateWriters } from '@/hooks/speedRateBridge'
 import { useRegisterSwirlReset } from '@/hooks/swirlReset'
 import { useAudioReactive } from '@/hooks/useAudioReactive'
@@ -194,13 +193,6 @@ jest.mock('@/hooks/swirlReset', () => ({
   useRegisterSwirlReset: jest.fn()
 }))
 
-// Real @/hooks/gravityMarkerVisibility would need a GravityMarkerVisibilityProvider this tree doesn't
-// render — mocked, like controlGroups/swirlReset above, so tests can drive showGravityMarker directly
-// instead of only ever observing the context's own default (false).
-jest.mock('@/hooks/gravityMarkerVisibility', () => ({
-  useGravityMarkerVisibility: jest.fn()
-}))
-
 // Real @/hooks/speedRateBridge would need a SpeedRateBridgeProvider this tree doesn't render — mocked,
 // same shortcut as swirlReset above, so the speed-rate-bridge tests below can grab exactly the 6 write
 // functions SwirlScreen registered and call them directly, bypassing the settings mock entirely (that's
@@ -217,7 +209,6 @@ const mockedUseShakeToRandomize = useShakeToRandomize as jest.MockedFunction<typ
 const mockedUseControlGroupSheetDrawer = useControlGroupSheetDrawer as jest.MockedFunction<typeof useControlGroupSheetDrawer>
 const mockedUseControlGroups = useControlGroups as jest.MockedFunction<typeof useControlGroups>
 const mockedUseRegisterSwirlReset = useRegisterSwirlReset as jest.MockedFunction<typeof useRegisterSwirlReset>
-const mockedUseGravityMarkerVisibility = useGravityMarkerVisibility as jest.MockedFunction<typeof useGravityMarkerVisibility>
 const mockedUseRegisterSpeedRateWriters = useRegisterSpeedRateWriters as jest.MockedFunction<typeof useRegisterSpeedRateWriters>
 
 // SwirlScreen re-registers on every render (its two reset callbacks are recreated whenever their own
@@ -323,6 +314,7 @@ const defaultMockSettings = {
   foregroundCycleSpeed: 1,
   gestureTarget: 'pattern' as GestureTarget,
   gravity: 0,
+  gravityMarkerVisible: false,
   hapticsEnabled: true,
   holeRadius: 0,
   holeShaped: true,
@@ -360,6 +352,7 @@ function mockSettings(overrides: Partial<typeof defaultMockSettings> = {}) {
     setForegroundCycleSpeed,
     setGestureTarget: jest.fn(),
     setGravity,
+    setGravityMarkerVisible: jest.fn(),
     setHapticsEnabled: jest.fn(),
     setHoleRadius,
     setHoleShaped,
@@ -397,7 +390,6 @@ describe('SwirlScreen gestures', () => {
     mockedUseShakeToRandomize.mockImplementation(() => undefined)
     mockedUseControlGroupSheetDrawer.mockReturnValue({ close: jest.fn(), isOpen: false, isVisible: false, open: jest.fn() })
     mockedUseControlGroups.mockReturnValue({ activeGroup: null, setActiveGroup: jest.fn() })
-    mockedUseGravityMarkerVisibility.mockReturnValue({ gravityMarkerVisible: false, setGravityMarkerVisible: jest.fn() })
   })
 
   it('leaves zoomSpeed untouched on a pinch release, and still adjusts density from a simultaneous twist', async () => {
@@ -511,10 +503,10 @@ describe('SwirlScreen gestures', () => {
 
   it('passes gravityMarkerVisible straight through as showGravityMarker, regardless of gestureTarget', async () => {
     // Gravity mode used to be the only thing that could ever show the marker — now it's purely the
-    // visibility toggle (ControlGroupTopSheetContent's own 'gravity' branch, bridged through
-    // gravityMarkerVisibility.tsx), independent of which gesture mode happens to be active. Off stays
-    // off even while actively targeting gravity; on stays on in every other mode too.
-    mockedUseGravityMarkerVisibility.mockReturnValue({ gravityMarkerVisible: false, setGravityMarkerVisible: jest.fn() })
+    // persisted visibility toggle (ControlGroupTopSheetContent's own 'gravity' branch, backed by
+    // useSwirlSettings' gravityMarkerVisible), independent of which gesture mode happens to be active.
+    // Off stays off even while actively targeting gravity; on stays on in every other mode too.
+    mockSettings({ gravityMarkerVisible: false })
     await renderScreen()
     expect(getLastSpiralProps().showGravityMarker).toBe(false)
 
@@ -523,7 +515,7 @@ describe('SwirlScreen gestures', () => {
     })
     expect(getLastSpiralProps().showGravityMarker).toBe(false)
 
-    mockedUseGravityMarkerVisibility.mockReturnValue({ gravityMarkerVisible: true, setGravityMarkerVisible: jest.fn() })
+    mockSettings({ gravityMarkerVisible: true })
     await act(async () => {
       getLastControlsProps().onSelectGestureTarget('pattern')
     })
@@ -537,8 +529,7 @@ describe('SwirlScreen gestures', () => {
   // the frozen-particles problem instead (its own test coverage lives with the rest of
   // gravityWellMath.ts), so the marker just stays visible straight through gravity crossing zero.
   it('stays visible at gravity 0 when the toggle is on — no hide/reveal pop as gravity crosses zero', async () => {
-    mockSettings({ gravity: 0 })
-    mockedUseGravityMarkerVisibility.mockReturnValue({ gravityMarkerVisible: true, setGravityMarkerVisible: jest.fn() })
+    mockSettings({ gravity: 0, gravityMarkerVisible: true })
     await renderScreen()
 
     expect(getLastSpiralProps().showGravityMarker).toBe(true)

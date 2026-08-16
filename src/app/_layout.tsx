@@ -5,7 +5,6 @@ import * as AutoPaper from '@rific/auto-paper'
 import { Provider as AutoPaperProvider, useThemeSettings } from '@rific/auto-paper'
 import { DrawerProvider } from '@rific/drawer'
 import { HapticPressProvider, useHapticSettings } from '@rific/haptic-press'
-import { useUpdater } from '@rific/updater'
 import * as ExpoBlur from 'expo-blur'
 import { useFonts } from 'expo-font'
 import { Stack } from 'expo-router'
@@ -21,7 +20,6 @@ import { ControlGroupTopSheetContent } from '@/components/ControlGroupTopSheetCo
 import { PhotosensitivityWarning } from '@/components/PhotosensitivityWarning'
 import { MONOCHROME_BLACK, MONOCHROME_WHITE } from '@/constants/fabTheme'
 import { ControlGroupBottomSheetProvider, ControlGroupProvider, ControlGroupTopSheetProvider } from '@/hooks/controlGroups'
-import { GravityMarkerVisibilityProvider } from '@/hooks/gravityMarkerVisibility'
 import { SpeedRateBridgeProvider } from '@/hooks/speedRateBridge'
 import { useReady } from '@/hooks/splashGate'
 import { SwirlRandomizeProvider } from '@/hooks/swirlRandomize'
@@ -87,8 +85,6 @@ function HapticsSettingsBridge() {
 }
 
 export default function RootLayout() {
-  useUpdater()
-
   if (__DEV__ && Platform.OS === 'web') {
     LogBox.ignoreLogs(['Animated: `useNativeDriver` is not supported because the native animated module is missing.'])
   }
@@ -136,26 +132,24 @@ export default function RootLayout() {
                 <SwirlResetProvider>
                   <SwirlRandomizeProvider>
                     <ControlGroupProvider>
-                      <GravityMarkerVisibilityProvider>
-                        {/* SwirlScreen (the Stack's own screen) and ControlGroupBottomSheetContent are siblings
-                        here, not ancestor/descendant — see speedRateBridge.tsx's own comment for why the 6 speed
-                        sliders living in the latter need this bridge to reach rate SharedValues owned by the
-                        former. */}
-                        <SpeedRateBridgeProvider>
-                          {/* enabled={false} on both: these two sheets only ever open via their own trigger FABs
-                          (see OnScreenControls' openGroup) — @rific/drawer's own edge-swipe-to-open gesture isn't a
-                          feature this app uses. enabled only gates DrawerEdgeSwipe itself (see createDrawer.tsx),
-                          so open()/close() (and every trigger FAB that calls them) are completely unaffected; this
-                          just removes the swipe gesture's own always-on 24px hit-band along the true top/bottom
-                          edges, which otherwise sits above (and steals touches from) any FAB placed within it. */}
-                          <ControlGroupTopSheetProvider content={<ControlGroupTopSheetContent />} enabled={false}>
-                            <ControlGroupBottomSheetProvider content={<ControlGroupBottomSheetContent />} enabled={false}>
-                              <Stack screenOptions={{ headerShown: false }} />
-                              <PhotosensitivityWarning />
-                            </ControlGroupBottomSheetProvider>
-                          </ControlGroupTopSheetProvider>
-                        </SpeedRateBridgeProvider>
-                      </GravityMarkerVisibilityProvider>
+                      {/* SwirlScreen (the Stack's own screen) and ControlGroupBottomSheetContent are siblings
+                      here, not ancestor/descendant — see speedRateBridge.tsx's own comment for why the 6 speed
+                      sliders living in the latter need this bridge to reach rate SharedValues owned by the
+                      former. */}
+                      <SpeedRateBridgeProvider>
+                        {/* enabled={false} on both: these two sheets only ever open via their own trigger FABs
+                        (see OnScreenControls' openGroup) — @rific/drawer's own edge-swipe-to-open gesture isn't a
+                        feature this app uses. enabled only gates DrawerEdgeSwipe itself (see createDrawer.tsx),
+                        so open()/close() (and every trigger FAB that calls them) are completely unaffected; this
+                        just removes the swipe gesture's own always-on 24px hit-band along the true top/bottom
+                        edges, which otherwise sits above (and steals touches from) any FAB placed within it. */}
+                        <ControlGroupTopSheetProvider content={<ControlGroupTopSheetContent />} enabled={false}>
+                          <ControlGroupBottomSheetProvider content={<ControlGroupBottomSheetContent />} enabled={false}>
+                            <Stack screenOptions={{ headerShown: false }} />
+                            <PhotosensitivityWarning />
+                          </ControlGroupBottomSheetProvider>
+                        </ControlGroupTopSheetProvider>
+                      </SpeedRateBridgeProvider>
                     </ControlGroupProvider>
                   </SwirlRandomizeProvider>
                 </SwirlResetProvider>

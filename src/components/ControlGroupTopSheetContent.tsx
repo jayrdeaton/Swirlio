@@ -1,11 +1,11 @@
 import { useThemeSettings } from '@rific/auto-paper'
+import { useUpdater } from '@rific/updater'
 import React from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { TOP_SHEET_HEADER_CLEARANCE, TOP_SHEET_RIGHT_CLEARANCE } from '@/constants/sheetLayout'
 import { useControlGroups } from '@/hooks/controlGroups'
-import { useGravityMarkerVisibility } from '@/hooks/gravityMarkerVisibility'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { useSwirlReset } from '@/hooks/swirlReset'
 import { useSwapColors } from '@/hooks/useSwapColors'
@@ -33,11 +33,15 @@ const isWeb = Platform.OS === 'web'
 export function ControlGroupTopSheetContent() {
   const insets = useSafeAreaInsets()
   const { activeGroup } = useControlGroups()
-  const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setGravity, setHapticsEnabled, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTightness } = useSwirlSettings()
+  const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setGravity, setGravityMarkerVisible, setHapticsEnabled, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTightness } = useSwirlSettings()
   const { swapColors } = useSwapColors()
   const { resetGravity, resetMirror, resetPattern } = useSwirlReset()
   const { randomizeGroup } = useSwirlRandomize()
-  const { gravityMarkerVisible, setGravityMarkerVisible } = useGravityMarkerVisibility()
+  // autoCheck: false — the sheet only checks on an explicit tap, no silent AppState-triggered fetch
+  // (see @rific/updater's own README). onConfirm/onError are left at the package defaults, which
+  // already show the exact "Update available" Alert (release date + optional message, Restart/Cancel)
+  // this app wants — no need to duplicate that dialog locally.
+  const { check: checkForUpdate, checking: checkingForUpdate } = useUpdater({ autoCheck: false })
   // App-wide look rather than a per-swirl setting, so it lives in @rific/auto-paper's own
   // ThemeSettingsContext instead of useSwirlSettings — see _layout.tsx's MonochromeThemeBridge for
   // how `appearance` feeds back into the forced black/white accent.
@@ -277,6 +281,12 @@ export function ControlGroupTopSheetContent() {
                   resetMirror()
                 }}
               />
+              {/* Manual-only (autoCheck: false above) rather than a silent auto-notify — this is a toy
+              app with no push infra, so "tap to check" is the whole update story, same one-tap-action
+              shape as Randomize/Reset all beside it. Disabled while in flight instead of a spinner —
+              no loading affordance exists on any FAB in this app (see LabeledFab), so this doesn't
+              invent one just for this button. */}
+              <ActionFab icon='download' label='Check for update' disabled={checkingForUpdate} onPress={checkForUpdate} />
               {/* Shares this row with Randomize/Reset rather than getting its own forced break — unlike
               Pattern's type picker or Line's dash style picker (each a wider, self-contained cluster
               worth its own line), appearance is just 3 more buttons, so it wraps in alongside
@@ -344,13 +354,13 @@ export function ControlGroupTopSheetContent() {
             />
             {/* Whether GravityWell (Spiral.tsx) shows at all — independent of gestureTarget, so this
             is reachable (and stays in sync) regardless of which mode is active, unlike most of this
-            row's neighbors — same shared gravityMarkerVisible state the on-canvas transport-row
+            row's neighbors — same shared gravityMarkerVisible setting the on-canvas transport-row
             toggle reads and writes too (see OnScreenControls' own gravity-branch comment); either one
             moves the other. On shows the well on every gesture mode; off hides it even while actively
-            dragging gravity. Session-only, not a persisted look preference — see
-            gravityMarkerVisibility.tsx's own comment for why this reads from a dedicated
-            sibling-shared context instead of useSwirlSettings. */}
-            <SettingToggleFab icon='eye' label='Visible' value={gravityMarkerVisible} onValueChange={setGravityMarkerVisible} />
+            dragging gravity. See useSwirlSettings.tsx's own gravityMarkerVisible comment for why this
+            is a persisted chrome preference rather than an ephemeral, per-group setting like the two
+            buttons above it. */}
+            <SettingToggleFab icon='eye' label='Visible' value={settings.gravityMarkerVisible} onValueChange={setGravityMarkerVisible} />
             {/* Tilt (DeviceMotion) no-ops on web already (see useTiltGravityCenter.ts's own
             Platform.OS check) — hidden here for the same reason every other web-inert toggle is (see
             isWeb's own comment). Drives whichever gesture target is currently active (pattern/mirror/

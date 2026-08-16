@@ -89,6 +89,7 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       // instead of needing its own migration.
       ...(typeof persisted.gestureTarget === 'string' && GESTURE_TARGET_ORDER.includes(persisted.gestureTarget) ? { gestureTarget: persisted.gestureTarget } : null),
       ...(typeof persisted.gravity === 'number' ? { gravity: clamp(persisted.gravity, MIN_GRAVITY, MAX_GRAVITY) } : null),
+      ...(typeof persisted.gravityMarkerVisible === 'boolean' ? { gravityMarkerVisible: persisted.gravityMarkerVisible } : null),
       ...(typeof persisted.hapticsEnabled === 'boolean' ? { hapticsEnabled: persisted.hapticsEnabled } : null),
       ...(typeof persisted.holeRadius === 'number' ? { holeRadius: clamp(persisted.holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : null),
       // Checked against PATTERN_ORDER itself rather than an enumerated list of literals: this is

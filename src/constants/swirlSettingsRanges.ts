@@ -154,6 +154,7 @@ export const defaultSettings: SwirlSettings = {
   foregroundCycleSpeed: 1,
   gestureTarget: 'pattern',
   gravity: DEFAULT_GRAVITY,
+  gravityMarkerVisible: false,
   hapticsEnabled: true,
   holeRadius: 0,
   holeShaped: true,
