@@ -31,7 +31,7 @@ import { useLoopingProgress } from '@/hooks/useLoopingProgress'
 import { useRerollUnits } from '@/hooks/useRerollUnits'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { useSwapColors } from '@/hooks/useSwapColors'
-import { DEFAULT_DASH_STYLE, MAX_BOUNCE_FRICTION, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_MIRROR_GAP, MAX_POLYGON_SIDES, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_BOUNCE_FRICTION, MIN_MIRROR_GAP, MIN_POLYGON_SIDES, MIN_STROKE_WIDTH, MIN_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { DEFAULT_DASH_STYLE, MAX_BOUNCE_FRICTION, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_MIRROR_GAP, MAX_POLYGON_SIDES, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_BOUNCE_FRICTION, MIN_GRAVITY, MIN_MIRROR_GAP, MIN_POLYGON_SIDES, MIN_STROKE_WIDTH, MIN_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
 import { TILT_EASE_SPRING, useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const BASE_ROTATION_DURATION_MS = 12000
@@ -125,13 +125,23 @@ const PINCH_SCALE_TO_PULSE_OFFSET_SCALE = 0.5
 // (scale ~2.5 at full spread, so event.scale - 1 tops out around 1.5).
 const PINCH_SCALE_TO_STROKE_WIDTH_SCALE = (MAX_STROKE_WIDTH - MIN_STROKE_WIDTH) / 1.5
 // How much relative pinch scale nudges gravity's own strength, while the pinch is targeting gravity —
-// magnitude only, same live 1:1-tracked shape as PINCH_SCALE_TO_MIRROR_GAP_SCALE, but against
-// gravity's *unsigned* strength (see gravity mode's own reverseGravity, which is what actually flips
-// the sign — a pinch never crosses zero into the opposite polarity on its own, it only grows/shrinks
-// whichever direction was already current). Calibrated the same way as PINCH_SCALE_TO_STROKE_WIDTH_
-// SCALE above: a full, arm's-length pinch spread sweeps close to the whole [0, MAX_GRAVITY] magnitude
-// range. Same untestable-without-a-device disclaimer as every other pinch-derived scale above.
+// same live 1:1-tracked shape as PINCH_SCALE_TO_MIRROR_GAP_SCALE, but against gravity's own *signed*
+// value: pinching all the way in now carries straight through 0 into the opposite polarity (push
+// becomes pull or vice versa) rather than stopping dead at an unsigned floor — the pinch-side
+// counterpart to reverseGravity's own dedicated button, not a replacement for it (the button's still
+// there for a one-tap flip; see GRAVITY_ZERO_STICKY_ZONE below for what makes landing exactly on 0 by
+// feel actually practical here). Calibrated the same way as PINCH_SCALE_TO_STROKE_WIDTH_SCALE above: a
+// full, arm's-length pinch spread sweeps close to the whole [0, MAX_GRAVITY] magnitude range on either
+// side of 0. Same untestable-without-a-device disclaimer as every other pinch-derived scale above.
 const PINCH_SCALE_TO_GRAVITY_SCALE = MAX_GRAVITY / 1.5
+// How wide a dead zone (in gravity's own units, symmetric around 0) a gravity-targeting pinch holds
+// dead-on-0 before letting the gesture continue on into the new polarity — the value-space counterpart
+// to ControlGroupBottomSheetContent's own snapToZero slider magnet (sliderMath.ts's ZERO_SNAP_PX),
+// adapted from pixel distance to gravity units since a pinch has no fixed track to measure pixels
+// against, just a relative scale delta from wherever the gesture started. Small relative to
+// PINCH_SCALE_TO_GRAVITY_SCALE's own full sweep (about 6% of one side's [0, MAX_GRAVITY] span) so 0
+// reads as a real, findable-by-feel detent without turning the middle of the gesture numb.
+const GRAVITY_ZERO_STICKY_ZONE = MAX_GRAVITY * 0.06
 // The twist/rotation gesture's own job now: "Focus" rather than spin — see rotationGesture's own
 // comment for the full reasoning. How many degrees of twist move the pattern's own density
 // (tightness) through its whole range — live 1:1-tracked the same way every pinch-driven value above
@@ -671,8 +681,14 @@ export default function SwirlScreen() {
   // rotationGesture's own version of this).
   const startMirrorGap = useSharedValue(0)
   // Captured at pinch-start the same way startMirrorGap is — the gravity-targeting pinch below reads
-  // this for its own starting *magnitude and sign* (see PINCH_SCALE_TO_GRAVITY_SCALE's own comment).
+  // this as its own starting *signed* value (see PINCH_SCALE_TO_GRAVITY_SCALE's own comment).
   const startGravity = useSharedValue(0)
+  // Whether a gravity-targeting pinch is currently holding inside GRAVITY_ZERO_STICKY_ZONE — seeded
+  // fresh from the live magnitude at the start of every pinch (not carried over from a previous
+  // gesture) so a pinch that starts already inside the zone doesn't misread itself as "just arrived"
+  // and fire a redundant haptic on its very first update. Diffed each frame purely to catch that one
+  // transition (see the pinch's own onUpdate/onEnd) — nothing downstream reads this as a value.
+  const gravityStuckAtZero = useSharedValue(false)
   // Captured at pinch-start the same way startMirrorGap is, for the one other property a
   // pattern-targeting pinch drives alongside zoom — see PINCH_SCALE_TO_STROKE_WIDTH_SCALE's own
   // comment for why line thickness moves together with zoom.
@@ -1604,6 +1620,7 @@ export default function SwirlScreen() {
       startPulseOffset.value = manualPulseOffset.value
       startStrokeWidth.value = strokeWidth.value
       startGravity.value = gravity.value
+      gravityStuckAtZero.value = Math.abs(gravity.value) <= GRAVITY_ZERO_STICKY_ZONE
       runOnJS(hideControls)()
     })
     .onUpdate((event) => {
@@ -1635,14 +1652,23 @@ export default function SwirlScreen() {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         strokeWidth.value = clamp(startStrokeWidth.value + (event.scale - 1) * PINCH_SCALE_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
       }
-      // Magnitude only, sign preserved from whichever direction was current at gesture-start — see
-      // PINCH_SCALE_TO_GRAVITY_SCALE's own comment for why this never crosses zero into the opposite
-      // polarity on its own the way reverseGravity's dedicated button does.
+      // Signed, unclamped-through-zero — see PINCH_SCALE_TO_GRAVITY_SCALE's own comment for why this
+      // now carries straight past 0 into the opposite polarity instead of stopping dead at an unsigned
+      // floor. gravitySign stays fixed to whichever direction was current at gesture-start (not
+      // resigned mid-gesture), so "spread grows the current direction, pinch shrinks it" still holds
+      // continuously all the way through the crossing rather than flipping meaning the instant rawGravity
+      // itself goes negative.
       if (targetsGravityPinch) {
         const gravitySign = startGravity.value < 0 ? -1 : 1
-        const magnitude = clamp(Math.abs(startGravity.value) + (event.scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE, 0, MAX_GRAVITY)
+        const rawGravity = startGravity.value + gravitySign * (event.scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
+        const stuckAtZero = Math.abs(rawGravity) <= GRAVITY_ZERO_STICKY_ZONE
+        // Fires once, right on arrival — not on every frame spent held inside the zone, and not again
+        // on the way back out (leaving is silent; see GRAVITY_ZERO_STICKY_ZONE's own comment for why
+        // landing here is the moment worth confirming, the same as reverseGravity's own tap).
+        if (stuckAtZero && !gravityStuckAtZero.value) runOnJS(selection)()
+        gravityStuckAtZero.value = stuckAtZero
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
-        gravity.value = gravitySign * magnitude
+        gravity.value = stuckAtZero ? 0 : clamp(rawGravity, MIN_GRAVITY, MAX_GRAVITY)
       }
     })
     .onEnd((event) => {
@@ -1685,9 +1711,16 @@ export default function SwirlScreen() {
       if (targetsGravityPinch) {
         // Recomputed from event.scale rather than trusting gravity.value already landed here from the
         // last onUpdate — same "onEnd's own event is authoritative" reasoning as mirrorGap's commit
-        // above.
+        // above. Same signed, sticky-through-zero math as onUpdate's own gravity block — duplicated
+        // rather than shared for the same reason every other value in this handler recomputes from the
+        // event instead of trusting onUpdate already ran (a pinch too quick to generate one still needs
+        // to commit the right value here).
         const gravitySign = startGravity.value < 0 ? -1 : 1
-        const nextGravity = gravitySign * clamp(Math.abs(startGravity.value) + (event.scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE, 0, MAX_GRAVITY)
+        const rawGravity = startGravity.value + gravitySign * (event.scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
+        const stuckAtZero = Math.abs(rawGravity) <= GRAVITY_ZERO_STICKY_ZONE
+        if (stuckAtZero && !gravityStuckAtZero.value) runOnJS(selection)()
+        gravityStuckAtZero.value = stuckAtZero
+        const nextGravity = stuckAtZero ? 0 : clamp(rawGravity, MIN_GRAVITY, MAX_GRAVITY)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         gravity.value = nextGravity
         runOnJS(setGravity)(nextGravity)
@@ -1751,6 +1784,7 @@ export default function SwirlScreen() {
         startPulseOffset.value = manualPulseOffset.value
         startStrokeWidth.value = strokeWidth.value
         startGravity.value = gravity.value
+        gravityStuckAtZero.value = Math.abs(gravity.value) <= GRAVITY_ZERO_STICKY_ZONE
         scale = 1
         hideControls()
       } else {
@@ -1766,7 +1800,11 @@ export default function SwirlScreen() {
       }
       if (targetsGravityPinch) {
         const gravitySign = startGravity.value < 0 ? -1 : 1
-        gravity.value = gravitySign * clamp(Math.abs(startGravity.value) + (scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE, 0, MAX_GRAVITY)
+        const rawGravity = startGravity.value + gravitySign * (scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
+        const stuckAtZero = Math.abs(rawGravity) <= GRAVITY_ZERO_STICKY_ZONE
+        if (stuckAtZero && !gravityStuckAtZero.value) selection()
+        gravityStuckAtZero.value = stuckAtZero
+        gravity.value = stuckAtZero ? 0 : clamp(rawGravity, MIN_GRAVITY, MAX_GRAVITY)
       }
       idleTimer = setTimeout(endGesture, WHEEL_PINCH_IDLE_MS)
     }
@@ -1776,7 +1814,7 @@ export default function SwirlScreen() {
       node.removeEventListener?.('wheel', onWheel)
       if (idleTimer !== null) clearTimeout(idleTimer)
     }
-  }, [targetsMirrorPinch, targetsPatternZoom, targetsGravityPinch, hideControls, setMirrorGap, setStrokeWidth, setGravity, basePulse, manualPulseOffset, mirrorGap, gravity, reversed, startMirrorGap, startPulseOffset, startStrokeWidth, startGravity, strokeWidth])
+  }, [targetsMirrorPinch, targetsPatternZoom, targetsGravityPinch, hideControls, setMirrorGap, setStrokeWidth, setGravity, selection, basePulse, manualPulseOffset, mirrorGap, gravity, reversed, startMirrorGap, startPulseOffset, startStrokeWidth, startGravity, strokeWidth, gravityStuckAtZero])
 
   // The twist/rotation gesture's job is Focus now, not "spin the pattern": rotationSpeed/
   // mirrorRotationSpeed live on the canvas's own outer-field drag instead (see useEpicenter.ts). Pattern

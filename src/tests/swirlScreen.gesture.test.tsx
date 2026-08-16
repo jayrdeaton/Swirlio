@@ -18,7 +18,7 @@ import { useAudioReactive } from '@/hooks/useAudioReactive'
 import { GRAVITY_SETTLE_DISTANCE } from '@/hooks/useDragPointPhysics'
 import { GestureTarget } from '@/hooks/useEpicenter'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
-import { MAX_MIRROR_GAP, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_STROKE_WIDTH, MIN_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { MAX_GRAVITY, MAX_MIRROR_GAP, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_GRAVITY, MIN_STROKE_WIDTH, MIN_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
 import { useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const mockSpiralSpy = jest.fn()
@@ -1440,7 +1440,10 @@ describe('SwirlScreen gestures', () => {
 
   // Explicitly NOT touched by randomize — deliberate tuning (speed), gesture-feel physics, fixed
   // spacing (a layout-precision preference), and behavioral/interface toggles, not "what does this
-  // look like" surprises. See randomize's own comment in index.tsx for the full reasoning.
+  // look like" surprises. See useRerollUnits' own top comment for the full reasoning: randomizing
+  // should change the look, not the feel — bounceFriction/gravity are physics, reachable only through
+  // the gravity group's own dedicated Randomize button (rerollUnitsByGroup.gravity, wired in
+  // ControlGroupTopSheetContent's 'gravity' branch — not exercised by this shake-driven randomize()).
   it('leaves speed, physics feel, fixed spacing, and behavioral/interface toggles untouched', async () => {
     await renderScreen()
     const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
@@ -1454,6 +1457,8 @@ describe('SwirlScreen gestures', () => {
     expect(setZoomSpeed).not.toHaveBeenCalled()
     expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
     expect(setFixedSpacing).not.toHaveBeenCalled()
+    expect(setBounceFriction).not.toHaveBeenCalled()
+    expect(setGravity).not.toHaveBeenCalled()
   })
 
   // mirrorGap, tightness, strokeWidth, cropRadius, holeRadius, and polygonSides are each already
@@ -3336,6 +3341,141 @@ describe('SwirlScreen gestures', () => {
       expect(setMirrorGap).toHaveBeenLastCalledWith(0)
     })
 
+    it("in 'gravity' mode, a pinch live-tracks gravity strength in the direction it's already going, then commits on release", async () => {
+      mockSettings({ gravity: 1 })
+      await renderScreen()
+      await selectGestureTarget('gravity')
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // PINCH_SCALE_TO_GRAVITY_SCALE is 5 / 1.5 ≈ 3.333, so (1.2 - 1) * 3.333 ≈ 0.667 above the
+        // mocked gravity of 1 — comfortably outside GRAVITY_ZERO_STICKY_ZONE, so this is plain 1:1
+        // tracking, same shape as every other pinch-driven value.
+        pinchGesture.__handlers.update?.({ scale: 1.2 })
+      })
+      expect(getLastSpiralProps().gravity.value).toBeCloseTo(1.667, 3)
+
+      await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 1.2, velocity: 0 })
+      })
+      expect(setGravity).toHaveBeenLastCalledWith(expect.closeTo(1.667, 3))
+    })
+
+    // The core of the reverse-via-pinch feature: pinching in far enough no longer just bottoms out at
+    // an unsigned 0 the way it used to — it carries straight through into the opposite polarity, live,
+    // the same "reversible by continuing to twist/pinch" shape mirror's own bonus gear already has.
+    it("in 'gravity' mode, pinching in past the sticky zone carries gravity through 0 into the opposite polarity", async () => {
+      mockSettings({ gravity: 1 })
+      await renderScreen()
+      await selectGestureTarget('gravity')
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // (0.5 - 1) * 3.333 ≈ -1.667 below the mocked gravity of 1: raw ≈ -0.667 — well outside the
+        // ±0.3 sticky zone, so this lands as a genuine negative (repelling) value, not a snap to 0.
+        pinchGesture.__handlers.update?.({ scale: 0.5 })
+      })
+      expect(getLastSpiralProps().gravity.value).toBeCloseTo(-0.667, 3)
+
+      await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 0.5, velocity: 0 })
+      })
+      expect(setGravity).toHaveBeenLastCalledWith(expect.closeTo(-0.667, 3))
+    })
+
+    it("in 'gravity' mode, a pinch landing inside the sticky zone snaps exactly to 0, live and on release, with a single confirming tick", async () => {
+      mockSettings({ gravity: 1 })
+      await renderScreen()
+      await selectGestureTarget('gravity')
+      ;(selection as jest.Mock).mockClear()
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // (0.7 - 1) * 3.333 = -1, exactly cancelling the mocked gravity of 1 — raw lands exactly on 0,
+        // deep inside the ±0.3 sticky zone.
+        pinchGesture.__handlers.update?.({ scale: 0.7 })
+      })
+      expect(getLastSpiralProps().gravity.value).toBe(0)
+      expect(selection).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 0.7, velocity: 0 })
+      })
+      expect(setGravity).toHaveBeenLastCalledWith(0)
+    })
+
+    it("in 'gravity' mode, holding inside the sticky zone doesn't re-fire the tick every frame, but leaving and coming back does", async () => {
+      mockSettings({ gravity: 1 })
+      await renderScreen()
+      await selectGestureTarget('gravity')
+      ;(selection as jest.Mock).mockClear()
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        pinchGesture.__handlers.update?.({ scale: 0.7 }) // raw 0 — arrives in the zone
+        pinchGesture.__handlers.update?.({ scale: 0.72 }) // raw ≈ 0.067 — still inside, held
+      })
+      expect(selection).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        // (1.2 - 1) * 3.333 ≈ 0.667 above start (1): raw ≈ 1.667 — well outside the zone.
+        pinchGesture.__handlers.update?.({ scale: 1.2 })
+      })
+      expect(selection).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        pinchGesture.__handlers.update?.({ scale: 0.7 }) // back to raw 0 — a fresh arrival
+      })
+      expect(selection).toHaveBeenCalledTimes(2)
+    })
+
+    it('clamps a gravity-targeted pinch to MAX_GRAVITY rather than an out-of-range value, live and on release', async () => {
+      mockSettings({ gravity: 1 })
+      await renderScreen()
+      await selectGestureTarget('gravity')
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // (3.5 - 1) * 3.333 ≈ 8.33 above the mocked gravity of 1 — comfortably past MAX_GRAVITY (5).
+        pinchGesture.__handlers.update?.({ scale: 3.5 })
+      })
+      expect(getLastSpiralProps().gravity.value).toBe(MAX_GRAVITY)
+
+      await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 3.5, velocity: 0 })
+      })
+      expect(setGravity).toHaveBeenLastCalledWith(MAX_GRAVITY)
+    })
+
+    it('clamps a gravity-targeted pinch to MIN_GRAVITY rather than an out-of-range value, live and on release', async () => {
+      // Starts already repelling (-3), same "deepen whichever direction is already current" spread
+      // this file's own gravitySign comment describes — event.scale has no physical lower bound below
+      // 0 the way it has no real upper one either, so reaching MIN_GRAVITY's own far side takes a
+      // spread (grow the current push), not a squeeze, same as the MAX_GRAVITY test above needed a
+      // spread starting from a positive (pulling) gravity.
+      mockSettings({ gravity: -3 })
+      await renderScreen()
+      await selectGestureTarget('gravity')
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // (3 - 1) * 3.333 ≈ 6.67 deeper than the mocked gravity of -3 — comfortably past MIN_GRAVITY (-5).
+        pinchGesture.__handlers.update?.({ scale: 3 })
+      })
+      expect(getLastSpiralProps().gravity.value).toBe(MIN_GRAVITY)
+
+      await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 3, velocity: 0 })
+      })
+      expect(setGravity).toHaveBeenLastCalledWith(MIN_GRAVITY)
+    })
+
     // onResetAllSettings is the skip-previous FAB's own long press (see OnScreenControls), matching
     // the settings drawer's own "Reset all" button exactly — resetSettings() for every persisted
     // look/tuning field, plus resetPattern/resetMirror's own position-squaring (but not
@@ -4248,10 +4388,13 @@ describe('SwirlScreen gestures', () => {
   })
 
   describe('back/forward look history', () => {
-    // The SwirlSettings fields captureLook/restoreLook read and write in index.tsx — every setter
-    // randomize's own rerollUnits can touch, including bounceFriction/gravity now that the gravity
-    // group has its own Randomize button too (see index.tsx's own Look type comment). Named here so
-    // the "none of these fired" checks below stay exhaustive without repeating the list in every test.
+    // The SwirlSettings fields captureLook/restoreLook read and write in index.tsx — every setter an
+    // onGoBack() can touch, since restoreLook always writes back the *entire* captured look regardless
+    // of which single field a forward tweak's reroll actually touched. bounceFriction/gravity are still
+    // in this list for that reason even though the reroll pool itself no longer picks them (see
+    // useRerollUnits' own top comment — randomizing should change the look, not the feel; physics stays
+    // reachable only through the gravity group's own dedicated Randomize button). Named here so the
+    // "none of these fired" checks below stay exhaustive without repeating the list in every test.
     const lookSetters = [setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setPattern, setPolygonSides, setStrokeWidth, setTightness]
 
     // Same audio-reactive pool reduction as randomize (see rerollUnits' own comment in index.tsx) —
@@ -4288,19 +4431,20 @@ describe('SwirlScreen gestures', () => {
       await renderScreen()
 
       // rerollUnits' own order is [colors, pattern+sides, dashStyle, mirrorLines, mirrorGap,
-      // mirrorAlternateColors, tightness, strokeWidth, cropRadius, cropShaped, holeRadius,
-      // holeShaped, bounceFriction, gravity] — with Math.random pinned to 0.3, pickRandomDistinct's
-      // Math.floor(0.3 * 14) = 4 lands on mirrorGap, the cleanest single-setter unit to assert
-      // against (unlike colors/pattern, which move two setters together as one unit).
+      // mirrorAlternateColors, tightness, strokeWidth, cropRadius, cropShaped, holeRadius, holeShaped]
+      // — bounceFriction/gravity aren't in this pool at all (see useRerollUnits' own top comment:
+      // randomizing should change the look, not the feel). With Math.random pinned to 0.3,
+      // pickRandomDistinct's Math.floor(0.3 * 12) = 3 lands on mirrorLines, the cleanest single-setter
+      // unit to assert against (unlike colors/pattern, which move two setters together as one unit).
       const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.3)
       await act(async () => {
         getLastControlsProps().onGoForward()
       })
       randomSpy.mockRestore()
 
-      expect(setMirrorGap).toHaveBeenCalledTimes(1)
+      expect(setMirrorLines).toHaveBeenCalledTimes(1)
       for (const setter of lookSetters) {
-        if (setter === setMirrorGap) continue
+        if (setter === setMirrorLines) continue
         expect(setter).not.toHaveBeenCalled()
       }
     })
@@ -4309,15 +4453,15 @@ describe('SwirlScreen gestures', () => {
       await renderScreen()
 
       // Same fixed 0.3 draw as the single-tweak test above — pickRandomDistinct's successive
-      // Math.floor(0.3 * poolSize) draws against the shrinking (now 14-wide) pool land on mirrorGap,
-      // mirrorLines, mirrorAlternateColors, then tightness, in that order.
+      // Math.floor(0.3 * poolSize) draws against the shrinking (now 12-wide) pool land on mirrorLines,
+      // mirrorGap, mirrorAlternateColors, then dashStyle, in that order.
       const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.3)
       await act(async () => {
         getLastControlsProps().onGoForwardBatch()
       })
       randomSpy.mockRestore()
 
-      const touched = [setMirrorGap, setMirrorLines, setMirrorAlternateColors, setTightness]
+      const touched = [setMirrorLines, setMirrorGap, setMirrorAlternateColors, setDashStyle]
       for (const setter of touched) {
         expect(setter).toHaveBeenCalledTimes(1)
       }

@@ -87,8 +87,9 @@ export function controlsAutoHideDelayMs(speed: number): number | null {
 // but the physics (useDragPointPhysics.ts's own gravity!==0 checks, not gravity>0) and the gravity
 // marker's magnitude-based sizing (Spiral.tsx's gravityWellHoleRadius) were always written to handle
 // a negative value correctly, so re-enabling it here was just reopening the range — see gravity mode's
-// own "reverse push/pull" transport button (OnScreenControls.tsx), which is what actually flips the
-// sign now that the slider (see ControlGroupBottomSheetContent's snapToZero) can reach it too.
+// own "reverse push/pull" transport button (OnScreenControls.tsx) — a one-tap flip — the slider (see
+// ControlGroupBottomSheetContent's snapToZero) can reach it too by dragging through, and so can the
+// gravity-targeting pinch gesture itself (see index.tsx's own GRAVITY_ZERO_STICKY_ZONE).
 export const MAX_GRAVITY = 5
 export const MIN_GRAVITY = -MAX_GRAVITY
 export const DEFAULT_GRAVITY = 1

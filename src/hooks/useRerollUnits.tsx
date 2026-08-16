@@ -17,15 +17,20 @@ const RANDOMIZE_MAX_FOREGROUND_COLORS = 3
 
 // Broad: everything that's purely "what does this look like" gets rerolled — colors, pattern,
 // sides/points/petals, dash style, mirror count, its wedge gap, and its alternating-colors toggle,
-// tightness, stroke width, crop/hole radius, whether either traces the pattern's own shape, and bounce
-// friction/gravity strength too. Left out on purpose: rotation/zoom/mirror-rotation/colour-cycle speed
-// (deliberate tuning, not a look-based surprise — rotation/zoom/mirror-rotation live entirely on the
-// canvas's own outer-field drag, see useEpicenter.ts/index.tsx's stopAndSnapGesture, and colour-cycle
-// speed is gesture-adjustable the same way, via mirror's own outer-field radial axis — none of the four
-// have a reroll-adjacent gesture of their own to protect from being silently overwritten by Randomize),
-// shake/tilt/mic (behavioral device-capability toggles, never touched by this), fixed spacing (a
-// layout-precision preference, not a look to reroll), and showLabels (an interface preference, not part
-// of the art either). Doesn't recenter the epicentre,
+// tightness, stroke width, crop/hole radius, and whether either traces the pattern's own shape. Left
+// out on purpose: bounce friction/gravity strength (randomizing should change the look, not the feel —
+// these two govern how the marble handles, not what's on screen, so a full "go crazy" reroll would
+// otherwise upend how the piece plays right when someone's mid-drag getting used to it; the gravity
+// group's own dedicated Randomize button is the deliberate way to reroll physics, see
+// rerollUnitsByGroup.gravity below and ControlGroupTopSheetContent's 'gravity' branch),
+// rotation/zoom/mirror-rotation/colour-cycle speed (deliberate tuning, not a look-based surprise —
+// rotation/zoom/mirror-rotation live entirely on the canvas's own outer-field drag, see
+// useEpicenter.ts/index.tsx's stopAndSnapGesture, and colour-cycle speed is gesture-adjustable the same
+// way, via mirror's own outer-field radial axis — none of the four have a reroll-adjacent gesture of
+// their own to protect from being silently overwritten by Randomize), shake/tilt/mic (behavioral
+// device-capability toggles, never touched by this), fixed spacing (a layout-precision preference, not
+// a look to reroll), and showLabels (an interface preference, not part of the art either). Doesn't
+// recenter the epicentre,
 // the gravity handle, or touch activeTargets — those are session-only, position-preserving state, not
 // persisted look settings; that's the gravity group's own Reset button's job instead (see index.tsx's
 // resetGravityPosition), same "Randomize touches persisted values, Reset also squares up position"
@@ -126,13 +131,21 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
       { group: 'pattern', audioDriven: true, reroll: () => setHoleRadius(skewedInRange(MIN_HOLE_RADIUS, MAX_HOLE_RADIUS, true)) },
       { group: 'pattern', audioDriven: false, reroll: () => setHoleShaped(Math.random() < 0.5) },
       // Neither is audio-driven — audio-reactive mode overrides stroke width/tightness/crop/hole
-      // radius/mirror gap (see the comment above), not the physics sliders.
+      // radius/mirror gap (see the comment above), not the physics sliders. Excluded from lookRerolls
+      // below regardless (see this file's own top comment) — audioReactive has no bearing on that,
+      // it's a "look" question, not a mic-input one.
       { group: 'gravity', audioDriven: false, reroll: () => setBounceFriction(skewedInRange(MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION, true)) },
       { group: 'gravity', audioDriven: false, reroll: () => setGravity(skewedTowardCenter(MIN_GRAVITY, MAX_GRAVITY)) }
     ]
 
     const filteredUnits = units.filter((unit) => !audioReactive || !unit.audioDriven)
-    const allRerolls = filteredUnits.map((unit) => unit.reroll)
+    // What "randomize the look" actually means: every unit above except gravity's own two physics
+    // sliders (see this file's own top comment) — this is what rerollUnits and the 'settings' group's
+    // slice both resolve to below, so full randomize, the shake gesture, and the forward-tweak
+    // transport button (tweakLook in index.tsx, which draws from this same rerollUnits pool) all leave
+    // Friction/Gravity strength alone the same way. The 'gravity' group's own slice still pulls the
+    // full physics-inclusive filteredUnits, unaffected — that's the one deliberate way to reroll them.
+    const lookRerolls = filteredUnits.filter((unit) => unit.group !== 'gravity').map((unit) => unit.reroll)
     const rerollUnitsByGroup: Record<ControlGroup, (() => void)[]> = {
       colors: filteredUnits.filter((unit) => unit.group === 'colors').map((unit) => unit.reroll),
       gravity: filteredUnits.filter((unit) => unit.group === 'gravity').map((unit) => unit.reroll),
@@ -141,11 +154,12 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
       pattern: filteredUnits.filter((unit) => unit.group === 'pattern').map((unit) => unit.reroll),
       // Settings has no "look" of its own to reroll — its sheet is toggles/appearance, not a units
       // entry above — so its own Randomize button (and the trigger stack's cog/chevron long press,
-      // see OnScreenControls) reroll every OTHER group's units at once instead, the same "randomize
-      // everything" the shake gesture already does (see index.tsx's own randomize/rerollUnits).
-      settings: allRerolls
+      // see OnScreenControls) reroll every OTHER look group's units at once instead, the same
+      // "randomize everything" the shake gesture already does (see index.tsx's own randomize/
+      // rerollUnits) — gravity's own physics sliders excluded from this too, same as rerollUnits itself.
+      settings: lookRerolls
     }
 
-    return { rerollUnits: allRerolls, rerollUnitsByGroup }
+    return { rerollUnits: lookRerolls, rerollUnitsByGroup }
   }, [settings.audioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setPattern, setPolygonSides, setStrokeWidth, setTightness])
 }

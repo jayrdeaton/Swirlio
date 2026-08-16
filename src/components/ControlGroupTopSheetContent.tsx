@@ -247,13 +247,16 @@ export function ControlGroupTopSheetContent() {
               {/* Leads the row — see Mirror's own comment above for why Randomize/Reset front every
               group now. Settings has no "look" of its own to reroll (its own sheet is toggles/
               appearance, not a slider-backed field — see useRerollUnits' own rerollUnitsByGroup), so
-              this rerolls every OTHER group's units at once instead — the exact same reroll the shake
-              gesture triggers (see index.tsx's randomize/rerollUnits) — rather than being left out the
-              way a genuinely look-less group otherwise would be. Also reachable without opening this
-              sheet at all, via a long press on either the cog trigger or the always-visible chevron
-              above it (see OnScreenControls) — the corner dice FAB used to be the one dedicated
-              shortcut for this exact reroll; now that it's freed up for Pause/Play, those two long
-              presses are what took its place. */}
+              this rerolls every OTHER look group's units at once instead — the exact same reroll the
+              shake gesture triggers (see index.tsx's randomize/rerollUnits) — rather than being left out
+              the way a genuinely look-less group otherwise would be. Deliberately excludes gravity's own
+              Friction/Gravity strength sliders (see useRerollUnits' own top comment: randomizing should
+              change the look, not the feel) — the 'gravity' group's own Randomize button below is the
+              one place that still touches those. Also reachable without opening this sheet at all, via a
+              long press on either the cog trigger or the always-visible chevron above it (see
+              OnScreenControls) — the corner dice FAB used to be the one dedicated shortcut for this
+              exact reroll; now that it's freed up for Pause/Play, those two long presses are what took
+              its place. */}
               <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('settings')} />
               {/* The one button in this group that isn't its own preference — every slider and toggle
               across all five groups, plus the pattern/mirror rotation+position the per-group Reset
@@ -315,11 +318,14 @@ export function ControlGroupTopSheetContent() {
         {group === 'gravity' && (
           <FabRow>
             {/* Leads the row — see Mirror's own comment above for why Randomize/Reset front every
-            group now. Rerolls Friction and Gravity strength — the 'gravity' rerollUnitsByGroup slice
-            the global dice FAB and shake gesture already pull from (see index.tsx's randomizeGroup).
-            Same icon as the global dice FAB (OnScreenControls) for a consistent "this randomizes"
-            affordance. Never touches the gravity handle's own position, same as every other group's
-            Randomize leaving ephemeral state to its own Reset button instead. */}
+            group now. Rerolls Friction and Gravity strength — the 'gravity' rerollUnitsByGroup slice,
+            which is now the ONLY reroll that reaches these two: the global dice FAB, shake gesture, and
+            forward-tweak transport button all deliberately skip gravity's own units (see
+            useRerollUnits' own top comment — randomizing should change the look, not the feel), so this
+            button is what's left for actually randomizing physics on purpose. Same icon as the global
+            dice FAB (OnScreenControls) for a consistent "this randomizes" affordance. Never touches the
+            gravity handle's own position, same as every other group's Randomize leaving ephemeral state
+            to its own Reset button instead. */}
             <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('gravity')} />
             {/* Puts both persisted fields this group owns (Friction, Gravity strength) back to
             default AND recentres the gravity handle itself back to the well's own center
