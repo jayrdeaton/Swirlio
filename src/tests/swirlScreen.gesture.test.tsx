@@ -3341,7 +3341,7 @@ describe('SwirlScreen gestures', () => {
       expect(setMirrorGap).toHaveBeenLastCalledWith(0)
     })
 
-    it("in 'gravity' mode, a pinch live-tracks gravity strength in the direction it's already going, then commits on release", async () => {
+    it("in 'gravity' mode, squeezing (scale < 1) nudges gravity toward MAX_GRAVITY, live and on release", async () => {
       mockSettings({ gravity: 1 })
       await renderScreen()
       await selectGestureTarget('gravity')
@@ -3349,23 +3349,24 @@ describe('SwirlScreen gestures', () => {
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
       await act(async () => {
         pinchGesture.__handlers.start?.()
-        // PINCH_SCALE_TO_GRAVITY_SCALE is 5 / 1.5 ≈ 3.333, so (1.2 - 1) * 3.333 ≈ 0.667 above the
-        // mocked gravity of 1 — comfortably outside GRAVITY_ZERO_STICKY_ZONE, so this is plain 1:1
-        // tracking, same shape as every other pinch-driven value.
-        pinchGesture.__handlers.update?.({ scale: 1.2 })
+        // PINCH_SCALE_TO_GRAVITY_SCALE is 5 / 1.5 ≈ 3.333, so -(0.8 - 1) * 3.333 ≈ 0.667 above the
+        // mocked gravity of 1 — comfortably outside GRAVITY_ZERO_STICKY_ZONE. Squeezing (not spreading)
+        // is what grows gravity now — see PINCH_SCALE_TO_GRAVITY_SCALE's own comment for why the
+        // mapping is absolute (toward MAX/MIN) rather than relative to whichever direction was current.
+        pinchGesture.__handlers.update?.({ scale: 0.8 })
       })
       expect(getLastSpiralProps().gravity.value).toBeCloseTo(1.667, 3)
 
       await act(async () => {
-        pinchGesture.__handlers.end?.({ scale: 1.2, velocity: 0 })
+        pinchGesture.__handlers.end?.({ scale: 0.8, velocity: 0 })
       })
       expect(setGravity).toHaveBeenLastCalledWith(expect.closeTo(1.667, 3))
     })
 
-    // The core of the reverse-via-pinch feature: pinching in far enough no longer just bottoms out at
-    // an unsigned 0 the way it used to — it carries straight through into the opposite polarity, live,
-    // the same "reversible by continuing to twist/pinch" shape mirror's own bonus gear already has.
-    it("in 'gravity' mode, pinching in past the sticky zone carries gravity through 0 into the opposite polarity", async () => {
+    // The core of the reverse-via-pinch feature: spreading far enough no longer just bottoms out at an
+    // unsigned 0 the way it used to — it carries straight through into the opposite polarity, live, the
+    // same "reversible by continuing to twist/pinch" shape mirror's own bonus gear already has.
+    it("in 'gravity' mode, spreading (scale > 1) past the sticky zone carries gravity through 0 into the opposite polarity", async () => {
       mockSettings({ gravity: 1 })
       await renderScreen()
       await selectGestureTarget('gravity')
@@ -3373,16 +3374,70 @@ describe('SwirlScreen gestures', () => {
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
       await act(async () => {
         pinchGesture.__handlers.start?.()
-        // (0.5 - 1) * 3.333 ≈ -1.667 below the mocked gravity of 1: raw ≈ -0.667 — well outside the
+        // -(1.5 - 1) * 3.333 ≈ -1.667 below the mocked gravity of 1: raw ≈ -0.667 — well outside the
         // ±0.3 sticky zone, so this lands as a genuine negative (repelling) value, not a snap to 0.
-        pinchGesture.__handlers.update?.({ scale: 0.5 })
+        pinchGesture.__handlers.update?.({ scale: 1.5 })
       })
       expect(getLastSpiralProps().gravity.value).toBeCloseTo(-0.667, 3)
 
       await act(async () => {
-        pinchGesture.__handlers.end?.({ scale: 0.5, velocity: 0 })
+        pinchGesture.__handlers.end?.({ scale: 1.5, velocity: 0 })
       })
       expect(setGravity).toHaveBeenLastCalledWith(expect.closeTo(-0.667, 3))
+    })
+
+    // The mirror image of the spread test above: squeezing from an already-negative (repelling) start
+    // carries gravity up through 0 the same way — the mapping is absolute in both directions, not just
+    // the one this test file happens to exercise most.
+    it("in 'gravity' mode, squeezing past the sticky zone from a negative start carries gravity through 0 the other way", async () => {
+      mockSettings({ gravity: -1 })
+      await renderScreen()
+      await selectGestureTarget('gravity')
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // -(0.5 - 1) * 3.333 ≈ 1.667 above the mocked gravity of -1: raw ≈ 0.667.
+        pinchGesture.__handlers.update?.({ scale: 0.5 })
+      })
+      expect(getLastSpiralProps().gravity.value).toBeCloseTo(0.667, 3)
+
+      await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 0.5, velocity: 0 })
+      })
+      expect(setGravity).toHaveBeenLastCalledWith(expect.closeTo(0.667, 3))
+    })
+
+    // The actual bug this mapping fixes: under the old gesture-start-relative version, a squeeze that
+    // crossed 0 into positive territory, released, then squeezed again, read the second squeeze as
+    // "shrink the newly-positive value" and walked straight back down toward 0 instead of continuing up
+    // — the opposite of what repeating the same physical motion should do. The absolute mapping (see
+    // PINCH_SCALE_TO_GRAVITY_SCALE's own comment) has no such gesture-start dependency, so two separate
+    // squeezes in a row keep climbing toward MAX_GRAVITY exactly as they would within one held gesture.
+    it("in 'gravity' mode, two separate squeezes in a row both keep climbing toward MAX_GRAVITY instead of the second one reversing", async () => {
+      mockSettings({ gravity: -1 })
+      await renderScreen()
+      await selectGestureTarget('gravity')
+
+      const firstSqueeze = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        firstSqueeze.__handlers.start?.()
+        // -(0.4 - 1) * 3.333 = 2 above the mocked gravity of -1: raw = 1 — crosses 0 into positive.
+        firstSqueeze.__handlers.end?.({ scale: 0.4, velocity: 0 })
+      })
+      expect(setGravity).toHaveBeenLastCalledWith(expect.closeTo(1, 5))
+
+      // Settings now reflect what that first gesture actually committed, and the live gravity
+      // SharedValue already carries it too (onEnd writes both) — no rerender needed for a fresh
+      // pinchGesture.onStart to read the right startGravity.
+      const secondSqueeze = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        secondSqueeze.__handlers.start?.()
+        // Same squeeze again, now starting from 1: -(0.4 - 1) * 3.333 = 2 above 1 — raw = 3, further
+        // from 0 than the first gesture ended, not back toward it.
+        secondSqueeze.__handlers.end?.({ scale: 0.4, velocity: 0 })
+      })
+      expect(setGravity).toHaveBeenLastCalledWith(expect.closeTo(3, 5))
     })
 
     it("in 'gravity' mode, a pinch landing inside the sticky zone snaps exactly to 0, live and on release, with a single confirming tick", async () => {
@@ -3394,15 +3449,15 @@ describe('SwirlScreen gestures', () => {
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
       await act(async () => {
         pinchGesture.__handlers.start?.()
-        // (0.7 - 1) * 3.333 = -1, exactly cancelling the mocked gravity of 1 — raw lands exactly on 0,
+        // -(1.3 - 1) * 3.333 = -1, exactly cancelling the mocked gravity of 1 — raw lands exactly on 0,
         // deep inside the ±0.3 sticky zone.
-        pinchGesture.__handlers.update?.({ scale: 0.7 })
+        pinchGesture.__handlers.update?.({ scale: 1.3 })
       })
       expect(getLastSpiralProps().gravity.value).toBe(0)
       expect(selection).toHaveBeenCalledTimes(1)
 
       await act(async () => {
-        pinchGesture.__handlers.end?.({ scale: 0.7, velocity: 0 })
+        pinchGesture.__handlers.end?.({ scale: 1.3, velocity: 0 })
       })
       expect(setGravity).toHaveBeenLastCalledWith(0)
     })
@@ -3416,24 +3471,46 @@ describe('SwirlScreen gestures', () => {
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
       await act(async () => {
         pinchGesture.__handlers.start?.()
-        pinchGesture.__handlers.update?.({ scale: 0.7 }) // raw 0 — arrives in the zone
-        pinchGesture.__handlers.update?.({ scale: 0.72 }) // raw ≈ 0.067 — still inside, held
+        pinchGesture.__handlers.update?.({ scale: 1.3 }) // raw 0 — arrives in the zone
+        pinchGesture.__handlers.update?.({ scale: 1.28 }) // raw ≈ 0.067 — still inside, held
       })
       expect(selection).toHaveBeenCalledTimes(1)
 
       await act(async () => {
-        // (1.2 - 1) * 3.333 ≈ 0.667 above start (1): raw ≈ 1.667 — well outside the zone.
-        pinchGesture.__handlers.update?.({ scale: 1.2 })
+        // -(0.8 - 1) * 3.333 ≈ 0.667 above start (1): raw ≈ 1.667 — well outside the zone.
+        pinchGesture.__handlers.update?.({ scale: 0.8 })
       })
       expect(selection).toHaveBeenCalledTimes(1)
 
       await act(async () => {
-        pinchGesture.__handlers.update?.({ scale: 0.7 }) // back to raw 0 — a fresh arrival
+        pinchGesture.__handlers.update?.({ scale: 1.3 }) // back to raw 0 — a fresh arrival
       })
       expect(selection).toHaveBeenCalledTimes(2)
     })
 
     it('clamps a gravity-targeted pinch to MAX_GRAVITY rather than an out-of-range value, live and on release', async () => {
+      mockSettings({ gravity: 2 })
+      await renderScreen()
+      await selectGestureTarget('gravity')
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // -(0 - 1) * 3.333 ≈ 3.33 above the mocked gravity of 2 — comfortably past MAX_GRAVITY (5). 0
+        // is the physical floor for scale (fingertips together), so reaching MAX_GRAVITY in a single
+        // squeeze needs a start already partway there, unlike spreading below, which has no such
+        // ceiling on scale itself.
+        pinchGesture.__handlers.update?.({ scale: 0 })
+      })
+      expect(getLastSpiralProps().gravity.value).toBe(MAX_GRAVITY)
+
+      await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 0, velocity: 0 })
+      })
+      expect(setGravity).toHaveBeenLastCalledWith(MAX_GRAVITY)
+    })
+
+    it('clamps a gravity-targeted pinch to MIN_GRAVITY rather than an out-of-range value, live and on release', async () => {
       mockSettings({ gravity: 1 })
       await renderScreen()
       await selectGestureTarget('gravity')
@@ -3441,37 +3518,13 @@ describe('SwirlScreen gestures', () => {
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
       await act(async () => {
         pinchGesture.__handlers.start?.()
-        // (3.5 - 1) * 3.333 ≈ 8.33 above the mocked gravity of 1 — comfortably past MAX_GRAVITY (5).
+        // -(3.5 - 1) * 3.333 ≈ -8.33 below the mocked gravity of 1 — comfortably past MIN_GRAVITY (-5).
         pinchGesture.__handlers.update?.({ scale: 3.5 })
-      })
-      expect(getLastSpiralProps().gravity.value).toBe(MAX_GRAVITY)
-
-      await act(async () => {
-        pinchGesture.__handlers.end?.({ scale: 3.5, velocity: 0 })
-      })
-      expect(setGravity).toHaveBeenLastCalledWith(MAX_GRAVITY)
-    })
-
-    it('clamps a gravity-targeted pinch to MIN_GRAVITY rather than an out-of-range value, live and on release', async () => {
-      // Starts already repelling (-3), same "deepen whichever direction is already current" spread
-      // this file's own gravitySign comment describes — event.scale has no physical lower bound below
-      // 0 the way it has no real upper one either, so reaching MIN_GRAVITY's own far side takes a
-      // spread (grow the current push), not a squeeze, same as the MAX_GRAVITY test above needed a
-      // spread starting from a positive (pulling) gravity.
-      mockSettings({ gravity: -3 })
-      await renderScreen()
-      await selectGestureTarget('gravity')
-
-      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
-      await act(async () => {
-        pinchGesture.__handlers.start?.()
-        // (3 - 1) * 3.333 ≈ 6.67 deeper than the mocked gravity of -3 — comfortably past MIN_GRAVITY (-5).
-        pinchGesture.__handlers.update?.({ scale: 3 })
       })
       expect(getLastSpiralProps().gravity.value).toBe(MIN_GRAVITY)
 
       await act(async () => {
-        pinchGesture.__handlers.end?.({ scale: 3, velocity: 0 })
+        pinchGesture.__handlers.end?.({ scale: 3.5, velocity: 0 })
       })
       expect(setGravity).toHaveBeenLastCalledWith(MIN_GRAVITY)
     })

@@ -125,14 +125,20 @@ const PINCH_SCALE_TO_PULSE_OFFSET_SCALE = 0.5
 // (scale ~2.5 at full spread, so event.scale - 1 tops out around 1.5).
 const PINCH_SCALE_TO_STROKE_WIDTH_SCALE = (MAX_STROKE_WIDTH - MIN_STROKE_WIDTH) / 1.5
 // How much relative pinch scale nudges gravity's own strength, while the pinch is targeting gravity —
-// same live 1:1-tracked shape as PINCH_SCALE_TO_MIRROR_GAP_SCALE, but against gravity's own *signed*
-// value: pinching all the way in now carries straight through 0 into the opposite polarity (push
-// becomes pull or vice versa) rather than stopping dead at an unsigned floor — the pinch-side
-// counterpart to reverseGravity's own dedicated button, not a replacement for it (the button's still
-// there for a one-tap flip; see GRAVITY_ZERO_STICKY_ZONE below for what makes landing exactly on 0 by
-// feel actually practical here). Calibrated the same way as PINCH_SCALE_TO_STROKE_WIDTH_SCALE above: a
-// full, arm's-length pinch spread sweeps close to the whole [0, MAX_GRAVITY] magnitude range on either
-// side of 0. Same untestable-without-a-device disclaimer as every other pinch-derived scale above.
+// against gravity's own *signed, absolute* value, unlike every other pinch-driven value in this file
+// (mirrorGap, strokeWidth, pulse), which move relative to whichever direction was already current.
+// Gravity instead maps onto the physical gesture itself: squeezing (fingers drawing in toward each
+// other) always pulls gravity toward MAX_GRAVITY — "drawing things in" reads as more pull — and
+// spreading always pushes it toward MIN_GRAVITY — "pushing things apart" reads as more repel —
+// regardless of gravity's sign when the gesture began. That absolute mapping (not gesture-start-
+// relative) is what lets repeated separate squeezes actually walk all the way to MAX_GRAVITY, through
+// 0 and out the other side, rather than a second squeeze right after the first crossed 0 reading as
+// "shrink the now-negative value" and walking straight back toward 0 instead of continuing on — see
+// GRAVITY_ZERO_STICKY_ZONE below for what makes landing exactly on 0 along the way actually practical
+// by feel, and reverseGravity for the other, one-tap way to flip polarity outright. Calibrated the same
+// way as PINCH_SCALE_TO_STROKE_WIDTH_SCALE above: a full, arm's-length pinch spread or squeeze sweeps
+// close to the whole [0, MAX_GRAVITY] magnitude range on either side of 0. Same untestable-without-a-
+// device disclaimer as every other pinch-derived scale above.
 const PINCH_SCALE_TO_GRAVITY_SCALE = MAX_GRAVITY / 1.5
 // How wide a dead zone (in gravity's own units, symmetric around 0) a gravity-targeting pinch holds
 // dead-on-0 before letting the gesture continue on into the new polarity — the value-space counterpart
@@ -1652,15 +1658,16 @@ export default function SwirlScreen() {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         strokeWidth.value = clamp(startStrokeWidth.value + (event.scale - 1) * PINCH_SCALE_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
       }
-      // Signed, unclamped-through-zero — see PINCH_SCALE_TO_GRAVITY_SCALE's own comment for why this
-      // now carries straight past 0 into the opposite polarity instead of stopping dead at an unsigned
-      // floor. gravitySign stays fixed to whichever direction was current at gesture-start (not
-      // resigned mid-gesture), so "spread grows the current direction, pinch shrinks it" still holds
-      // continuously all the way through the crossing rather than flipping meaning the instant rawGravity
-      // itself goes negative.
+      // Signed, unclamped-through-zero, and — unlike every other pinch-driven value in this file — not
+      // anchored to whichever direction was already current at gesture-start either. See
+      // PINCH_SCALE_TO_GRAVITY_SCALE's own comment for why: squeezing always pulls the value toward
+      // MAX_GRAVITY and spreading always pushes it toward MIN_GRAVITY, full stop, regardless of gravity's
+      // sign when this particular gesture began. That absolute mapping is what makes repeated separate
+      // pinches (release, re-grab, squeeze again) keep walking the same direction instead of the old
+      // sign-relative version, where a second squeeze right after the first crossed zero read as
+      // "shrink the newly-negative value" and walked straight back toward 0 instead of continuing on.
       if (targetsGravityPinch) {
-        const gravitySign = startGravity.value < 0 ? -1 : 1
-        const rawGravity = startGravity.value + gravitySign * (event.scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
+        const rawGravity = startGravity.value - (event.scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
         const stuckAtZero = Math.abs(rawGravity) <= GRAVITY_ZERO_STICKY_ZONE
         // Fires once, right on arrival — not on every frame spent held inside the zone, and not again
         // on the way back out (leaving is silent; see GRAVITY_ZERO_STICKY_ZONE's own comment for why
@@ -1711,12 +1718,11 @@ export default function SwirlScreen() {
       if (targetsGravityPinch) {
         // Recomputed from event.scale rather than trusting gravity.value already landed here from the
         // last onUpdate — same "onEnd's own event is authoritative" reasoning as mirrorGap's commit
-        // above. Same signed, sticky-through-zero math as onUpdate's own gravity block — duplicated
+        // above. Same absolute, sticky-through-zero math as onUpdate's own gravity block — duplicated
         // rather than shared for the same reason every other value in this handler recomputes from the
         // event instead of trusting onUpdate already ran (a pinch too quick to generate one still needs
         // to commit the right value here).
-        const gravitySign = startGravity.value < 0 ? -1 : 1
-        const rawGravity = startGravity.value + gravitySign * (event.scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
+        const rawGravity = startGravity.value - (event.scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
         const stuckAtZero = Math.abs(rawGravity) <= GRAVITY_ZERO_STICKY_ZONE
         if (stuckAtZero && !gravityStuckAtZero.value) runOnJS(selection)()
         gravityStuckAtZero.value = stuckAtZero
@@ -1799,8 +1805,7 @@ export default function SwirlScreen() {
         strokeWidth.value = clamp(startStrokeWidth.value + (scale - 1) * PINCH_SCALE_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
       }
       if (targetsGravityPinch) {
-        const gravitySign = startGravity.value < 0 ? -1 : 1
-        const rawGravity = startGravity.value + gravitySign * (scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
+        const rawGravity = startGravity.value - (scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
         const stuckAtZero = Math.abs(rawGravity) <= GRAVITY_ZERO_STICKY_ZONE
         if (stuckAtZero && !gravityStuckAtZero.value) selection()
         gravityStuckAtZero.value = stuckAtZero
