@@ -360,6 +360,23 @@ jest.mock('react-native-audio-api', () => ({
   }
 }))
 
+// expo-audio — a real native module, same unmocked-throws problem as react-native-audio-api above.
+// @rific/feedback-press/audio's useAudioPool builds its player pool with createAudioPlayer (a plain
+// factory), not the useAudioPlayer hook, so both need mocking here even though only createAudioPlayer
+// is actually exercised by this app's own sound hooks.
+jest.mock('expo-audio', () => ({
+  useAudioPlayer: jest.fn(() => ({
+    play: jest.fn(),
+    seekTo: jest.fn().mockResolvedValue(undefined),
+    remove: jest.fn()
+  })),
+  createAudioPlayer: jest.fn(() => ({
+    play: jest.fn(),
+    seekTo: jest.fn().mockResolvedValue(undefined),
+    remove: jest.fn()
+  }))
+}))
+
 // expo-blur — a real native module (delegates to requireNativeViewManager), so importing it unmocked
 // throws under Jest the same way react-native-audio-api does above. Rendered as a plain View via
 // React.createElement rather than JSX — this file is .ts, not .tsx, so JSX syntax doesn't parse here.

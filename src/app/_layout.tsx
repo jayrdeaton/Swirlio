@@ -9,7 +9,7 @@ import * as ExpoBlur from 'expo-blur'
 import { useFonts } from 'expo-font'
 import { Stack } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
-import React, { useEffect } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { Appearance, LogBox, Platform, StyleSheet, useColorScheme } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import * as RNPaper from 'react-native-paper'
@@ -24,6 +24,7 @@ import { SpeedRateBridgeProvider } from '@/hooks/speedRateBridge'
 import { useReady } from '@/hooks/splashGate'
 import { SwirlRandomizeProvider } from '@/hooks/swirlRandomize'
 import { SwirlResetProvider } from '@/hooks/swirlReset'
+import { useShutterSound, useTypewriterSound } from '@/hooks/useMechanicalSounds'
 import { SwirlSettingsProvider, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 // Held open until every named gate in splashGate.ts reports ready — saved settings hydrating from
@@ -84,6 +85,30 @@ function HapticsSettingsBridge() {
   return null
 }
 
+// Wraps FeedbackPressProvider (rather than a HapticsSettingsBridge-style child pushing into a
+// settable context) because SoundContext has no such setter — FeedbackPressProvider's own `sound`
+// prop is a plain, always-live React prop (see its SoundContext.Provider value={sound ?? EMPTY_SOUND}),
+// unlike `initialValue`, which only ever seeds vibrate once. That means whatever computes `sound`
+// has to sit above FeedbackPressProvider in the tree, which in turn has to sit below
+// SwirlSettingsProvider to read useSwirlSettings() — hence this wrapper taking over
+// FeedbackPressProvider's own spot in RootLayout below, one level further in than before.
+// playTypewriter/playShutter self-gate on settings.soundEnabled already (see
+// useMechanicalSounds.ts) — same "caller doesn't check the setting" shape medium()/selection() give
+// HapticsSettingsBridge above, so this never needs its own soundEnabled branch the way
+// Expo-Starter's own FeedbackBridge does.
+function FeedbackSoundBridge({ children }: { children: React.ReactNode }) {
+  const playTypewriter = useTypewriterSound()
+  const playShutter = useShutterSound()
+  const sound = useMemo(() => ({ selection: playTypewriter, notification: playShutter }), [playTypewriter, playShutter])
+
+  return (
+    <FeedbackPressProvider initialValue={{ vibrate: true }} paper={RNPaper} sound={sound}>
+      <HapticsSettingsBridge />
+      {children}
+    </FeedbackPressProvider>
+  )
+}
+
 export default function RootLayout() {
   if (__DEV__ && Platform.OS === 'web') {
     LogBox.ignoreLogs(['Animated: `useNativeDriver` is not supported because the native animated module is missing.'])
@@ -124,8 +149,7 @@ export default function RootLayout() {
           mount the host. FeedbackPressProvider itself has no dependency on AutoPaperProvider being an
           ancestor (paper is a static import, not read from AutoPaper's own context), so this reorder
           is free. */}
-          <FeedbackPressProvider initialValue={{ vibrate: true }} paper={RNPaper}>
-            <HapticsSettingsBridge />
+          <FeedbackSoundBridge>
             <AutoPaperProvider initialValue={{ appearance: 'system', color: initialScheme === 'dark' ? MONOCHROME_WHITE : MONOCHROME_BLACK }} expoBlur={ExpoBlur}>
               <MonochromeThemeBridge />
               <DrawerProvider autoPaper={AutoPaper}>
@@ -155,7 +179,7 @@ export default function RootLayout() {
                 </SwirlResetProvider>
               </DrawerProvider>
             </AutoPaperProvider>
-          </FeedbackPressProvider>
+          </FeedbackSoundBridge>
         </SwirlSettingsProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

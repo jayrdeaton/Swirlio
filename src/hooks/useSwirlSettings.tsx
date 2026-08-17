@@ -132,6 +132,12 @@ export type SwirlSettings = {
   // Compact by default (icon-only FABs, no slider labels) — turning this on trades that density for
   // legibility: bigger FAB captions and slider labels, see SettingSlider/LabeledFab.
   showLabels: boolean
+  // Gates every self-gated play* call the mechanical sound hooks return (see
+  // useMechanicalSounds.ts) — press/long-press feedback sound and the wall-bounce sound alike —
+  // the same "callers never need to check the setting themselves" shape hapticsEnabled's own
+  // HapticSettingsContext bridge already gives selection/medium/notification. True by default,
+  // matching hapticsEnabled's own default.
+  soundEnabled: boolean
   strokeWidth: number
   tightness: number
   tiltEnabled: boolean
@@ -173,6 +179,7 @@ type SwirlSettingsContextValue = {
   setRotationSpeed: (speed: number) => void
   setShakeEnabled: (enabled: boolean) => void
   setShowLabels: (enabled: boolean) => void
+  setSoundEnabled: (enabled: boolean) => void
   setStrokeWidth: (strokeWidth: number) => void
   setTightness: (tightness: number) => void
   setTiltEnabled: (enabled: boolean) => void
@@ -282,6 +289,7 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setRotationSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, rotationSpeed: clamp(speed, MIN_ROTATION_SPEED, MAX_ROTATION_SPEED) } : prev)),
       setShakeEnabled: (enabled) => setSettings((prev) => ({ ...prev, shakeEnabled: enabled })),
       setShowLabels: (enabled) => setSettings((prev) => ({ ...prev, showLabels: enabled })),
+      setSoundEnabled: (enabled) => setSettings((prev) => ({ ...prev, soundEnabled: enabled })),
       setStrokeWidth: (strokeWidth) => setSettings((prev) => (Number.isFinite(strokeWidth) ? { ...prev, strokeWidth: clamp(strokeWidth, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH) } : prev)),
       setTightness: (tightness) => setSettings((prev) => (Number.isFinite(tightness) ? { ...prev, tightness: clamp(tightness, MIN_TIGHTNESS, MAX_TIGHTNESS) } : prev)),
       setTiltEnabled: (enabled) => setSettings((prev) => ({ ...prev, tiltEnabled: enabled })),
@@ -292,8 +300,8 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       // each setter would also mean this drifts out of sync the moment a new field's setter gains its
       // own extra branching (e.g. the empty-list guards on colors) that a plain reset should ignore
       // anyway. audioReactiveEnabled, controlsAutoHideSpeed, followSpeed, gestureTarget,
-      // gravityMarkerVisible, hapticsEnabled, shakeEnabled, showLabels, tiltEnabled, and
-      // triggerStackExpanded are all carried over from whatever they already were, not reset to their
+      // gravityMarkerVisible, hapticsEnabled, shakeEnabled, showLabels, soundEnabled, tiltEnabled,
+      // and triggerStackExpanded are all carried over from whatever they already were, not reset to their
       // defaults — they're device-capability toggles (is the mic feeding this, does a shake randomize,
       // does tilting the device warp it, do presses buzz), chrome-density/interface preferences
       // (showLabels, controlsAutoHideSpeed, gravityMarkerVisible, triggerStackExpanded — same bucket,
@@ -316,6 +324,7 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
           hapticsEnabled: prev.hapticsEnabled,
           shakeEnabled: prev.shakeEnabled,
           showLabels: prev.showLabels,
+          soundEnabled: prev.soundEnabled,
           tiltEnabled: prev.tiltEnabled,
           triggerStackExpanded: prev.triggerStackExpanded
         }))

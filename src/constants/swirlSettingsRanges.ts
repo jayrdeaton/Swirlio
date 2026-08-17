@@ -171,6 +171,7 @@ export const defaultSettings: SwirlSettings = {
   rotationSpeed: 2,
   shakeEnabled: true,
   showLabels: false,
+  soundEnabled: true,
   strokeWidth: DEFAULT_STROKE_WIDTH,
   tightness: DEFAULT_TIGHTNESS,
   tiltEnabled: true,

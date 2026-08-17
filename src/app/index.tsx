@@ -29,6 +29,7 @@ import { SCREEN_EDGE_OFFSET, useDragPointPhysics } from '@/hooks/useDragPointPhy
 import { GestureTarget, useEpicenter } from '@/hooks/useEpicenter'
 import { ExtraResetFields, useLookHistory } from '@/hooks/useLookHistory'
 import { useLoopingProgress } from '@/hooks/useLoopingProgress'
+import { useRelaySound } from '@/hooks/useMechanicalSounds'
 import { useRerollUnits } from '@/hooks/useRerollUnits'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { useSwapColors } from '@/hooks/useSwapColors'
@@ -325,6 +326,16 @@ export default function SwirlScreen() {
     setZoomSpeed
   } = useSwirlSettings()
   const { medium, notification, selection } = useVibration()
+  // Every point's onBounce callback (gravityHandle just below, plus pattern/mirror inside
+  // useEpicenter) already meant "fire a haptic on every wall hit" — this adds the relay sound to
+  // that same moment rather than introducing a second, parallel callback plumbed through both call
+  // sites. playRelay self-gates on settings.soundEnabled already (see useMechanicalSounds.ts), the
+  // same way medium() self-gates on hapticsEnabled, so neither needs an extra check here.
+  const playRelay = useRelaySound()
+  const handleBounce = useCallback(() => {
+    medium()
+    playRelay()
+  }, [medium, playRelay])
 
   // The transport row's back/forward FABs (see OnScreenControls) — and every direct on-canvas "hot
   // key" change too (Cycle shape/Cycle line type's tap and long-press pair, Add/Remove mirror and its
@@ -854,7 +865,7 @@ export default function SwirlScreen() {
   // the well's dust, so neither is ever gated on it; gravity keeps doing whatever it was already doing
   // regardless.
   const gravityHandleZero = useSharedValue(0)
-  const gravityHandle = useDragPointPhysics(bounceFriction, gravityHandleZero, followSpeed, medium)
+  const gravityHandle = useDragPointPhysics(bounceFriction, gravityHandleZero, followSpeed, handleBounce)
   // True only for the duration of an actual one-finger drag while 'gravity' is one of the active
   // targets — purely a "is a finger down on it right now" signal (see useEpicenter.ts's gravityActive).
   // gravityManualControl below is the one effectiveGravityCenterX/Y actually keys off, since a released
@@ -1132,7 +1143,7 @@ export default function SwirlScreen() {
   const effectiveGravityCenterX = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.x.value : withSpring(tiltX.value, TILT_EASE_SPRING)))
   const effectiveGravityCenterY = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.y.value : withSpring(tiltY.value, TILT_EASE_SPRING)))
 
-  const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, longPressGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, medium, settings.mirrorLines, bounceFriction, gravity, followSpeed, effectiveGravityCenterX, effectiveGravityCenterY, activeTargets, gravityHandle, isDraggingGravity, gravityManualControl, applyPatternRotationRelease, applyMirrorRotationRelease, applyZoomRelease, applyMirrorCycleRelease, baseRotation, baseRotationPaused, mirrorProgress, mirrorPaused, mirrorRotationSign, manualPulseOffset, basePulse, basePulsePaused, foregroundCycleRate, backgroundCycleRate, minCycleRate, maxCycleRate, tiltX, tiltY, tiltEnabledShared)
+  const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, longPressGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, handleBounce, settings.mirrorLines, bounceFriction, gravity, followSpeed, effectiveGravityCenterX, effectiveGravityCenterY, activeTargets, gravityHandle, isDraggingGravity, gravityManualControl, applyPatternRotationRelease, applyMirrorRotationRelease, applyZoomRelease, applyMirrorCycleRelease, baseRotation, baseRotationPaused, mirrorProgress, mirrorPaused, mirrorRotationSign, manualPulseOffset, basePulse, basePulsePaused, foregroundCycleRate, backgroundCycleRate, minCycleRate, maxCycleRate, tiltX, tiltY, tiltEnabledShared)
 
   // Drives GravityWell's particles (Spiral.tsx) — bounceFriction's own speed, full stop (see
   // gravityParticleFrictionSpeed's own comment and GRAVITY_PARTICLE_FRICTION_MIN/MAX_SPEED above).

@@ -121,6 +121,7 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.rotationSpeed === 'number' ? { rotationSpeed: clamp(persisted.rotationSpeed, MIN_ROTATION_SPEED, MAX_ROTATION_SPEED) } : null),
       ...(typeof persisted.shakeEnabled === 'boolean' ? { shakeEnabled: persisted.shakeEnabled } : null),
       ...(typeof persisted.showLabels === 'boolean' ? { showLabels: persisted.showLabels } : null),
+      ...(typeof persisted.soundEnabled === 'boolean' ? { soundEnabled: persisted.soundEnabled } : null),
       ...(typeof persisted.strokeWidth === 'number' ? { strokeWidth: clamp(persisted.strokeWidth, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH) } : null),
       ...(typeof persisted.tightness === 'number' ? { tightness: clamp(persisted.tightness, MIN_TIGHTNESS, MAX_TIGHTNESS) } : null),
       ...(typeof persisted.tiltEnabled === 'boolean' ? { tiltEnabled: persisted.tiltEnabled } : null),

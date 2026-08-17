@@ -34,7 +34,7 @@ const isWeb = Platform.OS === 'web'
 export function ControlGroupTopSheetContent() {
   const insets = useSafeAreaInsets()
   const { activeGroup } = useControlGroups()
-  const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setGravity, setGravityMarkerVisible, setHapticsEnabled, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTightness } = useSwirlSettings()
+  const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setGravity, setGravityMarkerVisible, setHapticsEnabled, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setShakeEnabled, setShowLabels, setSoundEnabled, setStrokeWidth, setTiltEnabled, setTightness } = useSwirlSettings()
   const { swapColors } = useSwapColors()
   const { resetGravity, resetMirror, resetPattern } = useSwirlReset()
   const { randomizeGroup } = useSwirlRandomize()
@@ -316,6 +316,14 @@ export function ControlGroupTopSheetContent() {
               `vibrate` icon, a `vibrate`/`vibrate-off` pair read as near-duplicates at a glance despite
               meaning unrelated things (a physical shake gesture vs. press feedback on every tap). */}
               {!isWeb && <SettingToggleFab icon='gesture-tap' label='Haptics' value={settings.hapticsEnabled} onValueChange={setHapticsEnabled} />}
+              {/* Governs settings.soundEnabled, which every mechanical sound hook already self-gates
+              on (see useMechanicalSounds.ts) — press/long-press feedback sound (wired into
+              FeedbackPressProvider's own sound prop, see _layout.tsx's FeedbackSoundBridge) and the
+              wall-bounce relay sound alike, with no per-call-site changes needed here either. Unlike
+              Haptics/Shake/Audio reactive just above, not hidden on web: expo-audio (unlike
+              expo-haptics) has a real web target, so there's no unsupported-platform reason to hide
+              this one. */}
+              <SettingToggleFab icon='volume-high' label='Sound' value={settings.soundEnabled} onValueChange={setSoundEnabled} />
               {/* Trails every other control in this sheet now, not just its own row — it's the one FAB
               here that isn't a look/behavior preference at all, so it reads as a footer action rather
               than competing with Randomize/Reset all up top for the same "first thing you see" spot.

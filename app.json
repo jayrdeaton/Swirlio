@@ -60,7 +60,8 @@
           "iosMicrophonePermission": "Swirlio uses the microphone to make the swirl react to sound.",
           "androidForegroundService": false
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "runtimeVersion": {
       "policy": "fingerprint"
