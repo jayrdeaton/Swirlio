@@ -503,12 +503,17 @@ export default function SwirlScreen() {
     setControlsVisible(false)
   }, [])
 
-  // The only way to bring the controls back once hidden — an edge hover/press, wired up via
-  // EdgeRevealZones. There used to also be a passive path: any gesture-triggered hide would auto-
-  // reveal the controls again a couple of seconds later on its own, a leftover from before edge-reveal
-  // existed (so controls hidden by a gesture weren't lost for good). Now that edge-reveal covers that,
-  // the passive timer was pure downside — since hideControls fires on every ordinary tap too, it meant
-  // the controls would silently pop back up ~2s after nearly anything you did, for no visible reason.
+  // An edge hover/press (EdgeRevealZones) is the main way to bring the controls back once hidden —
+  // OnScreenControls' own fanGesture calls this too now (see its own onReveal prop), the moment a
+  // press-drag-release on the primary FAB begins, so picking a target is visible even starting from
+  // fully hidden rather than a blind haptics-only guess; the idle-hide effect below (gated on
+  // gestureFanOpen) keeps it up for the duration of the pick, then fades it back out on its own once
+  // released, same as any other reveal. There used to also be a passive path: any gesture-triggered hide
+  // would auto-reveal the controls again a couple of seconds later on its own, a leftover from before
+  // edge-reveal existed (so controls hidden by a gesture weren't lost for good). Now that edge-reveal
+  // covers that, the passive timer was pure downside — since hideControls fires on every ordinary tap
+  // too, it meant the controls would silently pop back up ~2s after nearly anything you did, for no
+  // visible reason.
   const revealControls = useCallback(() => {
     setControlsVisible(true)
     setActivityEpoch((epoch) => epoch + 1)
@@ -2217,10 +2222,19 @@ export default function SwirlScreen() {
           />
         </View>
       </GestureDetector>
+      {/* EdgeRevealZones first, OnScreenControls second — OnScreenControls' own gesture-target-cluster-
+      overlay (see its own comment) deliberately stays touch-reachable even while pointerEvents='none'
+      everywhere else in that component, specifically so the primary FAB's press-drag-release still
+      works with the real controls hidden. Rendered later, it paints on top of EdgeRevealZones' own
+      full-width bottom zone — the opposite order left that zone's plain Pressable winning every touch
+      at the FAB's own position first, since a later sibling always wins native hit-testing over an
+      earlier one at the same point, and the fan gesture never even saw them. Everywhere else on
+      OnScreenControls' own pointerEvents='none' root, hit-testing already skips straight past it to
+      EdgeRevealZones underneath, so this doesn't cost that its own reachability anywhere else. */}
+      <EdgeRevealZones active={!controlsVisible} onReveal={revealControls} triggerStackExpanded={settings.triggerStackExpanded} onPause={pause} onRecenterEverything={recenterEverything} onExpandTriggerStack={expandTriggerStack} onRandomizeEverything={randomizeEverything} />
       {/* Forced on (independent of controlsVisible) while the group sheet is open — see
       OnScreenControls' own Portal, which keeps the trigger stack reachable the whole time. */}
-      <OnScreenControls visible={controlsVisible || groupSheetVisible} activeTargets={activeTargets} backDisabled={backDisabled} frozen={frozen} onToggleFrozen={toggleFrozen} onRecenterEverything={recenterEverything} gestureFanOpen={gestureFanOpen} onGestureFanOpenChange={setGestureFanOpen} onSelectGestureTarget={selectGestureTarget} onRandomizeGestureTarget={randomizeGestureTarget} onRecenter={recenterGestureTarget} onGoBack={goBack} onResetAllSettings={resetAllSettings} onGoForward={goForward} onGoForwardBatch={goForwardBatch} onAlternateBackground={alternateBackground} onCycleBackgroundTwoTone={cycleBackgroundTwoTone} onRandomizeForeground={randomizeForeground} onGrowForeground={growForeground} onCycleShape={nextPattern} onCycleLineType={nextDashStyle} onCycleSides={cycleSides} onResetLineToSolid={resetLineToSolid} gravityRepelling={settings.gravity < 0} onReverseGravity={reverseGravity} onHideControls={hideControls} />
-      <EdgeRevealZones active={!controlsVisible} onReveal={revealControls} triggerStackExpanded={settings.triggerStackExpanded} onPause={pause} onRecenterEverything={recenterEverything} onExpandTriggerStack={expandTriggerStack} onRandomizeEverything={randomizeEverything} />
+      <OnScreenControls visible={controlsVisible || groupSheetVisible} activeTargets={activeTargets} backDisabled={backDisabled} frozen={frozen} onToggleFrozen={toggleFrozen} onRecenterEverything={recenterEverything} gestureFanOpen={gestureFanOpen} onGestureFanOpenChange={setGestureFanOpen} onSelectGestureTarget={selectGestureTarget} onRandomizeGestureTarget={randomizeGestureTarget} onRecenter={recenterGestureTarget} onReveal={revealControls} onGoBack={goBack} onResetAllSettings={resetAllSettings} onGoForward={goForward} onGoForwardBatch={goForwardBatch} onAlternateBackground={alternateBackground} onCycleBackgroundTwoTone={cycleBackgroundTwoTone} onRandomizeForeground={randomizeForeground} onGrowForeground={growForeground} onCycleShape={nextPattern} onCycleLineType={nextDashStyle} onCycleSides={cycleSides} onResetLineToSolid={resetLineToSolid} gravityRepelling={settings.gravity < 0} onReverseGravity={reverseGravity} onHideControls={hideControls} />
     </View>
   )
 }

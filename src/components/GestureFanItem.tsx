@@ -12,9 +12,10 @@ import { IconOrRenderFn } from './MdIcon'
 // whenever the fan opens, so there's no reason to hold back from the whole upper half of the circle.
 // At 180°, the first and last entries in GESTURE_TARGET_ORDER land exactly due left/right (see
 // fanItemOffset's own angleDeg below) rather than just leaning that direction, which also makes the
-// fixed spatial layout easier to learn by feel — useful now that OnScreenControls' own fanGesture can
-// be driven without looking (see its own hit-layer comment). FAN_RADIUS is tuned by eye, not derived
-// from anything — expect it to move once it's actually visible on a real device.
+// fixed spatial layout a little easier to learn by feel — even though OnScreenControls' own fanGesture
+// now reveals itself the moment a pick starts (see its own onReveal comment), so this is no longer
+// something you'd need to do purely blind. FAN_RADIUS is tuned by eye, not derived from anything —
+// expect it to move once it's actually visible on a real device.
 const FAN_RADIUS = 92
 const FAN_ANGLE_SPAN_DEG = 180
 // Exported for OnScreenControls' own fanFlanksStyle, which fades the transport row's other two flanks

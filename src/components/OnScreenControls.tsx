@@ -147,6 +147,14 @@ type OnScreenControlsProps = {
   // convention every other long press in this file already uses, just reached through the picker's own
   // drag instead of a second, separate FAB. index.tsx's randomizeGestureTarget straight through.
   onRandomizeGestureTarget: (target: GestureTarget) => void
+  // index.tsx's own revealControls, the exact same one EdgeRevealZones already calls — fanGesture's own
+  // onBegin fires this unconditionally (see handleFanBegin further down), so a press-drag-release
+  // started while the real controls are hidden brings the fan itself into view for the duration of the
+  // pick instead of staying a blind, haptics-only guess. Calling it while already visible is still fine
+  // to do every time, not just harmless: it also resets index.tsx's own idle-hide countdown (see
+  // revealControls' own activityEpoch bump), which is exactly what should happen at the start of any
+  // fresh pick, not just the first one from hidden.
+  onReveal: () => void
   // Whether the gesture-target fan is spread out — lifted up and controlled by index.tsx (rather than
   // local state in here) purely so its own idle-fade effect can see it and suspend the auto-hide timer
   // while it's open: picking a target is deliberate, "not touching anything" time that shouldn't read
@@ -228,7 +236,7 @@ type OnScreenControlsProps = {
 // controls' own hit areas capture anything. Faded via opacity rather than conditionally rendered so
 // hiding/revealing transitions smoothly instead of popping instantly — see EdgeRevealZones for how it
 // comes back once fully hidden and no longer touchable.
-export function OnScreenControls({ visible, activeTargets, backDisabled, frozen, onToggleFrozen, onRecenterEverything, gestureFanOpen, onGestureFanOpenChange, onSelectGestureTarget, onRandomizeGestureTarget, onRecenter, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, onAlternateBackground, onCycleBackgroundTwoTone, onRandomizeForeground, onGrowForeground, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, gravityRepelling, onReverseGravity, onHideControls }: OnScreenControlsProps) {
+export function OnScreenControls({ visible, activeTargets, backDisabled, frozen, onToggleFrozen, onRecenterEverything, gestureFanOpen, onGestureFanOpenChange, onSelectGestureTarget, onRandomizeGestureTarget, onReveal, onRecenter, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, onAlternateBackground, onCycleBackgroundTwoTone, onRandomizeForeground, onGrowForeground, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, gravityRepelling, onReverseGravity, onHideControls }: OnScreenControlsProps) {
   // Recomputed every render (not a module-level constant) purely so tests can flip Platform.OS and
   // actually exercise both of gravity mode's slotA branches below — see useAudioReactive.test.ts for
   // the same Platform.OS-mutation pattern. Cheap enough that per-render cost was never a concern.
@@ -436,7 +444,8 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // Captures whichever target was already active as this gesture's own startTargetRef/appliedTargetRef
   // (see their own comments), then reuses handleFanZoneChanged for zone -1 (the primary FAB's own
   // position) so a hold that never moves at all still arms the recenter dwell, the exact same way it
-  // always has.
+  // always has. onReveal fires unconditionally too — this is what makes the pick visible even starting
+  // from fully hidden (see that prop's own comment), not just reachable-but-blind.
   const handleFanBegin = useCallback(() => {
     const current = [...activeTargets][0]
     startTargetRef.current = current
@@ -444,9 +453,10 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     wasAlreadyOpenRef.current = gestureFanOpen
     dwellFiredRef.current = false
     selection()
+    onReveal()
     onGestureFanOpenChange(true)
     handleFanZoneChanged(-1)
-  }, [activeTargets, gestureFanOpen, handleFanZoneChanged, onGestureFanOpenChange, selection])
+  }, [activeTargets, gestureFanOpen, handleFanZoneChanged, onGestureFanOpenChange, onReveal, selection])
 
   // A plain press-and-release, with no drag and no dwell, still has to mean what a plain tap on this FAB
   // always meant: open it if it was closed, close it back up if this was the second tap on one already
@@ -661,16 +671,14 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
       a sheet, alongside re-tapping the open group's own trigger below and a plain tap on the exposed
       canvas (see index.tsx's handleCanvasTap and topSheet/bottomSheet's own blockingBackdrop comment in
       controlGroups.tsx for why the backdrop itself doesn't do this). closeGroupSheet no-ops harmlessly
-      when nothing's open. onLongPress depends on which state this FAB is already in: while siblingsVisible
-      (chevron-up, the cog and friends already on screen), a long press collapses AND hides the whole
-      overlay in one hold — onHideControls, the same state index.tsx's own edge-reveal zones bring back
-      (see EdgeRevealZones/index.tsx's hideControls/revealControls) — since the cog right below already
-      covers "randomize everything" via its own long press whenever the stack is expanded, this FAB's
-      long press would otherwise just be a redundant shortcut to the same thing. While collapsed
-      (chevron-down), the cog and siblings aren't reachable at all, so this FAB's long press falls back to
-      randomizeGroup('settings') (see useRerollUnits' own rerollUnitsByGroup, which gives settings every
-      other group's units combined) — the one spot a full randomize stays reachable with the rest of the
-      stack collapsed. */}
+      when nothing's open. onLongPress always collapses AND hides the whole overlay in one hold —
+      onHideControls, the same state index.tsx's own edge-reveal zones bring back (see EdgeRevealZones/
+      index.tsx's hideControls/revealControls) — regardless of whether the siblings were already
+      expanded or collapsed: this used to fall back to randomizeGroup('settings') while already
+      collapsed instead (the cog's own long press already covers that while expanded), but that left no
+      way to hide everything at all without first re-expanding the stack, which defeats the point of
+      collapsing it in the first place. Randomize-everything still has its own home on the cog's long
+      press whenever the stack is expanded. */}
       <GlassToggleFab
         icon={siblingsVisible ? 'chevron-up' : 'chevron-down'}
         testID={siblingsVisible ? 'fab-chevron-up' : 'fab-chevron-down'}
@@ -680,18 +688,10 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
           closeGroupSheet()
         })}
         onLongPress={closeFanFirst(() => {
-          if (siblingsVisible) {
-            setTriggerStackExpanded(false)
-            closeGroupSheet()
-            onHideControls()
-          } else {
-            randomizeGroupHold.onLongPress('settings')()
-          }
+          setTriggerStackExpanded(false)
+          closeGroupSheet()
+          onHideControls()
         })}
-        // Harmless no-op via the collapse/hide branch above (nothing was ever started for 'settings'
-        // there, and stop() on an untracked key is guarded — see useHoldToRepeatByKey), so this can stay
-        // unconditional rather than needing its own siblingsVisible branch.
-        onPressOut={randomizeGroupHold.onPressOut('settings')}
         delayLongPress={TRANSPORT_LONG_PRESS_MS}
       />
       {/* Collapsible siblings live in their own wrapper (rather than gap-ing directly under
@@ -895,18 +895,17 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
       auto-hide, or an explicit hide). pointerEvents='none' on a parent blocks its *entire* subtree on
       native, with no way for a descendant to opt back in the way fab-target-hit-layer's own comment
       documents doing on web — the only reliable, cross-platform way to keep just this one region
-      reachable regardless of `visible` is to not be a descendant of the thing gating on it at all. Still
-      fades its own opacity in step with visible/anySheetVisible (animatedStyle/sheetFadeStyle, the same
-      two every other piece of this screen already uses) — pointerEvents is what's decoupled here, not
-      the look of it. That's what makes the press-drag-release pick (fanGesture, below — see its own
-      comment) usable "blind": a full press-drag-release starting right here still works with nothing on
-      screen, reading the fixed spatial layout by feel (see GestureFanItem's own FAN_ANGLE_SPAN_DEG
-      comment) with the haptic tick handleFanZoneChanged fires on every wedge crossing as the only
-      feedback. The other way to pick — open with a plain tap, then a second, separate tap directly on
-      the wedge you want (see GestureFanItem's own onPress) — still needs the fan actually visible to
-      aim at, so it only ever works while `visible` is true; adrift while hidden, it degrades gracefully
-      to just the drag. Positioned by centering this single child in
-      a full-width row exactly the way styles.transportRow's own justifyContent: 'center' already centers
+      reachable regardless of `visible` is to not be a descendant of the thing gating on it at all.
+      Reachability is only half of it, though: fanGesture's own onBegin also calls onReveal (see that
+      prop's own comment) the instant a press lands here, so a pick started from fully hidden still
+      brings the fan itself into view for as long as gestureFanOpen stays true (index.tsx's own idle-hide
+      effect is suspended for exactly that reason), then lets it fade back out on its own once released —
+      visible while you're actually choosing, gone again once you're not, rather than a permanent
+      "controls are back" the way tapping an edge-reveal zone means. index.tsx renders EdgeRevealZones
+      *before* this component specifically so this overlay — reachable regardless of `visible` — paints
+      on top of that zone's own full-width bottom strip instead of losing every touch to it (see
+      index.tsx's own comment on that ordering). Positioned by centering this single child in a
+      full-width row exactly the way styles.transportRow's own justifyContent: 'center' already centers
       the placeholder above among its two flanks — reliable without having to replicate their width,
       since slotA/slotB always render exactly one small FAB each regardless of activeTargets (see their
       own comment), so the flanks are always symmetric and the placeholder already sits at true screen-

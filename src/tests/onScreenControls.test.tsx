@@ -163,6 +163,7 @@ const defaultProps = {
   onGestureFanOpenChange: jest.fn(),
   onSelectGestureTarget: jest.fn(),
   onRandomizeGestureTarget: jest.fn(),
+  onReveal: jest.fn(),
   onRecenter: jest.fn(),
   onGoBack: jest.fn(),
   onResetAllSettings: jest.fn(),
@@ -261,22 +262,36 @@ describe('OnScreenControls', () => {
 
   // The primary FAB/fan renders in its own overlay, deliberately outside on-screen-controls-root (see
   // that overlay's own comment) — unlike everything else in this file, gated only by anySheetVisible,
-  // never by `visible`, so switching modes stays possible with the whole rest of the row hidden. A
-  // blind gesture by design (see GestureFanItem's own FAN_ANGLE_SPAN_DEG comment) — this only checks
-  // that the drag itself still drives onSelectGestureTarget while hidden, not anything about it becoming
-  // visible again.
-  it('keeps the gesture-target fan itself reachable and fully functional even while the rest of the row is hidden', async () => {
+  // never by `visible`, so switching modes stays possible with the whole rest of the row hidden.
+  // onReveal (see handleFanBegin) is what keeps this from being a blind, haptics-only guess — pressing
+  // down brings the fan itself into view for the pick, even starting from fully hidden.
+  it('keeps the gesture-target fan itself reachable while the rest of the row is hidden, and reveals it for the pick', async () => {
     const onSelectGestureTarget = jest.fn()
-    const screen = await renderControls({ visible: false, activeTargets: new Set(['pattern']), onSelectGestureTarget })
+    const onReveal = jest.fn()
+    const screen = await renderControls({ visible: false, activeTargets: new Set(['pattern']), onSelectGestureTarget, onReveal })
 
     expect(screen.getByTestId('gesture-target-cluster-overlay').props.pointerEvents).toBe('box-none')
 
     await fanBegin()
+    expect(onReveal).toHaveBeenCalledTimes(1)
+
     const { dx, dy } = wedgeOffset('gravity')
     await fanUpdate(dx, dy)
     await fanFinalize()
 
     expect(onSelectGestureTarget).toHaveBeenCalledWith('gravity')
+  })
+
+  // onReveal fires on every press, not only ones starting from hidden — it doubles as index.tsx's own
+  // idle-hide countdown reset (see that prop's own comment), which a fresh pick should restart
+  // regardless of whether the controls happened to already be visible.
+  it('calls onReveal on every press, even when the controls were already visible', async () => {
+    const onReveal = jest.fn()
+    await renderControls({ visible: true, onReveal })
+
+    await fanBegin()
+
+    expect(onReveal).toHaveBeenCalledTimes(1)
   })
 
   it('wires the back FAB to onGoBack', async () => {
@@ -1210,12 +1225,11 @@ describe('OnScreenControls', () => {
     expect(mockCloseGroupSheet).not.toHaveBeenCalled()
   })
 
-  // The always-visible chevron's long press means something different depending on which state it's
-  // already in. While expanded (chevron-up), the cog right below it already covers "randomize
-  // everything" via its own long press, so this FAB's long press instead collapses AND hides the whole
-  // overlay in one hold — the on-canvas equivalent of an edge-reveal zone's own onReveal undoing this
-  // (see EdgeRevealZones). Its own ordinary tap (collapse/expand + close any open sheet) is covered
-  // separately further down.
+  // The always-visible chevron's long press always collapses AND hides the whole overlay in one hold —
+  // the on-canvas equivalent of an edge-reveal zone's own onReveal undoing this (see EdgeRevealZones) —
+  // regardless of whether the siblings were already expanded or collapsed: there'd otherwise be no way
+  // to hide everything from a collapsed stack without first re-expanding it. Its own ordinary tap
+  // (collapse/expand + close any open sheet) is covered separately further down.
   it('wires a long-press on the chevron-up FAB to collapse the stack, close any open sheet, and hide the whole overlay', async () => {
     mockGroupSheetOpen = true
     mockActiveGroup = 'pattern'
@@ -1233,11 +1247,11 @@ describe('OnScreenControls', () => {
     expect(screen.getByTestId('fab-chevron-down')).toBeTruthy()
   })
 
-  // Once collapsed, the cog and every other sibling are unreachable (disabled — see "disables the
-  // trigger-stack siblings while collapsed" below), so this is the one remaining spot a full reroll
-  // stays reachable — the same randomizeGroup('settings') shortcut the cog's own long press uses while
-  // expanded.
-  it("wires a long-press on the chevron-down FAB to randomizeGroup('settings'), not collapse/hide", async () => {
+  // The same long press, already collapsed — still hides, not randomizeGroup('settings') the way this
+  // used to fall back to while collapsed (the cog's own long press already covers "randomize
+  // everything" whenever the stack is expanded; this is the one remaining way to hide everything from a
+  // collapsed stack without re-expanding it first).
+  it('wires a long-press on the chevron-down FAB to hide the whole overlay too, not randomizeGroup', async () => {
     const onHideControls = jest.fn()
     const screen = await renderControls({ onHideControls })
 
@@ -1250,9 +1264,8 @@ describe('OnScreenControls', () => {
       fireEvent(screen.getByTestId('fab-chevron-down'), 'longPress')
     })
 
-    expect(mockRandomizeGroup).toHaveBeenCalledWith('settings')
-    expect(mockRandomizeGroup).toHaveBeenCalledTimes(1)
-    expect(onHideControls).not.toHaveBeenCalled()
+    expect(onHideControls).toHaveBeenCalledTimes(1)
+    expect(mockRandomizeGroup).not.toHaveBeenCalled()
   })
 
   // Randomize's own hold-repeat twin to Cycle shape's/Forward's/Add-Remove mirror's (see
@@ -1296,38 +1309,10 @@ describe('OnScreenControls', () => {
       expect(mockRandomizeGroup).toHaveBeenCalledTimes(2)
     })
 
-    it("keeps calling randomizeGroup('settings') every RANDOMIZE_HOLD_REPEAT_MS while the collapsed chevron is held, and stops on release", async () => {
-      const screen = await renderControls()
-
-      await act(async () => {
-        fireEvent.press(screen.getByTestId('fab-chevron-up'))
-      })
-      const fab = screen.getByTestId('fab-chevron-down')
-
-      await act(async () => {
-        fireEvent(fab, 'longPress')
-      })
-      expect(mockRandomizeGroup).toHaveBeenCalledTimes(1)
-
-      await act(async () => {
-        await jest.advanceTimersByTimeAsync(1000)
-      })
-      expect(mockRandomizeGroup).toHaveBeenCalledTimes(2)
-      expect(mockRandomizeGroup).toHaveBeenLastCalledWith('settings')
-
-      await act(async () => {
-        fireEvent(fab, 'pressOut')
-      })
-      await act(async () => {
-        await jest.advanceTimersByTimeAsync(2000)
-      })
-      expect(mockRandomizeGroup).toHaveBeenCalledTimes(2)
-    })
-
-    // The expanded chevron's own long press does something else entirely (collapse + hide, see "wires a
-    // long-press on the chevron-up FAB" above) — its onPressOut is still unconditionally wired to
-    // randomizeGroupHold.onPressOut('settings') (see OnScreenControls' own comment for why that's a safe
-    // no-op here), so this confirms releasing that hold never fires a stray randomize.
+    // The chevron's own long press (either state, expanded or collapsed) never touches randomizeGroupHold
+    // at all anymore — it always collapses+hides instead (see "wires a long-press on the chevron-up/
+    // chevron-down FAB" above) — so a pressOut/wait afterward has nothing pending to fire, confirming
+    // that isn't a stray randomize hiding behind it.
     it('releasing the expanded chevron-up FAB after a long press never fires a stray randomize', async () => {
       const onHideControls = jest.fn()
       const screen = await renderControls({ onHideControls })
