@@ -12,6 +12,7 @@ import { RANDOMIZE_HOLD_REPEAT_MS } from '@/constants/holdToRepeat'
 import { ControlGroup, useControlGroups, useControlGroupSheetDrawer, useOpenControlGroup } from '@/hooks/controlGroups'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { GESTURE_TARGET_ORDER, GestureTarget } from '@/hooks/useEpicenter'
+import { useShutterSound, useTypewriterSound } from '@/hooks/useMechanicalSounds'
 import { useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { DashStyleIcon } from './DashStyleIcon'
@@ -346,7 +347,20 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // fresh by fanGesture's closure every render, the same way useEpicenter.ts's own worklets close over
   // plain per-render constants (wedgeAngleDeg, copyCount, etc.) rather than needing a SharedValue.
   const fanWedgeOffsets = useMemo(() => GESTURE_TARGET_ORDER.map((target, index) => ({ target, ...fanItemOffset(index, GESTURE_TARGET_ORDER.length) })), [])
-  const { selection, notification } = useVibration()
+  const { selection: hapticSelection, notification: hapticNotification } = useVibration()
+  const playTypewriter = useTypewriterSound()
+  const playShutter = useShutterSound()
+  // Same haptic+sound pairing as index.tsx's own selection/notification wrap: the gesture-target fan
+  // below is a Gesture.Pan(), not a Pressable/FAB, so it never goes through FeedbackSoundBridge's
+  // automatic sound wiring the way ordinary FABs in this file do.
+  const selection = useCallback(() => {
+    hapticSelection()
+    playTypewriter()
+  }, [hapticSelection, playTypewriter])
+  const notification = useCallback(() => {
+    hapticNotification()
+    playShutter()
+  }, [hapticNotification, playShutter])
   // Which "zone" the drag is currently sitting in, mirrored on the UI thread so fanGesture's own
   // onUpdate can tell whether anything's actually changed since the last frame without crossing to JS
   // every single frame — only an actual zone change below ever calls runOnJS. -2 is the dead zone

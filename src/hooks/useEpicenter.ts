@@ -101,6 +101,11 @@ export function useEpicenter(
   onSnapToCenter: () => void,
   onDragChange: () => void,
   onBounce: () => void,
+  // Fires the instant an epicenter is actually grabbed — longPressGesture's own onStart below, and
+  // panGesture's equivalent immediate-grab branch. Before this, both grab paths were completely
+  // silent (no haptic, no sound); index.tsx passes its own selection() here, the same click every
+  // other touch-down already gets elsewhere in the app.
+  onGrab: () => void,
   mirrorLines: number,
   bounceFriction: SharedValue<number>,
   gravity: SharedValue<number>,
@@ -536,6 +541,14 @@ export function useEpicenter(
   // reads this to decide whether it needs to run releaseTargets itself — see its own comment for why.
   const panActive = useSharedValue(false)
 
+  // Whether this touch's grab click (onGrab) has already fired — reset alongside panActive on every
+  // fresh touch-down (panGesture's own onBegin below, which always runs before either gesture's
+  // onStart per the RNGH lifecycle). longPressGesture and panGesture can both activate for the same
+  // physical touch (see longPressGesture's onEnd/panActive comment above for the release-side version
+  // of this exact scenario) — without this guard, a long press that turns into a drag would grab
+  // twice, firing onGrab (and its selection() click) once per recognizer instead of once per touch.
+  const grabFired = useSharedValue(false)
+
   // Whether the touch that started this pan landed outside GRAB_RADIUS_PX of the active target's own
   // center — decided once, in onStart, and held for the rest of the gesture (a drag that starts in the
   // outer field stays an outer-field drag even if it later sweeps back over the center, and vice versa
@@ -604,6 +617,7 @@ export function useEpicenter(
     .onBegin(() => {
       panActive.value = false
       outerFieldActive.value = false
+      grabFired.value = false
     })
     .onStart((event) => {
       panActive.value = true
@@ -643,6 +657,10 @@ export function useEpicenter(
       // actually move, interrupting this if it's still mid-flight.
       glideTargetsTo(event.x, event.y)
       runOnJS(onDragChange)()
+      if (!grabFired.value) {
+        grabFired.value = true
+        runOnJS(onGrab)()
+      }
     })
     .onUpdate((event) => {
       if (outerFieldActive.value) {
@@ -900,6 +918,10 @@ export function useEpicenter(
     .onStart((event) => {
       glideTargetsTo(event.x, event.y)
       runOnJS(onDragChange)()
+      if (!grabFired.value) {
+        grabFired.value = true
+        runOnJS(onGrab)()
+      }
     })
     .onEnd(() => {
       if (panActive.value) return

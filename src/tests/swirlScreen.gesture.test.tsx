@@ -684,7 +684,10 @@ describe('SwirlScreen gestures', () => {
     const props = getLastSpiralProps()
     expect(props.epicenterX.value).toBe(0)
     expect(props.epicenterY.value).toBe(0)
-    expect(selection).toHaveBeenCalledTimes(1)
+    // 2, not 1: one grab click from the long press's own onStart (useEpicenter.ts's grabFired guard
+    // is what keeps panGesture's onStart from firing a second one for this same touch — see its own
+    // comment), plus one release click from the snap back to center. Not a double-apply of either.
+    expect(selection).toHaveBeenCalledTimes(2)
   })
 
   it('reaches the actual screen edge even dragging through a mirrored wedge whose own correction angle is not axis-aligned', async () => {

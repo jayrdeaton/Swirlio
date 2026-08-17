@@ -29,7 +29,7 @@ import { SCREEN_EDGE_OFFSET, useDragPointPhysics } from '@/hooks/useDragPointPhy
 import { GestureTarget, useEpicenter } from '@/hooks/useEpicenter'
 import { ExtraResetFields, useLookHistory } from '@/hooks/useLookHistory'
 import { useLoopingProgress } from '@/hooks/useLoopingProgress'
-import { useRelaySound } from '@/hooks/useMechanicalSounds'
+import { useRelaySound, useShutterSound, useTypewriterSound } from '@/hooks/useMechanicalSounds'
 import { useRerollUnits } from '@/hooks/useRerollUnits'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { useSwapColors } from '@/hooks/useSwapColors'
@@ -325,7 +325,23 @@ export default function SwirlScreen() {
     setTriggerStackExpanded,
     setZoomSpeed
   } = useSwirlSettings()
-  const { medium, notification, selection } = useVibration()
+  const { medium, notification: hapticNotification, selection: hapticSelection } = useVibration()
+  const playTypewriter = useTypewriterSound()
+  const playShutter = useShutterSound()
+  // useVibration() only ever fires the haptic half of feedback — Pressable/FAB get the matching
+  // typewriter/shutter sound for free via FeedbackSoundBridge's SoundContext, but every gesture
+  // handler in this file (canvas tap, gesture-target picks, transport resets, etc.) calls
+  // selection()/notification() directly, bypassing that wiring entirely. Wrapping both once here,
+  // with the same selection->typewriter/notification->shutter mapping FeedbackSoundBridge already
+  // uses, covers every one of those call sites below without touching each individually.
+  const selection = useCallback(() => {
+    hapticSelection()
+    playTypewriter()
+  }, [hapticSelection, playTypewriter])
+  const notification = useCallback(() => {
+    hapticNotification()
+    playShutter()
+  }, [hapticNotification, playShutter])
   // Every point's onBounce callback (gravityHandle just below, plus pattern/mirror inside
   // useEpicenter) already meant "fire a haptic on every wall hit" — this adds the relay sound to
   // that same moment rather than introducing a second, parallel callback plumbed through both call
@@ -1143,7 +1159,7 @@ export default function SwirlScreen() {
   const effectiveGravityCenterX = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.x.value : withSpring(tiltX.value, TILT_EASE_SPRING)))
   const effectiveGravityCenterY = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.y.value : withSpring(tiltY.value, TILT_EASE_SPRING)))
 
-  const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, longPressGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, handleBounce, settings.mirrorLines, bounceFriction, gravity, followSpeed, effectiveGravityCenterX, effectiveGravityCenterY, activeTargets, gravityHandle, isDraggingGravity, gravityManualControl, applyPatternRotationRelease, applyMirrorRotationRelease, applyZoomRelease, applyMirrorCycleRelease, baseRotation, baseRotationPaused, mirrorProgress, mirrorPaused, mirrorRotationSign, manualPulseOffset, basePulse, basePulsePaused, foregroundCycleRate, backgroundCycleRate, minCycleRate, maxCycleRate, tiltX, tiltY, tiltEnabledShared)
+  const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, longPressGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, handleBounce, selection, settings.mirrorLines, bounceFriction, gravity, followSpeed, effectiveGravityCenterX, effectiveGravityCenterY, activeTargets, gravityHandle, isDraggingGravity, gravityManualControl, applyPatternRotationRelease, applyMirrorRotationRelease, applyZoomRelease, applyMirrorCycleRelease, baseRotation, baseRotationPaused, mirrorProgress, mirrorPaused, mirrorRotationSign, manualPulseOffset, basePulse, basePulsePaused, foregroundCycleRate, backgroundCycleRate, minCycleRate, maxCycleRate, tiltX, tiltY, tiltEnabledShared)
 
   // Drives GravityWell's particles (Spiral.tsx) — bounceFriction's own speed, full stop (see
   // gravityParticleFrictionSpeed's own comment and GRAVITY_PARTICLE_FRICTION_MIN/MAX_SPEED above).
