@@ -39,6 +39,7 @@ type TestApi = {
   setShowLabels: (enabled: boolean) => void
   setStrokeWidth: (strokeWidth: number) => void
   setTiltEnabled: (enabled: boolean) => void
+  setTriggerStackExpanded: (expanded: boolean) => void
   setZoomSpeed: (speed: number) => void
   resetSettings: () => void
 }
@@ -51,11 +52,11 @@ function requireApi(value: TestApi | null): TestApi {
 }
 
 function Probe({ onUpdate }: { onUpdate: (api: TestApi) => void }) {
-  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings } = useSwirlSettings()
+  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings } = useSwirlSettings()
 
   useEffect(() => {
-    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings })
-  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setZoomSpeed, resetSettings, settings])
+    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings })
+  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings, settings])
 
   return <Text testID='stroke'>{String(settings.strokeWidth)}</Text>
 }
@@ -1019,10 +1020,11 @@ describe('useSwirlSettings', () => {
 
   // shakeEnabled/tiltEnabled are opt-outs, not look/tuning knobs — someone who's turned off shake-to-
   // randomize or tilt warp shouldn't have Reset all silently switch them back on, mirroring
-  // audioReactiveEnabled's carve-out above. showLabels and controlsAutoHideSpeed are chrome-density/
-  // interface preferences, not look/tuning knobs either. See resetSettings's own comment in
+  // audioReactiveEnabled's carve-out above. showLabels, controlsAutoHideSpeed, and triggerStackExpanded
+  // are chrome-density/interface preferences, not look/tuning knobs either. followSpeed is interaction
+  // feel (how touch input eases), not the art itself. See resetSettings's own comment in
   // useSwirlSettings.tsx.
-  it('resetSettings leaves shakeEnabled, tiltEnabled, showLabels, and controlsAutoHideSpeed exactly as they were', async () => {
+  it('resetSettings leaves shakeEnabled, tiltEnabled, showLabels, controlsAutoHideSpeed, followSpeed, and triggerStackExpanded exactly as they were', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
@@ -1031,6 +1033,8 @@ describe('useSwirlSettings', () => {
       getApi().setTiltEnabled(false)
       getApi().setShowLabels(true)
       getApi().setControlsAutoHideSpeed(4)
+      getApi().setFollowSpeed(2)
+      getApi().setTriggerStackExpanded(false)
     })
     await waitFor(() => expect(getApi().settings.shakeEnabled).toBe(false))
 
@@ -1043,6 +1047,8 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.tiltEnabled).toBe(false)
     expect(getApi().settings.showLabels).toBe(true)
     expect(getApi().settings.controlsAutoHideSpeed).toBe(4)
+    expect(getApi().settings.followSpeed).toBe(2)
+    expect(getApi().settings.triggerStackExpanded).toBe(false)
   })
 
   // gestureTarget is a tool mode (which point a drag targets), not a look/tuning knob either — same

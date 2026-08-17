@@ -7,13 +7,16 @@ import { FAB_HEIGHT_MEDIUM, FAB_HEIGHT_SMALL } from './LabeledFab'
 import { IconOrRenderFn } from './MdIcon'
 
 // How far each fan item sits from the primary FAB's own center once open, and how wide a wedge the
-// whole fan sweeps — biased toward straight up rather than a full semicircle, but wider than it would
-// need to be if the neighboring FABs stayed put: they don't (see OnScreenControls' own fanFlanksStyle),
-// fading out of the way whenever the fan opens, so there's the whole row's width to spread into rather
-// than just the gap between two still-visible buttons. Tuned by eye, not derived from anything — expect
-// this to move once it's actually visible on a real device.
+// whole fan sweeps — a full semicircle rather than a narrower arc biased toward straight up: the
+// neighboring FABs don't stay put (see OnScreenControls' own fanFlanksStyle), fading out of the way
+// whenever the fan opens, so there's no reason to hold back from the whole upper half of the circle.
+// At 180°, the first and last entries in GESTURE_TARGET_ORDER land exactly due left/right (see
+// fanItemOffset's own angleDeg below) rather than just leaning that direction, which also makes the
+// fixed spatial layout easier to learn by feel — useful now that OnScreenControls' own fanGesture can
+// be driven without looking (see its own hit-layer comment). FAN_RADIUS is tuned by eye, not derived
+// from anything — expect it to move once it's actually visible on a real device.
 const FAN_RADIUS = 92
-const FAN_ANGLE_SPAN_DEG = 130
+const FAN_ANGLE_SPAN_DEG = 180
 // Exported for OnScreenControls' own fanFlanksStyle, which fades the transport row's other two flanks
 // out in step with these items fanning open — same duration either way, one consistent motion.
 export const FAN_DURATION_MS = 220
@@ -34,6 +37,7 @@ type GestureFanItemProps = {
   open: boolean
   dx: number
   dy: number
+  onPress: () => void
 }
 
 // One per GESTURE_TARGET_ORDER entry (see OnScreenControls), each a real component (not a shared style
@@ -47,22 +51,26 @@ type GestureFanItemProps = {
 // (open: false) sits exactly on top of the primary FAB (dx/dy both animate back to 0) rather than just
 // fading out in place, so it visibly retracts into the button it came from.
 //
-// Purely a visual now, no onPress of its own: picking a target is a single press-drag-release on the
-// primary FAB (see OnScreenControls' own fanGesture), which hit-tests against this same dx/dy live as
-// the finger moves rather than waiting for a discrete tap on whichever wedge is currently fanned out —
-// pointerEvents='none' unconditionally (not just while closed) is what lets that drag sweep straight
-// through a wedge's own pixels to the cluster's GestureDetector underneath instead of this wedge's own
-// FAB claiming the touch. `active` still comes straight from activeTargets, so once the drag calls
-// onSelectGestureTarget mid-gesture, whichever wedge is currently under the finger lights up on its
-// own — no separate "hovered" state needed here.
-export function GestureFanItem({ icon, testID, active, open, dx, dy }: GestureFanItemProps) {
+// Two ways to pick a target now, not one: dragging the primary FAB's own press-drag-release straight
+// onto a wedge (see OnScreenControls' own fanGesture) live-selects it without this FAB's onPress ever
+// firing — that drag already owns the touch from wherever it started, so it never reaches down into
+// whatever's now visually underneath the finger. But a *second*, separate touch landing directly on an
+// already-fanned-out wedge is exactly what a real onPress here is for: open the fan with a plain tap
+// (leaving it open — see OnScreenControls' own wasAlreadyOpenRef), then tap the one you actually want,
+// the same two-step pick this had before the drag existed, still worth keeping alongside it for a more
+// deliberate, look-first pick. pointerEvents only turns on while `open`, matching that: closed, there's
+// nothing here to tap yet, and a stray touch on this wedge's own resting position (right on top of the
+// primary FAB — see fanItem's own style) would otherwise compete with that FAB's own gesture for it.
+// `active` still comes straight from activeTargets, so once either path calls onSelectGestureTarget,
+// whichever wedge is now the live target lights up on its own — no separate "hovered" state needed here.
+export function GestureFanItem({ icon, testID, active, open, dx, dy, onPress }: GestureFanItemProps) {
   const style = useAnimatedStyle(() => ({
     opacity: withTiming(open ? 1 : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }),
     transform: [{ translateX: withTiming(open ? dx : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }) }, { translateY: withTiming(open ? dy : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }) }]
   }))
   return (
-    <Animated.View testID={`${testID}-fan-item`} style={[styles.fanItem, style]} pointerEvents='none'>
-      <GlassToggleFab icon={icon} testID={testID} active={active} />
+    <Animated.View testID={`${testID}-fan-item`} style={[styles.fanItem, style]} pointerEvents={open ? 'auto' : 'none'}>
+      <GlassToggleFab icon={icon} testID={testID} active={active} onPress={onPress} />
     </Animated.View>
   )
 }

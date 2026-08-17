@@ -174,7 +174,10 @@ const PINCH_SCALE_TO_TIGHTNESS_SCALE = (MAX_TIGHTNESS - MIN_TIGHTNESS) / 1.5
 // 0 and out the other side, rather than a second squeeze right after the first crossed 0 reading as
 // "shrink the now-negative value" and walking straight back toward 0 instead of continuing on — see
 // GRAVITY_ZERO_STICKY_ZONE below for what makes landing exactly on 0 along the way actually practical
-// by feel, and reverseGravity for the other, one-tap way to flip polarity outright. Calibrated the same
+// by feel, and reverseGravity for the other, one-tap way to flip polarity outright — native's own
+// gravity-mode slotA is free for tilt control precisely because this pinch already covers polarity
+// there; reverseGravity itself only ever renders as web's fallback for that same slot (see
+// OnScreenControls' own gravity-mode slotA/slotB). Calibrated the same
 // way as PINCH_SCALE_TO_TIGHTNESS_SCALE above: a full, arm's-length pinch spread or squeeze sweeps
 // close to the whole [0, MAX_GRAVITY] magnitude range on either side of 0. Same untestable-without-a-
 // device disclaimer as every other pinch-derived scale above.
@@ -896,11 +899,14 @@ export default function SwirlScreen() {
   // that needs UI-thread reactivity.
   const gravityMarkerVisible = settings.gravityMarkerVisible
 
-  // Gravity mode's other transport button (see OnScreenControls) — a plain sign flip. Rendered as a
+  // Gravity mode's own web-only flank button (see OnScreenControls) — a plain sign flip. Rendered as a
   // stateful toggle reflecting current polarity, not a one-shot action (see OnScreenControls' own
-  // reverseGravity comment). Requires MIN_GRAVITY to reach negative — see its own comment in
-  // useSwirlSettings.tsx — everything downstream (the physics, the marker's magnitude-based sizing)
-  // already handles a negative value correctly regardless of how it got there.
+  // reverseGravity comment). Native doesn't need this: the gravity-targeting pinch already flips the
+  // sign live (see PINCH_SCALE_TO_GRAVITY_SCALE's own comment), so that slot goes to tilt control
+  // there instead — this button only ever renders as web's fallback, where tilt has nothing to
+  // control. Requires MIN_GRAVITY to reach negative — see its own comment in useSwirlSettings.tsx —
+  // everything downstream (the physics, the marker's magnitude-based sizing) already handles a
+  // negative value correctly regardless of how it got there.
   const reverseGravity = useCallback(() => {
     pushHistory()
     setGravity(-settings.gravity)
@@ -1181,14 +1187,16 @@ export default function SwirlScreen() {
   // branch), reachable without opening that sheet at all: every persisted look/tuning setting (colors,
   // stroke width, dash style, and so on) via
   // resetSettings — which already carries over audioReactiveEnabled/shakeEnabled/showLabels/
-  // tiltEnabled rather than resetting them (see resetSettings' own comment), and never touches
+  // tiltEnabled/followSpeed/controlsAutoHideSpeed/triggerStackExpanded rather than resetting them (see
+  // resetSettings' own comment: 'Reset all' is scoped to visual items, not device-capability toggles,
+  // chrome/interface preferences, or interaction feel), and never touches
   // themeSettings (appearance/blur), a separate persisted store this screen doesn't own at all.
   // pushHistory first so a "back" after an accidental long-hold restores the whole look this just
   // wiped, in one step — same as every other hot key, see pushHistory's own comment. Passes
   // captureExtraResetFields() along too (no other pushHistory caller does): resetSettings resets far
   // more of SwirlSettings than Look's own 16 fields cover — the speed sliders, fixedSpacing,
-  // micSensitivity, triggerStackExpanded — so without this, "back" would restore the *look* correctly
-  // but silently leave those extra fields stuck at their just-reset defaults.
+  // micSensitivity — so without this, "back" would restore the *look* correctly but silently leave
+  // those extra fields stuck at their just-reset defaults.
   const resetAllSettings = useCallback(() => {
     pushHistory(captureExtraResetFields())
     resetSettings()

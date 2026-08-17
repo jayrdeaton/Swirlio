@@ -50,7 +50,8 @@ function GravityParticle({ index, x, y, gravity, gravityParticleProgress, holeRa
   // around it. gravity.value >= 0 (pull) counts this particle down from the hole's edge to its center —
   // falling in. Negative (push/repel) counts it up from the center to the hole's edge — emanating out.
   // Reading gravity.value directly here (rather than some pre-computed "pulling" prop) is what makes a
-  // sign flip (the reverse-gravity control) take effect on the very next frame, live.
+  // sign flip (the reverse-gravity control, or the gravity-targeting pinch sweeping through 0 — see
+  // index.tsx's own PINCH_SCALE_TO_GRAVITY_SCALE) take effect on the very next frame, live.
   const orbitRadius = useDerivedValue(() => gravityParticleRadius(phase.value, 0, holeRadius.value, gravity.value >= 0))
   const cx = useDerivedValue(() => x.value + Math.cos(angleRad) * orbitRadius.value)
   const cy = useDerivedValue(() => y.value + Math.sin(angleRad) * orbitRadius.value)

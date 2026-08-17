@@ -4917,10 +4917,12 @@ describe('SwirlScreen gestures', () => {
     // own 16 fields cover — rotationSpeed among them. A first version of onResetAllSettings only ever
     // pushed a plain captureLook() entry, so "back" restored the look correctly but silently left
     // rotationSpeed (and the other ExtraResetFields — zoomSpeed, mirrorRotationSpeed,
-    // backgroundCycleSpeed, foregroundCycleSpeed, followSpeed, fixedSpacing, micSensitivity,
-    // triggerStackExpanded) stuck at their just-reset defaults, contradicting the button's own "restore
-    // the whole prior look" promise. pushHistory(captureExtraResetFields()) is what fixes this — this
-    // test would fail against the old plain-pushHistory() version.
+    // backgroundCycleSpeed, foregroundCycleSpeed, fixedSpacing, micSensitivity) stuck at their
+    // just-reset defaults, contradicting the button's own "restore the whole prior look" promise.
+    // pushHistory(captureExtraResetFields()) is what fixes this — this test would fail against the old
+    // plain-pushHistory() version. followSpeed/triggerStackExpanded aren't part of this list: resetSettings
+    // carries both over rather than resetting them (see its own comment), so there's nothing for undo to
+    // restore.
     it("onResetAllSettings's undo entry also restores settings outside Look's own 16 fields, like rotationSpeed", async () => {
       mockSettings({ rotationSpeed: 4 })
       await renderScreen()

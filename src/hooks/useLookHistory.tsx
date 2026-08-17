@@ -30,13 +30,16 @@ type Look = Pick<SwirlSettings, 'backgroundColors' | 'bounceFriction' | 'cropRad
 
 // resetAllSettings (see index.tsx) is the one undoable action broad enough that Look's own 16 fields
 // aren't enough to restore what it touches: it delegates to resetSettings, which resets nearly every
-// SwirlSettings field, including several — the speed sliders, fixedSpacing, micSensitivity, the
-// trigger-stack chrome preference — that Look deliberately leaves out (see Look's own comment: a plain
-// hot key or randomize/tweak's own undo entry should never surprise-revert a speed slider a manual
-// drag just set). Rather than widen Look itself for everyone (which would reintroduce exactly that
-// surprise-revert risk for every other push), only resetAllSettings' own entry additionally carries
-// these — see captureExtraResetFields/pushHistory below for how.
-export type ExtraResetFields = Pick<SwirlSettings, 'backgroundCycleSpeed' | 'fixedSpacing' | 'followSpeed' | 'foregroundCycleSpeed' | 'micSensitivity' | 'mirrorRotationSpeed' | 'rotationSpeed' | 'triggerStackExpanded' | 'zoomSpeed'>
+// SwirlSettings field, including several — the speed sliders, fixedSpacing, micSensitivity — that Look
+// deliberately leaves out (see Look's own comment: a plain hot key or randomize/tweak's own undo entry
+// should never surprise-revert a speed slider a manual drag just set). followSpeed and
+// triggerStackExpanded aren't among them despite being reset-able look/tuning-shaped fields elsewhere in
+// SwirlSettings: resetSettings itself carries both over rather than resetting them (interaction feel and
+// a chrome preference, not the art — see resetSettings' own comment in useSwirlSettings.tsx), so there's
+// nothing here for an undo entry to restore. Rather than widen Look itself for everyone (which would
+// reintroduce exactly that surprise-revert risk for every other push), only resetAllSettings' own entry
+// additionally carries these — see captureExtraResetFields/pushHistory below for how.
+export type ExtraResetFields = Pick<SwirlSettings, 'backgroundCycleSpeed' | 'fixedSpacing' | 'foregroundCycleSpeed' | 'micSensitivity' | 'mirrorRotationSpeed' | 'rotationSpeed' | 'zoomSpeed'>
 type LookHistoryEntry = Look & Partial<ExtraResetFields>
 
 const LOOK_HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
@@ -52,7 +55,7 @@ function isValidLookColorList(value: unknown): value is string[] {
 // entry is dropped from the array entirely here rather than partially trusted. Range validation
 // (cropRadius in bounds, mirrorLines an integer in range, and so on) isn't repeated here either:
 // restoreLook's own setters (setCropRadius, setMirrorLines, ...) already clamp everything on the way
-// in, the same safety net every other caller of those setters already relies on. The 9
+// in, the same safety net every other caller of those setters already relies on. The 7
 // ExtraResetFields are the one part of a LookHistoryEntry that's genuinely optional (only
 // resetAllSettings' own entries carry them, see its own comment) — validated as "absent, or present
 // with the right type" rather than required, so a plain Look-only entry from any other push still
@@ -81,12 +84,10 @@ function isValidLookHistoryEntry(value: unknown): value is LookHistoryEntry {
     typeof candidate.tightness === 'number' &&
     (candidate.backgroundCycleSpeed === undefined || typeof candidate.backgroundCycleSpeed === 'number') &&
     (candidate.fixedSpacing === undefined || typeof candidate.fixedSpacing === 'boolean') &&
-    (candidate.followSpeed === undefined || typeof candidate.followSpeed === 'number') &&
     (candidate.foregroundCycleSpeed === undefined || typeof candidate.foregroundCycleSpeed === 'number') &&
     (candidate.micSensitivity === undefined || typeof candidate.micSensitivity === 'number') &&
     (candidate.mirrorRotationSpeed === undefined || typeof candidate.mirrorRotationSpeed === 'number') &&
     (candidate.rotationSpeed === undefined || typeof candidate.rotationSpeed === 'number') &&
-    (candidate.triggerStackExpanded === undefined || typeof candidate.triggerStackExpanded === 'boolean') &&
     (candidate.zoomSpeed === undefined || typeof candidate.zoomSpeed === 'number')
   )
 }
@@ -119,7 +120,7 @@ function sanitizeLookHistory(rawValue: string): LookHistoryEntry[] {
 // every field captureLook/restoreLook/captureExtraResetFields touch already lives on that one context,
 // so there's nothing for index.tsx to thread through by hand.
 export function useLookHistory() {
-  const { settings, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setTriggerStackExpanded, setZoomSpeed } = useSwirlSettings()
+  const { settings, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
 
   const captureLook = useCallback(
     (): Look => ({
@@ -149,12 +150,10 @@ export function useLookHistory() {
     (): ExtraResetFields => ({
       backgroundCycleSpeed: settings.backgroundCycleSpeed,
       fixedSpacing: settings.fixedSpacing,
-      followSpeed: settings.followSpeed,
       foregroundCycleSpeed: settings.foregroundCycleSpeed,
       micSensitivity: settings.micSensitivity,
       mirrorRotationSpeed: settings.mirrorRotationSpeed,
       rotationSpeed: settings.rotationSpeed,
-      triggerStackExpanded: settings.triggerStackExpanded,
       zoomSpeed: settings.zoomSpeed
     }),
     [settings]
@@ -184,15 +183,13 @@ export function useLookHistory() {
       // default.
       if (look.backgroundCycleSpeed !== undefined) setBackgroundCycleSpeed(look.backgroundCycleSpeed)
       if (look.fixedSpacing !== undefined) setFixedSpacing(look.fixedSpacing)
-      if (look.followSpeed !== undefined) setFollowSpeed(look.followSpeed)
       if (look.foregroundCycleSpeed !== undefined) setForegroundCycleSpeed(look.foregroundCycleSpeed)
       if (look.micSensitivity !== undefined) setMicSensitivity(look.micSensitivity)
       if (look.mirrorRotationSpeed !== undefined) setMirrorRotationSpeed(look.mirrorRotationSpeed)
       if (look.rotationSpeed !== undefined) setRotationSpeed(look.rotationSpeed)
-      if (look.triggerStackExpanded !== undefined) setTriggerStackExpanded(look.triggerStackExpanded)
       if (look.zoomSpeed !== undefined) setZoomSpeed(look.zoomSpeed)
     },
-    [setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setTriggerStackExpanded, setZoomSpeed]
+    [setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed]
   )
 
   const [lookHistory, setLookHistory] = useState<LookHistoryEntry[]>([])

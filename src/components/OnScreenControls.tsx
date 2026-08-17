@@ -1,7 +1,7 @@
 import { BlurView, useBlur } from '@rific/auto-paper'
 import { FAB, useHoldToRepeat, useHoldToRepeatByKey, useVibration } from '@rific/feedback-press'
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { Platform, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Portal, useTheme } from 'react-native-paper'
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
@@ -38,10 +38,11 @@ const TRANSPORT_LONG_PRESS_MS = 400
 const FAN_CENTER_RADIUS_PX = FAB_HEIGHT_MEDIUM / 2
 // How close a drag has to land to one wedge's own resting dx/dy (see GestureFanItem's fanItemOffset)
 // to count as aiming at it. Comfortably bigger than a wedge's own visual footprint (FAB_HEIGHT_SMALL)
-// so it doesn't take pixel-perfect aim, but still well under half the ~68px gap between adjacent
-// wedges at FAN_RADIUS/4 items, so neighboring wedges don't fight over the same touch. Retune by feel
-// on a real device, same disclaimer as every other gesture-calibration constant in this codebase.
-const FAN_CAPTURE_RADIUS_PX = 32
+// so it doesn't take pixel-perfect aim, but still under half the ~92px gap between adjacent wedges at
+// FAN_RADIUS/4 items spread across the full 180° (see GestureFanItem's own FAN_ANGLE_SPAN_DEG), so
+// neighboring wedges don't fight over the same touch. Retune by feel on a real device, same disclaimer
+// as every other gesture-calibration constant in this codebase.
+const FAN_CAPTURE_RADIUS_PX = 42
 // How fast Cycle shape and Forward's own long-presses (see useHoldToRepeat) keep stepping for as long
 // as they're held, once the initial TRANSPORT_LONG_PRESS_MS hold has already fired the first step via
 // onLongPress — a "keep going while held" effect rather than the single step every other long-press
@@ -189,11 +190,15 @@ type OnScreenControlsProps = {
   onCycleLineType: () => void
   onCycleSides: () => void
   onResetLineToSolid: () => void
-  // Gravity mode's own flank button — rendered as a stateful toggle (GlassToggleFab), not a one-shot
-  // action, so it needs its current state as well as an onPress. gravityRepelling is just
-  // settings.gravity < 0. The marker-visibility toggle that used to sit alongside this one moved into
-  // the gravity group's own top sheet (see ControlGroupTopSheetContent) — reachable regardless of
-  // gesture mode now, rather than mode-scoped like everything else on this row.
+  // Gravity mode's own slotA on web only — everywhere else slotA is the tilt-control toggle instead
+  // (see the activeTargets.has('gravity') branch further down), since tilt has no on-canvas gesture
+  // equivalent of its own to fall back on there. Web has no DeviceMotion (see
+  // useTiltGravityCenter.ts), so tilt control itself is never reachable there at all — this reverse-
+  // push/pull toggle is what fills that slot instead, a plain sign flip. Rendered as a stateful
+  // toggle reflecting current polarity, not a one-shot action. gravityRepelling is just
+  // settings.gravity < 0. Native still has a full, gesture-driven way to flip polarity too (the
+  // gravity-targeting pinch sweeping through 0 — see index.tsx's own PINCH_SCALE_TO_GRAVITY_SCALE),
+  // which is exactly why native's own slotA is free for tilt control instead of needing this button.
   gravityRepelling: boolean
   onReverseGravity: () => void
   // The collapse toggle's own long-press bonus while expanded (chevron-up) — see its own onLongPress
@@ -224,6 +229,10 @@ type OnScreenControlsProps = {
 // hiding/revealing transitions smoothly instead of popping instantly — see EdgeRevealZones for how it
 // comes back once fully hidden and no longer touchable.
 export function OnScreenControls({ visible, activeTargets, backDisabled, frozen, onToggleFrozen, onRecenterEverything, gestureFanOpen, onGestureFanOpenChange, onSelectGestureTarget, onRandomizeGestureTarget, onRecenter, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, onAlternateBackground, onCycleBackgroundTwoTone, onRandomizeForeground, onGrowForeground, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, gravityRepelling, onReverseGravity, onHideControls }: OnScreenControlsProps) {
+  // Recomputed every render (not a module-level constant) purely so tests can flip Platform.OS and
+  // actually exercise both of gravity mode's slotA branches below — see useAudioReactive.test.ts for
+  // the same Platform.OS-mutation pattern. Cheap enough that per-render cost was never a concern.
+  const isWeb = Platform.OS === 'web'
   const insets = useSafeAreaInsets()
   const { colors, roundness } = useTheme()
   const blurEnabled = useBlur()
@@ -275,7 +284,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // useSwirlSettings.tsx's own triggerStackExpanded comment) rather than plain useState, so a user who
   // collapses the stack once has it stay collapsed on the next launch too, not just for the rest of
   // this session.
-  const { settings, setCropShaped, setGravityMarkerVisible, setHoleShaped, setTriggerStackExpanded } = useSwirlSettings()
+  const { settings, setCropShaped, setGravityMarkerVisible, setHoleShaped, setTiltEnabled, setTriggerStackExpanded } = useSwirlSettings()
   const siblingsVisible = settings.triggerStackExpanded
 
   // Cycle line type/Cycle shape's own icons preview the *current* dashStyle/pattern (see the 'pattern'
@@ -694,7 +703,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
         {[{ group: 'settings' as const, icon: 'cog', testID: 'fab-cog' }, ...GROUP_TRIGGERS].map(({ group, icon, testID }) => {
           // Only the trigger for whichever group is actually showing gets the "on" treatment, the same
           // solid/glass-scrim on/off language every other GlassToggleFab in this file uses (gravity
-          // mode's marker-pinned/reverse-gravity toggles) — every other trigger reads as off, including
+          // mode's marker-pinned/tilt-enabled toggles) — every other trigger reads as off, including
           // all six when no sheet is open at all. Solid
           // here isn't a neutral/default look, so it's reserved for the one FAB that's actually toggled
           // on.
@@ -742,9 +751,11 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     slotA = <FAB testID='fab-alternate-background' icon={resolveIcon('circle-half-full')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onAlternateBackground} onLongPress={cycleBackgroundTwoToneHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={cycleBackgroundTwoToneHold.onPressOut} />
     // Right (foreground): tap picks one fresh random hue; long-press-and-hold keeps appending another
     // on top of whatever's there — the "rainbow soup" half of the pair (see index.tsx's own
-    // randomizeForeground/growForeground). Same 'dice-multiple' glyph the Colors sheet's own Randomize
-    // button already uses (see ControlGroupTopSheetContent), so both read as the same action.
-    slotB = <FAB testID='fab-randomize-foreground' icon={resolveIcon('dice-multiple')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onRandomizeForeground} onLongPress={growForegroundHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={growForegroundHold.onPressOut} />
+    // randomizeForeground/growForeground). 'palette' rather than the Colors sheet's own 'dice-multiple'
+    // Randomize glyph (ControlGroupTopSheetContent) — this row already has a dedicated dice elsewhere in
+    // the fan, so a second dice here read as ambiguous about which of the many randomizable things it
+    // touched; a palette glyph reads as color specifically.
+    slotB = <FAB testID='fab-randomize-foreground' icon={resolveIcon('palette')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onRandomizeForeground} onLongPress={growForegroundHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={growForegroundHold.onPressOut} />
   } else if (activeTargets.has('pattern')) {
     // Cycle shape reuses index.tsx's existing nextPattern (already reachable via a two-finger canvas
     // tap); cycle line type is the only on-canvas way to reach dash style at all — 'line' has no
@@ -795,13 +806,26 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     // Both real toggles (GlassToggleFab), not one-shot actions — each needs to show its current
     // state, not just fire an action. Distinct icons from gravity's own magnet glyph (already shown
     // on the primary FAB here) for the same reason cycle shape/line type avoid the spiral above.
-    // slotA's marker-visibility toggle also has a copy in the gravity group's own top sheet now (see
+    //
+    // slotA is platform-dependent: tilt control everywhere it can actually do something, falling
+    // back to the polarity flip on web, where tilt never can (see isWeb's own comment and
+    // useTiltGravityCenter.ts's Platform.OS === 'web' bail-out) — an empty slot there would waste the
+    // spot on nothing. Native doesn't need the polarity fallback: it already has a full, gesture-
+    // driven way to flip the sign (the gravity-targeting pinch sweeping through 0 — see index.tsx's
+    // own PINCH_SCALE_TO_GRAVITY_SCALE/GRAVITY_ZERO_STICKY_ZONE), so tilt control gets the slot there
+    // instead of a redundant second way to do the same flip. Same icon/setting as the Tilt control
+    // toggle in the gravity group's own top sheet (see ControlGroupTopSheetContent) — reachable
+    // regardless of gesture mode there, unlike this one, which only ever renders while gravity is the
+    // active target — but both read/write the exact same persisted tiltEnabled setting, so either one
+    // moves the other.
+    slotA = isWeb ? <GlassToggleFab icon='plus-minus-variant' testID='fab-reverse-gravity' active={gravityRepelling} onPress={onReverseGravity} /> : <GlassToggleFab icon='axis-arrow' testID='fab-tilt-enabled' active={settings.tiltEnabled} onPress={() => setTiltEnabled(!settings.tiltEnabled)} />
+    // slotB — marker-visibility, moved over from its old slotA spot now that slotA is tilt control (or
+    // its web fallback). Also has a copy in the gravity group's own top sheet now (see
     // ControlGroupTopSheetContent) — reachable regardless of gesture mode there, unlike this one,
     // which only ever renders while gravity is the active target — but both read/write the exact same
     // persisted gravityMarkerVisible setting (see useSwirlSettings.tsx), so either one moves the
     // other and neither can drift out of sync with it.
-    slotA = <GlassToggleFab icon='eye' testID='fab-gravity-marker-visible' active={settings.gravityMarkerVisible} onPress={() => setGravityMarkerVisible(!settings.gravityMarkerVisible)} />
-    slotB = <GlassToggleFab icon='plus-minus-variant' testID='fab-reverse-gravity' active={gravityRepelling} onPress={onReverseGravity} />
+    slotB = <GlassToggleFab icon='eye' testID='fab-gravity-marker-visible' active={settings.gravityMarkerVisible} onPress={() => setGravityMarkerVisible(!settings.gravityMarkerVisible)} />
   } else if (activeTargets.has('crop')) {
     // Same shape as the gravity branch above: two real toggles, not one-shot actions — cropRadius/
     // holeRadius themselves live on this target's pinch/twist instead (see index.tsx's own
@@ -841,64 +865,11 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
             {/* Slot A — see slotA/slotB's own comment above for the full mode table this renders from. */}
             {slotA}
           </Animated.View>
-          {/* The row's primary/biggest FAB (medium, centered) — switching what a drag/twist controls
-          is the thing you're actually doing most of the time in this app. Pressing down still fans the
-          other targets out in an arc above it (see GestureFanItem) immediately, the same tap-to-open
-          this always did — a plain press-and-release with no drag and no hold (handleFanFinalize's own
-          wasAlreadyOpenRef branch) leaves it open exactly like the old onPress toggle always did too,
-          rather than snapping shut the instant a quick tap lifts. Dragging onto a wedge is what's new:
-          it live-switches activeTargets to it the instant the finger crosses in (fanGesture's own
-          onUpdate, above), and releasing there commits it and closes — no separate "confirm" tap needed
-          once you're actually dragging. A fan (rather than cycling through targets one at a time) is what
-          makes this reach any of them in a single motion regardless of count — cycling stopped scaling
-          once gravity brought the option count to four, and more are coming (particles, camera). Dragging
-          back off a wedge without releasing reverts the live preview to whatever was active before this
-          gesture started (see fanGesture's own startTargetRef), so sweeping through on the way to
-          somewhere else — or changing your mind — doesn't leave you on whatever you happened to pass
-          over; releasing from there falls through to the same "leave it open" tap behavior as never
-          having dragged at all. Holding still — either right on this FAB, or on a wedge once the drag's
-          landed on one — arms a bonus after TRANSPORT_LONG_PRESS_MS: recenter (onRecenter) at the center,
-          randomize that mode (onRandomizeGestureTarget) on a wedge, the same tap/hold-does-something-else
-          convention every other FAB in this file already uses, just reached through this drag instead of
-          a second press — either one closes the fan itself, same as a wedge pick landing does.
-          gestureFanOpen is lifted up to index.tsx (see its own prop comment) so opening the fan also
-          suspends the idle auto-hide timer — picking a target shouldn't have the whole row fade out from
-          underneath you mid-pick.
-          The FAB itself renders inert (pointerEvents='none', no onPress/onLongPress of its own) —
-          fanGesture attached to the cluster below is what actually owns every touch here now, hit-
-          testing against the drag's own translation rather than needing a Pressable under the finger
-          for every wedge. icon is always the one active target's own icon — activeTargets is always
-          exactly one entry (see slotA/slotB's own comment) — so it's always a live summary of whatever
-          this drag has (or hasn't) switched to, not just whatever was last explicitly picked.
-          testID is a fixed 'fab-target' rather than left to derive from the icon: GESTURE_TARGET_ICONS'
-          own 'pattern' entry renders the exact same PatternIcon closure shape as the Pattern group
-          trigger above (see GROUP_TRIGGERS), so anything deriving an identity from the icon prop alone
-          can't tell the two apart once this FAB is showing 'pattern' too — a fixed testID sidesteps that
-          regardless of which icon is currently showing. */}
-          <GestureDetector gesture={fanGesture}>
-            {/* collapsable={false} keeps this View from being flattened out of the native view tree,
-            the same reason index.tsx's own canvas wrapper needs it (see its own comment) — without it,
-            a GestureDetector whose only child renders nothing interactive of its own is exactly what
-            view-flattening optimizes away on native, leaving GestureDetector with no real view left to
-            attach its gesture recognizer to. */}
-            <View testID='gesture-target-cluster' collapsable={false} style={styles.gestureTargetCluster}>
-              {GESTURE_TARGET_ORDER.map((target, index) => {
-                const { dx, dy } = fanItemOffset(index, GESTURE_TARGET_ORDER.length)
-                return <GestureFanItem key={target} icon={GESTURE_TARGET_ICONS[target]} testID={`fab-target-${target}`} active={activeTargets.has(target)} open={gestureFanOpen} dx={dx} dy={dy} />
-              })}
-              <View pointerEvents='none'>
-                <FAB testID='fab-target' icon={resolveIcon(GESTURE_TARGET_ICONS[[...activeTargets][0]])} size='medium' color={solidFabColor} style={[solidFabStyle, solidFabSizeMedium]} />
-              </View>
-              {/* The real hit target — on web, react-native-paper's FAB renders its own inner container
-              with pointer-events explicitly reset to 'auto' regardless of an ancestor's 'none' (a plain
-              wrapper doesn't override that once a descendant re-asserts its own value), so a touch
-              landing on the FAB above would otherwise be claimed by that inner container and never reach
-              this cluster's own GestureDetector at all. A dedicated, topmost, purely transparent layer —
-              painted last, so it wins hit-testing for this whole area regardless of what pointer-events
-              value anything underneath it ends up with — sidesteps that instead of depending on it. */}
-              <View testID='fab-target-hit-layer' style={StyleSheet.absoluteFill} />
-            </View>
-          </GestureDetector>
+          {/* A same-sized, non-interactive placeholder rather than nothing — the real primary FAB/fan
+          now renders in its own independent overlay further down (see gestureTargetClusterOverlay's own
+          comment for why), but this row's flex layout still needs *something* this size between the two
+          flanks to keep them exactly as far apart as they've always been. */}
+          <View style={styles.gestureTargetCluster} pointerEvents='none' />
           {/* Grouped with forward into its own row for the same fanFlanksStyle reason as the back/slot-A
           flank above. */}
           <Animated.View testID='transport-row-flank-right' style={[styles.transportRowFlank, fanFlanksStyle]} pointerEvents={gestureFanOpen ? 'none' : 'auto'}>
@@ -917,6 +888,69 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
             <FAB testID='fab-skip-next' icon={resolveIcon('skip-next')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onGoForward} onLongPress={goForwardBatchHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={goForwardBatchHold.onPressOut} />
           </Animated.View>
         </Animated.View>
+      </Animated.View>
+
+      {/* The primary FAB/fan's real home now — deliberately NOT nested inside on-screen-controls-root
+      above, so switching modes stays possible even while the whole rest of the row is hidden (idle
+      auto-hide, or an explicit hide). pointerEvents='none' on a parent blocks its *entire* subtree on
+      native, with no way for a descendant to opt back in the way fab-target-hit-layer's own comment
+      documents doing on web — the only reliable, cross-platform way to keep just this one region
+      reachable regardless of `visible` is to not be a descendant of the thing gating on it at all. Still
+      fades its own opacity in step with visible/anySheetVisible (animatedStyle/sheetFadeStyle, the same
+      two every other piece of this screen already uses) — pointerEvents is what's decoupled here, not
+      the look of it. That's what makes the press-drag-release pick (fanGesture, below — see its own
+      comment) usable "blind": a full press-drag-release starting right here still works with nothing on
+      screen, reading the fixed spatial layout by feel (see GestureFanItem's own FAN_ANGLE_SPAN_DEG
+      comment) with the haptic tick handleFanZoneChanged fires on every wedge crossing as the only
+      feedback. The other way to pick — open with a plain tap, then a second, separate tap directly on
+      the wedge you want (see GestureFanItem's own onPress) — still needs the fan actually visible to
+      aim at, so it only ever works while `visible` is true; adrift while hidden, it degrades gracefully
+      to just the drag. Positioned by centering this single child in
+      a full-width row exactly the way styles.transportRow's own justifyContent: 'center' already centers
+      the placeholder above among its two flanks — reliable without having to replicate their width,
+      since slotA/slotB always render exactly one small FAB each regardless of activeTargets (see their
+      own comment), so the flanks are always symmetric and the placeholder already sits at true screen-
+      center. anySheetVisible still blocks it, same as the row above — an open settings sheet is a
+      separate concern from "hidden," and this was never meant to stay reachable underneath one. */}
+      <Animated.View testID='gesture-target-cluster-overlay' style={[styles.transportRow, animatedStyle, sheetFadeStyle, { bottom: insets.bottom + FAB_EDGE_MARGIN }]} pointerEvents={anySheetVisible ? 'none' : 'box-none'}>
+        <GestureDetector gesture={fanGesture}>
+          {/* collapsable={false} keeps this View from being flattened out of the native view tree, the
+          same reason index.tsx's own canvas wrapper needs it (see its own comment) — without it, a
+          GestureDetector whose only child renders nothing interactive of its own is exactly what
+          view-flattening optimizes away on native, leaving GestureDetector with no real view left to
+          attach its gesture recognizer to. */}
+          <View testID='gesture-target-cluster' collapsable={false} style={styles.gestureTargetCluster}>
+            {GESTURE_TARGET_ORDER.map((target, index) => {
+              const { dx, dy } = fanItemOffset(index, GESTURE_TARGET_ORDER.length)
+              return (
+                <GestureFanItem
+                  key={target}
+                  icon={GESTURE_TARGET_ICONS[target]}
+                  testID={`fab-target-${target}`}
+                  active={activeTargets.has(target)}
+                  open={gestureFanOpen}
+                  dx={dx}
+                  dy={dy}
+                  onPress={() => {
+                    onSelectGestureTarget(target)
+                    onGestureFanOpenChange(false)
+                  }}
+                />
+              )
+            })}
+            <View pointerEvents='none'>
+              <FAB testID='fab-target' icon={resolveIcon(GESTURE_TARGET_ICONS[[...activeTargets][0]])} size='medium' color={solidFabColor} style={[solidFabStyle, solidFabSizeMedium]} />
+            </View>
+            {/* The real hit target — on web, react-native-paper's FAB renders its own inner container
+            with pointer-events explicitly reset to 'auto' regardless of an ancestor's 'none' (a plain
+            wrapper doesn't override that once a descendant re-asserts its own value), so a touch landing
+            on the FAB above would otherwise be claimed by that inner container and never reach this
+            cluster's own GestureDetector at all. A dedicated, topmost, purely transparent layer — painted
+            last, so it wins hit-testing for this whole area regardless of what pointer-events value
+            anything underneath it ends up with — sidesteps that instead of depending on it. */}
+            <View testID='fab-target-hit-layer' style={StyleSheet.absoluteFill} />
+          </View>
+        </GestureDetector>
       </Animated.View>
 
       {anySheetVisible && (
@@ -942,10 +976,12 @@ const styles = StyleSheet.create({
     position: 'absolute'
   },
   // Sized to exactly the primary FAB's own medium footprint, not the fan's spread — the fan items
-  // themselves escape these bounds via transform (see fanItem above), which layout doesn't account
-  // for, so this only needs to be big enough for the primary FAB sitting inside it, not the fan.
-  // pointerEvents='box-none' on the View that uses this (not baked in here) is what lets the fanned-
-  // out items' own empty surrounding space fall through to the canvas rather than swallowing touches.
+  // themselves escape these bounds via transform (see GestureFanItem's own fanItem style), which layout
+  // doesn't account for, so this only needs to be big enough for the primary FAB sitting inside it, not
+  // the fan. Shared by two different Views now: the real, interactive cluster (rendered in its own
+  // gestureTargetClusterOverlay, outside on-screen-controls-root entirely — see its own comment) and a
+  // same-sized, pointerEvents='none' placeholder left behind in this row's own flex flow purely to keep
+  // its two flanks exactly as far apart as they've always been.
   gestureTargetCluster: {
     height: FAB_HEIGHT_MEDIUM,
     width: FAB_HEIGHT_MEDIUM

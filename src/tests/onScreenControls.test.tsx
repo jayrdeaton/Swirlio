@@ -1,5 +1,6 @@
 import { act, fireEvent, render, within } from '@testing-library/react-native'
 import React, { useState } from 'react'
+import { Platform } from 'react-native'
 import * as gestureHandlerModule from 'react-native-gesture-handler'
 
 import { fanItemOffset } from '@/components/GestureFanItem'
@@ -94,7 +95,10 @@ jest.mock('@/hooks/swirlRandomize', () => ({
 // gravityMarkerVisible gets the same real-useState treatment, for the same reason: it used to live in
 // a dedicated GravityMarkerVisibilityProvider this tree doesn't render, but it's a plain persisted
 // field on useSwirlSettings now (see that hook's own comment), and the marker-visibility toggle tests
-// below still need a press to actually flip what this component reads back.
+// below still need a press to actually flip what this component reads back. tiltEnabled gets the same
+// treatment for the same reason, now that gravity mode's own tilt-control toggle reads/writes it
+// directly too (see OnScreenControls' activeTargets.has('gravity') branch) — default true, matching
+// the real setting's own default (see swirlSettingsRanges.ts).
 // pattern/dashStyle back the Cycle shape/Cycle line type FABs' own live-preview icons (see
 // OnScreenControls' own comment) — plain mutable module state, controllable per test the same way
 // mockActiveGroup/mockGroupSheetOpen are below, since these never change reactively within a single
@@ -108,6 +112,7 @@ jest.mock('@/hooks/useSwirlSettings', () => {
     useSwirlSettings: () => {
       const [triggerStackExpanded, setTriggerStackExpanded] = useState(true)
       const [gravityMarkerVisible, setGravityMarkerVisible] = useState(false)
+      const [tiltEnabled, setTiltEnabled] = useState(true)
       // cropShaped/holeShaped back the crop target's own flanking toggles (see OnScreenControls'
       // activeTargets.has('crop') branch) — same real-useState treatment as gravityMarkerVisible above,
       // for the same reason: the toggle tests need a press to actually flip what this component reads
@@ -115,9 +120,10 @@ jest.mock('@/hooks/useSwirlSettings', () => {
       const [cropShaped, setCropShaped] = useState(true)
       const [holeShaped, setHoleShaped] = useState(true)
       return {
-        settings: { triggerStackExpanded, gravityMarkerVisible, cropShaped, holeShaped, pattern: mockPattern, dashStyle: mockDashStyle },
+        settings: { triggerStackExpanded, gravityMarkerVisible, tiltEnabled, cropShaped, holeShaped, pattern: mockPattern, dashStyle: mockDashStyle },
         setTriggerStackExpanded,
         setGravityMarkerVisible,
+        setTiltEnabled,
         setCropShaped,
         setHoleShaped
       }
@@ -251,6 +257,26 @@ describe('OnScreenControls', () => {
 
     const visible = await renderControls({ visible: true })
     expect(visible.getByTestId('on-screen-controls-root').props.pointerEvents).toBe('box-none')
+  })
+
+  // The primary FAB/fan renders in its own overlay, deliberately outside on-screen-controls-root (see
+  // that overlay's own comment) — unlike everything else in this file, gated only by anySheetVisible,
+  // never by `visible`, so switching modes stays possible with the whole rest of the row hidden. A
+  // blind gesture by design (see GestureFanItem's own FAN_ANGLE_SPAN_DEG comment) — this only checks
+  // that the drag itself still drives onSelectGestureTarget while hidden, not anything about it becoming
+  // visible again.
+  it('keeps the gesture-target fan itself reachable and fully functional even while the rest of the row is hidden', async () => {
+    const onSelectGestureTarget = jest.fn()
+    const screen = await renderControls({ visible: false, activeTargets: new Set(['pattern']), onSelectGestureTarget })
+
+    expect(screen.getByTestId('gesture-target-cluster-overlay').props.pointerEvents).toBe('box-none')
+
+    await fanBegin()
+    const { dx, dy } = wedgeOffset('gravity')
+    await fanUpdate(dx, dy)
+    await fanFinalize()
+
+    expect(onSelectGestureTarget).toHaveBeenCalledWith('gravity')
   })
 
   it('wires the back FAB to onGoBack', async () => {
@@ -493,6 +519,27 @@ describe('OnScreenControls', () => {
     await fanFinalize()
     expect(fanItemOpacity(screen, 'mirror')).toBe(0)
     expect(onSelectGestureTarget).not.toHaveBeenCalled()
+  })
+
+  // The second, still-supported way to pick a target alongside the drag above (see GestureFanItem's own
+  // onPress comment) — open with a plain press-and-release (leaving it open, per the test above), then a
+  // second, separate tap directly on the wedge you want, the same two-step pick this had before the drag
+  // existed. Goes through each wedge's own Pressable (fireEvent.press), not fanGesture's __handlers —
+  // a wholly different touch from the one that opened the fan.
+  it('still selects a target via a second, separate tap directly on a fanned-out wedge, and closes the fan', async () => {
+    const onSelectGestureTarget = jest.fn()
+    const screen = await renderControls({ onSelectGestureTarget })
+
+    await fanBegin()
+    await fanFinalize()
+    expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('fab-target-gravity'))
+    })
+
+    expect(onSelectGestureTarget).toHaveBeenCalledWith('gravity')
+    expect(fanItemOpacity(screen, 'mirror')).toBe(0)
   })
 
   // Sweeping onto a wedge and back off it without releasing reverts the live preview to whatever was
@@ -893,15 +940,15 @@ describe('OnScreenControls', () => {
     it("keeps Cycle shape/Cycle line type's own icon identity stable across an unrelated re-render, changing only when its own setting does", async () => {
       mockPattern = 'rings'
       mockDashStyle = 'dashDot'
-      const screen = await renderControls({ activeTargets: new Set(['pattern']), gravityRepelling: false })
+      const screen = await renderControls({ activeTargets: new Set(['pattern']), frozen: false })
 
       const cycleShapeIconBefore = screen.getByTestId('fab-cycle-shape').props.icon
       const cycleLineTypeIconBefore = screen.getByTestId('fab-cycle-line-type').props.icon
 
-      // An unrelated prop change (gravityRepelling — nothing to do with pattern or dashStyle) still
-      // re-renders this whole component, exactly the scenario that used to shake both icons.
+      // An unrelated prop change (frozen — nothing to do with pattern or dashStyle) still re-renders
+      // this whole component, exactly the scenario that used to shake both icons.
       await act(async () => {
-        screen.rerender(<ControlledOnScreenControls {...defaultProps} activeTargets={new Set(['pattern'])} gravityRepelling={true} />)
+        screen.rerender(<ControlledOnScreenControls {...defaultProps} activeTargets={new Set(['pattern'])} frozen={true} />)
       })
       expect(screen.getByTestId('fab-cycle-shape').props.icon).toBe(cycleShapeIconBefore)
       expect(screen.getByTestId('fab-cycle-line-type').props.icon).toBe(cycleLineTypeIconBefore)
@@ -910,48 +957,77 @@ describe('OnScreenControls', () => {
       // one — dashStyle didn't move).
       mockPattern = 'star'
       await act(async () => {
-        screen.rerender(<ControlledOnScreenControls {...defaultProps} activeTargets={new Set(['pattern'])} gravityRepelling={true} />)
+        screen.rerender(<ControlledOnScreenControls {...defaultProps} activeTargets={new Set(['pattern'])} frozen={true} />)
       })
       expect(screen.getByTestId('fab-cycle-shape').props.icon).not.toBe(cycleShapeIconBefore)
       expect(screen.getByTestId('fab-cycle-line-type').props.icon).toBe(cycleLineTypeIconBefore)
     })
 
-    it('shows the marker-visibility and reverse-push/pull toggles when gravity is the sole active target', async () => {
-      const onReverseGravity = jest.fn()
-      const screen = await renderControls({ activeTargets: new Set(['gravity']), onReverseGravity })
+    it('shows the tilt-control and marker-visibility toggles when gravity is the sole active target, tilt flanking left and visibility flanking right', async () => {
+      const screen = await renderControls({ activeTargets: new Set(['gravity']) })
       expect(screen.queryByTestId('fab-cycle-shape')).toBeNull()
 
-      // The visibility toggle's own state is read/written straight from the mocked
-      // gravityMarkerVisibility context (see this file's own mock above) rather than a prop now —
-      // off (false) by default, same as the real context's own default.
+      // Tilt control flanks left (where the old, unconditional polarity-flip button used to sit —
+      // polarity itself moved onto the gravity-targeting pinch gesture on native, see index.tsx's own
+      // PINCH_SCALE_TO_GRAVITY_SCALE) and marker-visibility flanks right, the two having swapped
+      // places — see OnScreenControls' own activeTargets.has('gravity') branch comment. This is
+      // slotA's native branch — Platform.OS defaults to 'ios' for every test in this file except the
+      // web-specific one below, which covers slotA's own web fallback instead.
+      expect(within(screen.getByTestId('transport-row-flank-left')).getByTestId('fab-tilt-enabled')).toBeTruthy()
+      expect(within(screen.getByTestId('transport-row-flank-right')).getByTestId('fab-gravity-marker-visible')).toBeTruthy()
+      expect(screen.queryByTestId('fab-reverse-gravity')).toBeNull()
+
+      // Both toggles' own state is read/written straight from the mocked settings (see this file's
+      // own useSwirlSettings mock above) rather than a prop now — tiltEnabled on (true) and
+      // gravityMarkerVisible off (false) by default, same as the real settings' own defaults.
+      expect(screen.getByTestId('fab-tilt-enabled').props.style.backgroundColor).toBe('#6750a4')
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('fab-tilt-enabled'))
+      })
+      expect(screen.getByTestId('fab-tilt-enabled').props.style.backgroundColor).toBe('transparent')
+
       expect(screen.getByTestId('fab-gravity-marker-visible').props.style.backgroundColor).toBe('transparent')
       await act(async () => {
         fireEvent.press(screen.getByTestId('fab-gravity-marker-visible'))
       })
       expect(screen.getByTestId('fab-gravity-marker-visible').props.style.backgroundColor).toBe('#6750a4')
-
-      await act(async () => {
-        fireEvent.press(screen.getByTestId('fab-reverse-gravity'))
-      })
-      expect(onReverseGravity).toHaveBeenCalledTimes(1)
     })
 
-    // The marker-visibility toggle no longer renders here at all outside gravity mode — matches
-    // every other mode-scoped slotA/slotB entry in this row.
-    it('hides the marker-visibility toggle outside gravity mode', async () => {
+    // Web has no DeviceMotion (see useTiltGravityCenter.ts's own Platform.OS === 'web' bail-out), so
+    // tilt control can never do anything there — slotA falls back to the reverse-push/pull toggle
+    // instead of sitting empty. Same Platform.OS-mutation-in-a-try/finally pattern
+    // useAudioReactive.test.ts already uses for its own web-only branch — OnScreenControls reads
+    // Platform.OS fresh every render (not a cached module-level constant) specifically so this works.
+    it("falls back to the reverse-push/pull toggle in tilt control's own slot on web, and wires it to onReverseGravity/gravityRepelling", async () => {
+      const originalOS = Platform.OS
+      Platform.OS = 'web'
+      try {
+        const onReverseGravity = jest.fn()
+        const attracting = await renderControls({ activeTargets: new Set(['gravity']), gravityRepelling: false, onReverseGravity })
+        expect(within(attracting.getByTestId('transport-row-flank-left')).getByTestId('fab-reverse-gravity')).toBeTruthy()
+        expect(attracting.queryByTestId('fab-tilt-enabled')).toBeNull()
+        expect(attracting.getByTestId('fab-reverse-gravity').props.style.backgroundColor).toBe('transparent')
+
+        await act(async () => {
+          fireEvent.press(attracting.getByTestId('fab-reverse-gravity'))
+        })
+        expect(onReverseGravity).toHaveBeenCalledTimes(1)
+        await attracting.unmount()
+
+        const repelling = await renderControls({ activeTargets: new Set(['gravity']), gravityRepelling: true })
+        expect(repelling.getByTestId('fab-reverse-gravity').props.style.backgroundColor).toBe('#6750a4')
+      } finally {
+        Platform.OS = originalOS
+      }
+    })
+
+    // Neither gravity-mode toggle renders outside gravity mode — matches every other mode-scoped
+    // slotA/slotB entry in this row.
+    it('hides the tilt-control and marker-visibility toggles outside gravity mode', async () => {
       const screen = await renderControls({ activeTargets: new Set(['pattern']) })
+      expect(screen.queryByTestId('fab-tilt-enabled')).toBeNull()
       expect(screen.queryByTestId('fab-gravity-marker-visible')).toBeNull()
-    })
-
-    // gravityRepelling drives the reverse-push/pull toggle's own on/off look, same GlassToggleFab
-    // active/inactive language every other toggle in this file already uses.
-    it("reflects gravity's current polarity on the reverse-push/pull toggle", async () => {
-      const attracting = await renderControls({ activeTargets: new Set(['gravity']), gravityRepelling: false })
-      expect(attracting.getByTestId('fab-reverse-gravity').props.style.backgroundColor).toBe('transparent')
-      await attracting.unmount()
-
-      const repelling = await renderControls({ activeTargets: new Set(['gravity']), gravityRepelling: true })
-      expect(repelling.getByTestId('fab-reverse-gravity').props.style.backgroundColor).toBe('#6750a4')
+      expect(screen.queryByTestId('fab-reverse-gravity')).toBeNull()
     })
   })
 

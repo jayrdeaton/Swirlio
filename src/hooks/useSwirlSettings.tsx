@@ -291,28 +291,33 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       // per-field validation to run since defaultSettings is already known-valid, and going through
       // each setter would also mean this drifts out of sync the moment a new field's setter gains its
       // own extra branching (e.g. the empty-list guards on colors) that a plain reset should ignore
-      // anyway. audioReactiveEnabled, controlsAutoHideSpeed, gestureTarget, gravityMarkerVisible,
-      // hapticsEnabled, shakeEnabled, showLabels, and tiltEnabled are all carried over from whatever
-      // they already were, not reset to their defaults — they're device-capability toggles (is the mic
-      // feeding this, does a shake randomize, does tilting the device warp it, do presses buzz), chrome-
-      // density/interface preferences (showLabels, controlsAutoHideSpeed, gravityMarkerVisible — same
-      // bucket, see its own field comment), or a tool mode (gestureTarget — which point a drag targets
-      // has no bearing on what the art itself looks like), not look/tuning preferences like everything
-      // else this button touches. audioReactiveEnabled is live session state tied to a mic the user
-      // just granted; shakeEnabled/tiltEnabled/showLabels/controlsAutoHideSpeed/gestureTarget/
-      // gravityMarkerVisible/hapticsEnabled are explicit choices the user made — either way, a flat
-      // reset shouldn't silently switch them back on/off (or back to 'pattern') underneath someone.
+      // anyway. audioReactiveEnabled, controlsAutoHideSpeed, followSpeed, gestureTarget,
+      // gravityMarkerVisible, hapticsEnabled, shakeEnabled, showLabels, tiltEnabled, and
+      // triggerStackExpanded are all carried over from whatever they already were, not reset to their
+      // defaults — they're device-capability toggles (is the mic feeding this, does a shake randomize,
+      // does tilting the device warp it, do presses buzz), chrome-density/interface preferences
+      // (showLabels, controlsAutoHideSpeed, gravityMarkerVisible, triggerStackExpanded — same bucket,
+      // see gravityMarkerVisible's own field comment), interaction feel rather than art (followSpeed —
+      // how touch input eases, not what gets drawn), or a tool mode (gestureTarget — which point a drag
+      // targets has no bearing on what the art itself looks like) — not look/tuning preferences like
+      // everything else this button touches. 'Reset all' is scoped to visual items, not to how the UI
+      // itself behaves. audioReactiveEnabled is live session state tied to a mic the user just granted;
+      // the rest are explicit choices the user made — either way, a flat reset shouldn't silently
+      // switch them back on/off (or back to 'pattern', or back to the original follow feel/auto-hide
+      // delay) underneath someone.
       resetSettings: () =>
         setSettings((prev) => ({
           ...defaultSettings,
           audioReactiveEnabled: prev.audioReactiveEnabled,
           controlsAutoHideSpeed: prev.controlsAutoHideSpeed,
+          followSpeed: prev.followSpeed,
           gestureTarget: prev.gestureTarget,
           gravityMarkerVisible: prev.gravityMarkerVisible,
           hapticsEnabled: prev.hapticsEnabled,
           shakeEnabled: prev.shakeEnabled,
           showLabels: prev.showLabels,
-          tiltEnabled: prev.tiltEnabled
+          tiltEnabled: prev.tiltEnabled,
+          triggerStackExpanded: prev.triggerStackExpanded
         }))
     }),
     [settings]
