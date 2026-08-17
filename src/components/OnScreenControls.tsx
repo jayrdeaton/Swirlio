@@ -359,6 +359,16 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // still from the very start." A single ref is enough: only one zone is ever dwell-eligible at a time,
   // and handlePhaseChanged below always clears whatever was pending before starting a new one.
   const fanDwellTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Whether the fan was already open the moment this touch landed — a plain tap has to tell "opening
+  // it" from "closing it back up" apart at release time (see handleFanFinalize below), the exact same
+  // toggle the old onPress={() => onGestureFanOpenChange(!gestureFanOpen)} used to give it, just decided
+  // at onBegin now instead of read fresh at release.
+  const wasAlreadyOpenRef = useRef(false)
+  // Whether this gesture's own dwell (recenter or randomize) actually fired — set the instant either
+  // one does (see handleFanZoneChanged below). handleFanFinalize checks this first: a dwell already
+  // closed the fan deliberately, so the eventual release finishing the same touch shouldn't reopen it
+  // by then falling through to the plain-tap toggle below.
+  const dwellFiredRef = useRef(false)
 
   const clearFanDwell = useCallback(() => {
     if (!fanDwellTimeout.current) return
@@ -391,6 +401,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
         applyTarget(target)
         fanDwellTimeout.current = setTimeout(() => {
           fanDwellTimeout.current = null
+          dwellFiredRef.current = true
           notification()
           onRandomizeGestureTarget(target)
           onGestureFanOpenChange(false)
@@ -401,6 +412,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
       if (zone === -1) {
         fanDwellTimeout.current = setTimeout(() => {
           fanDwellTimeout.current = null
+          dwellFiredRef.current = true
           notification()
           onRecenter()
           onGestureFanOpenChange(false)
@@ -420,15 +432,28 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     const current = [...activeTargets][0]
     startTargetRef.current = current
     appliedTargetRef.current = current
+    wasAlreadyOpenRef.current = gestureFanOpen
+    dwellFiredRef.current = false
     selection()
     onGestureFanOpenChange(true)
     handleFanZoneChanged(-1)
-  }, [activeTargets, handleFanZoneChanged, onGestureFanOpenChange, selection])
+  }, [activeTargets, gestureFanOpen, handleFanZoneChanged, onGestureFanOpenChange, selection])
 
+  // A plain press-and-release, with no drag and no dwell, still has to mean what a plain tap on this FAB
+  // always meant: open it if it was closed, close it back up if this was the second tap on one already
+  // open — see wasAlreadyOpenRef's own comment. Only reachable when neither of the two more deliberate
+  // outcomes already resolved this touch: a dwell (dwellFiredRef) already closed the fan itself, and
+  // releasing on a wedge (fanZone.value >= 0) is a genuine pick, which always closes regardless of
+  // whether this touch opened the fan or found it already open.
   const handleFanFinalize = useCallback(() => {
     clearFanDwell()
-    onGestureFanOpenChange(false)
-  }, [clearFanDwell, onGestureFanOpenChange])
+    if (dwellFiredRef.current) return
+    if (fanZone.value >= 0) {
+      onGestureFanOpenChange(false)
+      return
+    }
+    onGestureFanOpenChange(!wasAlreadyOpenRef.current)
+  }, [clearFanDwell, fanZone, onGestureFanOpenChange])
 
   // Belt-and-suspenders for the fan closing through some other path entirely (closeFanFirst, pressing a
   // group trigger mid-drag) — gestureFanOpen going false is the one signal guaranteed to cover every one
@@ -454,6 +479,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     // elsewhere (see index.tsx's resetRotation comment).
     // eslint-disable-next-line react-hooks/refs
     .onBegin(() => {
+      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       fanZone.value = -1
       runOnJS(handleFanBegin)()
     })
@@ -473,6 +499,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
       const centerDistance = Math.sqrt(event.translationX * event.translationX + event.translationY * event.translationY)
       const nextZone = nearestDistance <= FAN_CAPTURE_RADIUS_PX ? nearestIndex : centerDistance <= FAN_CENTER_RADIUS_PX ? -1 : -2
       if (nextZone !== fanZone.value) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
         fanZone.value = nextZone
         runOnJS(handleFanZoneChanged)(nextZone)
       }
@@ -815,24 +842,28 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
             {slotA}
           </Animated.View>
           {/* The row's primary/biggest FAB (medium, centered) — switching what a drag/twist controls
-          is the thing you're actually doing most of the time in this app, so it's a single press-drag-
-          release rather than the tap-to-open/tap-to-select two-step this used to be: pressing down
-          fans the other targets out in an arc above it (see GestureFanItem) immediately, dragging onto
-          one live-switches activeTargets to it the instant the finger crosses in (fanGesture's own
-          onUpdate, above), and releasing just ends the picking session — whatever's currently live
-          stays selected, there's no separate "confirm" step. A fan (rather than cycling through targets
-          one at a time) is what makes this reach any of them in a single motion regardless of count —
-          cycling stopped scaling once gravity brought the option count to four, and more are coming
-          (particles, camera). Dragging back off a wedge without releasing reverts the live preview to
-          whatever was active before this gesture started (see fanGesture's own startTargetRef), so
-          sweeping through on the way to somewhere else — or changing your mind — doesn't leave you on
-          whatever you happened to pass over. Holding still — either right on this FAB, or on a wedge
-          once the drag's landed on one — arms a bonus after TRANSPORT_LONG_PRESS_MS: recenter
-          (onRecenter) at the center, randomize that mode (onRandomizeGestureTarget) on a wedge, the same
-          tap/hold-does-something-else convention every other FAB in this file already uses, just
-          reached through this drag instead of a second press. gestureFanOpen is lifted up to index.tsx
-          (see its own prop comment) so opening the fan also suspends the idle auto-hide timer — picking
-          a target shouldn't have the whole row fade out from underneath you mid-pick.
+          is the thing you're actually doing most of the time in this app. Pressing down still fans the
+          other targets out in an arc above it (see GestureFanItem) immediately, the same tap-to-open
+          this always did — a plain press-and-release with no drag and no hold (handleFanFinalize's own
+          wasAlreadyOpenRef branch) leaves it open exactly like the old onPress toggle always did too,
+          rather than snapping shut the instant a quick tap lifts. Dragging onto a wedge is what's new:
+          it live-switches activeTargets to it the instant the finger crosses in (fanGesture's own
+          onUpdate, above), and releasing there commits it and closes — no separate "confirm" tap needed
+          once you're actually dragging. A fan (rather than cycling through targets one at a time) is what
+          makes this reach any of them in a single motion regardless of count — cycling stopped scaling
+          once gravity brought the option count to four, and more are coming (particles, camera). Dragging
+          back off a wedge without releasing reverts the live preview to whatever was active before this
+          gesture started (see fanGesture's own startTargetRef), so sweeping through on the way to
+          somewhere else — or changing your mind — doesn't leave you on whatever you happened to pass
+          over; releasing from there falls through to the same "leave it open" tap behavior as never
+          having dragged at all. Holding still — either right on this FAB, or on a wedge once the drag's
+          landed on one — arms a bonus after TRANSPORT_LONG_PRESS_MS: recenter (onRecenter) at the center,
+          randomize that mode (onRandomizeGestureTarget) on a wedge, the same tap/hold-does-something-else
+          convention every other FAB in this file already uses, just reached through this drag instead of
+          a second press — either one closes the fan itself, same as a wedge pick landing does.
+          gestureFanOpen is lifted up to index.tsx (see its own prop comment) so opening the fan also
+          suspends the idle auto-hide timer — picking a target shouldn't have the whole row fade out from
+          underneath you mid-pick.
           The FAB itself renders inert (pointerEvents='none', no onPress/onLongPress of its own) —
           fanGesture attached to the cluster below is what actually owns every touch here now, hit-
           testing against the drag's own translation rather than needing a Pressable under the finger

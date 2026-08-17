@@ -473,13 +473,23 @@ describe('OnScreenControls', () => {
     expect(fanItemOpacity(screen, 'mirror')).toBe(0)
   })
 
-  it('releasing without ever dragging onto a wedge closes the fan without selecting anything', async () => {
+  // A plain press-and-release (no drag, no dwell) means exactly what a tap on this FAB always meant:
+  // open it if it was closed, close it back up if this was a second press on one already open — see
+  // OnScreenControls' own wasAlreadyOpenRef comment. Releasing a genuine drag-onto-a-wedge always closes
+  // regardless of that (see the "pressing down..." test above), since a pick is always a deliberate
+  // commit — this is specifically the "nothing happened" case.
+  it('leaves the fan open after a plain press-and-release, and closes it on a second one, without selecting anything either time', async () => {
     const onSelectGestureTarget = jest.fn()
     const screen = await renderControls({ onSelectGestureTarget })
 
     await fanBegin()
     expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
 
+    await fanFinalize()
+    expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
+    expect(onSelectGestureTarget).not.toHaveBeenCalled()
+
+    await fanBegin()
     await fanFinalize()
     expect(fanItemOpacity(screen, 'mirror')).toBe(0)
     expect(onSelectGestureTarget).not.toHaveBeenCalled()
@@ -488,9 +498,9 @@ describe('OnScreenControls', () => {
   // Sweeping onto a wedge and back off it without releasing reverts the live preview to whatever was
   // already active before this gesture started, rather than leaving activeTargets on whatever the drag
   // happened to pass through on the way elsewhere.
-  it('reverts the live selection to the original target when the drag leaves a wedge without releasing', async () => {
+  it('reverts the live selection to the original target when the drag leaves a wedge without releasing, and leaves the fan open on release from there', async () => {
     const onSelectGestureTarget = jest.fn()
-    await renderControls({ activeTargets: new Set(['pattern']), onSelectGestureTarget })
+    const screen = await renderControls({ activeTargets: new Set(['pattern']), onSelectGestureTarget })
 
     await fanBegin()
     const { dx, dy } = wedgeOffset('gravity')
@@ -502,7 +512,11 @@ describe('OnScreenControls', () => {
     expect(onSelectGestureTarget).toHaveBeenLastCalledWith('pattern')
     expect(onSelectGestureTarget).toHaveBeenCalledTimes(2)
 
+    // Releasing from the center (never having landed on a wedge by the time the finger lifts) falls
+    // through to the same "leave it open" plain-tap behavior as never having dragged at all — it's not
+    // a wedge pick, so it doesn't commit-and-close.
     await fanFinalize()
+    expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
   })
 
   // Mirror is always a selectable gesture target now, even at 0 mirror lines (see index.tsx's
