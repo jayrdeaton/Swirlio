@@ -38,11 +38,11 @@ export function ControlGroupTopSheetContent() {
   const { swapColors } = useSwapColors()
   const { resetGravity, resetMirror, resetPattern } = useSwirlReset()
   const { randomizeGroup } = useSwirlRandomize()
-  // autoCheck: false — the sheet only checks on an explicit tap, no silent AppState-triggered fetch
-  // (see @rific/updater's own README). onConfirm/onError are left at the package defaults, which
-  // already show the exact "Update available" Alert (release date + optional message, Restart/Cancel)
-  // this app wants — no need to duplicate that dialog locally.
-  const { check: checkForUpdate, checking: checkingForUpdate } = useUpdater({ autoCheck: false })
+  // autoCheck/autoPrompt both default to true — a foreground fetch that finds an update shows
+  // the confirm prompt on its own, no tap needed. onConfirm/onError are left at the package
+  // defaults, which already show the exact "Update available" Alert (release date + optional
+  // message, Restart/Cancel) this app wants — no need to duplicate that dialog locally.
+  const { check: checkForUpdate, checking: checkingForUpdate } = useUpdater()
   // App-wide look rather than a per-swirl setting, so it lives in @rific/auto-paper's own
   // ThemeSettingsContext instead of useSwirlSettings — see _layout.tsx's MonochromeThemeBridge for
   // how `appearance` feeds back into the forced black/white accent.
@@ -319,8 +319,9 @@ export function ControlGroupTopSheetContent() {
               {/* Trails every other control in this sheet now, not just its own row — it's the one FAB
               here that isn't a look/behavior preference at all, so it reads as a footer action rather
               than competing with Randomize/Reset all up top for the same "first thing you see" spot.
-              Manual-only (autoCheck: false above) rather than a silent auto-notify — this is a toy app
-              with no push infra, so "tap to check" is the whole update story. Label is the running OTA
+              autoPrompt already surfaces the confirm dialog on its own the next time the app
+              foregrounds after an update ships; this button exists for checking without waiting on a
+              background/foreground cycle (e.g. right after opening the app). Label is the running OTA
               version (release.ts's otaVersion, bumped by the release script) instead of a fixed "Check
               for update" caption, so this doubles as a version readout even before it's tapped. Icon
               swaps to a downloading glyph while checkingForUpdate — still no spinner/animation
