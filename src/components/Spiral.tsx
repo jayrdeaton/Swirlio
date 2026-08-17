@@ -3,6 +3,7 @@ import React from 'react'
 import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { SharedValue, useDerivedValue } from 'react-native-reanimated'
 
+import { clamp } from '@/constants/clamp'
 import { buildFlowerPoints } from '@/constants/flowerMath'
 import { gravityHoleRadius } from '@/constants/gravityWellMath'
 import { buildHeartPoints } from '@/constants/heartMath'
@@ -12,7 +13,7 @@ import { buildPolygonPoints } from '@/constants/polygonMath'
 import { buildStarPoints } from '@/constants/starMath'
 import { DashStyle } from '@/constants/strokeDash'
 import { useCyclingColor } from '@/hooks/useCyclingColor'
-import { MAX_CROP_RADIUS, MAX_GRAVITY } from '@/hooks/useSwirlSettings'
+import { MAX_CROP_RADIUS, MAX_GRAVITY, MIN_CROP_RADIUS } from '@/hooks/useSwirlSettings'
 
 import { GRAVITY_HOLE_MAX_RADIUS_PX, GRAVITY_HOLE_MIN_RADIUS_PX, GravityWell } from './GravityWell'
 import { KaleidoscopeCopy } from './KaleidoscopeCopy'
@@ -35,6 +36,15 @@ const RADIUS_QUANTUM_PX = 6
 // pool's own sampling granularity (see FlowerPattern/StarPattern/PolygonPattern's ripple spacing)
 // landing a little short of a perfect 2x reach in between two pool instances.
 const NO_CROP_CLIP_RADIUS_MULTIPLIER = 2.5
+// How much of the crop range's own top end tapers NO_CROP_CLIP_RADIUS_MULTIPLIER's extra headroom in,
+// rather than snapping it on the instant cropRadius ticks off its exact max — without this, cropRadius
+// the barest hair below MAX_CROP_RADIUS collapsed outerRadius (see cropClip below) straight back down
+// from that ~2.5x headroom to a plain baseRadius*cropRadius circle, a real ~2.5x shrink in a single
+// slider tick that read as a clip edge suddenly slicing through concave pattern content that had been
+// safely out of reach a moment earlier. A fraction of the crop range itself, not a fixed radius, so it
+// keeps scaling correctly if MIN/MAX_CROP_RADIUS are ever retuned; first-pass width meant to be
+// retuned by eye on a real device, the same as NO_CROP_CLIP_RADIUS_MULTIPLIER itself.
+const NO_CROP_TRANSITION_WIDTH = (MAX_CROP_RADIUS - MIN_CROP_RADIUS) * 0.08
 
 // The closed vertex list to trace a "shaped" crop/hole contour at the given radius for whichever
 // pattern is active, or null to fall back to a plain circle — Rings/Spiral/Starburst have no closed
@@ -293,7 +303,14 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
   const cropClip = useDerivedValue(() => {
     const baseRadius = fixedSpacing ? referenceRadius : radius.value
     const noCropRequested = cropRadius.value >= MAX_CROP_RADIUS
-    const outerRadius = noCropRequested ? baseRadius * NO_CROP_CLIP_RADIUS_MULTIPLIER : baseRadius * cropRadius.value
+    // 0 below the transition band (ordinary crop, unaffected), ramping to 1 exactly at
+    // MAX_CROP_RADIUS — blending NO_CROP_CLIP_RADIUS_MULTIPLIER in over that band (see
+    // NO_CROP_TRANSITION_WIDTH's own comment) keeps outerRadius itself continuous through the "no
+    // crop requested" boundary. Only the outer contour's own shape still flips straight to a plain
+    // circle right at that exact point (noCropRequested below) — a far smaller, purely cosmetic pop
+    // than the radius jump this replaces.
+    const noCropBlend = clamp((cropRadius.value - (MAX_CROP_RADIUS - NO_CROP_TRANSITION_WIDTH)) / NO_CROP_TRANSITION_WIDTH, 0, 1)
+    const outerRadius = baseRadius * cropRadius.value * (1 + noCropBlend * (NO_CROP_CLIP_RADIUS_MULTIPLIER - 1))
     const outerShape = cropShaped && !noCropRequested ? shapedClipPoints(pattern, sides.value, outerRadius) : null
     if (holeRadius.value <= 0) {
       return outerShape ? Skia.PathBuilder.Make().addPoly(outerShape, true).detach() : Skia.Path.Circle(0, 0, outerRadius)

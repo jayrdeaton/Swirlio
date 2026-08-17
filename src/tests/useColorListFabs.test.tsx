@@ -17,10 +17,10 @@ jest.mock('react-native-paper', () => {
   }
 })
 
-// FAB/Button/TouchableOpacity now come from @rific/haptic-press rather than react-native-paper/
+// FAB/Button/TouchableOpacity now come from @rific/feedback-press rather than react-native-paper/
 // react-native (see useColorListFabs.tsx/LabeledFab.tsx/ActionFab.tsx) — mocked the same shallow way
 // as the react-native-paper mock above, still without pulling in the real haptic-wiring chain.
-jest.mock('@rific/haptic-press', () => {
+jest.mock('@rific/feedback-press', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
   return {

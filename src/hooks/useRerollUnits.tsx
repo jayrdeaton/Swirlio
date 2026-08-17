@@ -53,10 +53,10 @@ const RANDOMIZE_MAX_FOREGROUND_COLORS = 3
 // group's units instead of every unit in rerollUnits at once. Calls useSwirlSettings() itself rather
 // than taking settings/setters as params — every field/setter here already lives on that one context,
 // so there's nothing for index.tsx to thread through by hand.
-export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGroup: Record<ControlGroup, (() => void)[]> } {
+export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGroup: Record<ControlGroup, (() => void)[]>; rerollUnitsCropHole: (() => void)[] } {
   const { settings, setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setPattern, setPolygonSides, setStrokeWidth, setTightness } = useSwirlSettings()
 
-  return useMemo<{ rerollUnits: (() => void)[]; rerollUnitsByGroup: Record<ControlGroup, (() => void)[]> }>(() => {
+  return useMemo<{ rerollUnits: (() => void)[]; rerollUnitsByGroup: Record<ControlGroup, (() => void)[]>; rerollUnitsCropHole: (() => void)[] }>(() => {
     const randomInRange = (min: number, max: number) => min + Math.random() * (max - min)
     const randomInt = (min: number, max: number) => Math.floor(randomInRange(min, max + 1))
     // Every slider-backed reroll below draws from one of these three, not a flat 0-1 Math.random() —
@@ -89,7 +89,7 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
     }
     const audioReactive = settings.audioReactiveEnabled
 
-    const units: { group: ControlGroup; audioDriven: boolean; reroll: () => void }[] = [
+    const units: { group: ControlGroup; audioDriven: boolean; cropHole?: boolean; reroll: () => void }[] = [
       // Background is derived from the foreground's own contrast, not independently randomized, so
       // both setters move together as one unit.
       {
@@ -126,10 +126,10 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
       { group: 'mirror', audioDriven: false, reroll: () => setMirrorAlternateColors(Math.random() < 0.5) },
       { group: 'line', audioDriven: true, reroll: () => setTightness(skewedTowardCenter(MIN_TIGHTNESS, MAX_TIGHTNESS)) },
       { group: 'line', audioDriven: true, reroll: () => setStrokeWidth(skewedTowardCenter(MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)) },
-      { group: 'pattern', audioDriven: true, reroll: () => setCropRadius(skewedInRange(MIN_CROP_RADIUS, MAX_CROP_RADIUS, false)) },
-      { group: 'pattern', audioDriven: false, reroll: () => setCropShaped(Math.random() < 0.5) },
-      { group: 'pattern', audioDriven: true, reroll: () => setHoleRadius(skewedInRange(MIN_HOLE_RADIUS, MAX_HOLE_RADIUS, true)) },
-      { group: 'pattern', audioDriven: false, reroll: () => setHoleShaped(Math.random() < 0.5) },
+      { group: 'pattern', audioDriven: true, cropHole: true, reroll: () => setCropRadius(skewedInRange(MIN_CROP_RADIUS, MAX_CROP_RADIUS, false)) },
+      { group: 'pattern', audioDriven: false, cropHole: true, reroll: () => setCropShaped(Math.random() < 0.5) },
+      { group: 'pattern', audioDriven: true, cropHole: true, reroll: () => setHoleRadius(skewedInRange(MIN_HOLE_RADIUS, MAX_HOLE_RADIUS, true)) },
+      { group: 'pattern', audioDriven: false, cropHole: true, reroll: () => setHoleShaped(Math.random() < 0.5) },
       // Neither is audio-driven — audio-reactive mode overrides stroke width/tightness/crop/hole
       // radius/mirror gap (see the comment above), not the physics sliders. Excluded from lookRerolls
       // below regardless (see this file's own top comment) — audioReactive has no bearing on that,
@@ -160,6 +160,13 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
       settings: lookRerolls
     }
 
-    return { rerollUnits: lookRerolls, rerollUnitsByGroup }
+    // The 'crop' gesture target's own long-press-to-randomize bonus (see OnScreenControls' own
+    // handlePhaseChanged) needs just these four fields, not the full 'pattern' group's own reroll list
+    // above — that one also carries the shape/sides picker, which would be a much bigger, unrelated
+    // change to fire off the crop/hole wedge specifically. Reuses the exact same four closures (tagged
+    // cropHole above) rather than a second, separately-written copy of the same random logic.
+    const rerollUnitsCropHole = filteredUnits.filter((unit) => unit.cropHole).map((unit) => unit.reroll)
+
+    return { rerollUnits: lookRerolls, rerollUnitsByGroup, rerollUnitsCropHole }
   }, [settings.audioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setPattern, setPolygonSides, setStrokeWidth, setTightness])
 }

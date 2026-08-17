@@ -1,5 +1,5 @@
 import { Dialog, getContrastColor } from '@rific/auto-paper'
-import { Button, TouchableOpacity } from '@rific/haptic-press'
+import { Button, TouchableOpacity } from '@rific/feedback-press'
 import React, { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { useTheme } from 'react-native-paper'

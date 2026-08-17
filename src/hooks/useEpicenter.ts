@@ -27,8 +27,8 @@ import { BounceBoundary, DragClamp, DragPointPhysics, reflectOffAxis, SNAP_DISTA
 // one consistent shape — there used to be a multi-select "combine" mode that populated it with more
 // than one entry at once, which is why the membership-check shape stuck around even though selecting a
 // target always replaces the whole set with exactly one now (see index.tsx's selectGestureTarget).
-export type GestureTarget = 'pattern' | 'mirror' | 'gravity'
-export const GESTURE_TARGET_ORDER: GestureTarget[] = ['pattern', 'mirror', 'gravity']
+export type GestureTarget = 'pattern' | 'mirror' | 'gravity' | 'crop'
+export const GESTURE_TARGET_ORDER: GestureTarget[] = ['pattern', 'crop', 'mirror', 'gravity']
 
 // How hard tilt pulls on whichever of pattern/mirror is its active target — a fixed constant, not a
 // user-facing setting: gravity already has its own slider for "how strong is a pull," and reusing that
@@ -277,7 +277,13 @@ export function useEpicenter(
   const rawTargetsMirror = activeTargets.has('mirror')
   const rawTargetsPattern = activeTargets.has('pattern')
   const mirrorHasWedge = mirrorLines > 0
-  const targetsPattern = rawTargetsPattern || (rawTargetsMirror && !mirrorHasWedge)
+  // 'crop' has no draggable point of its own (see index.tsx's own rotationGesture/pinchGesture for
+  // what it actually drives — holeRadius/cropRadius, neither of which is a screen position) — it
+  // folds into targetsPattern the same way mirror's own 0-line fallback just above does, just
+  // unconditionally rather than only at a wedge count of 0, since 'crop' never has anything of its
+  // own to redirect away from. This is what gives it the pattern epicentre's full one-finger
+  // pan/long-press behavior (grab-and-carry, outer-field spin/zoom, tilt's ambient pull) for free.
+  const targetsPattern = rawTargetsPattern || (rawTargetsMirror && !mirrorHasWedge) || activeTargets.has('crop')
   const targetsMirror = rawTargetsMirror && mirrorHasWedge
   const targetsGravity = activeTargets.has('gravity')
 

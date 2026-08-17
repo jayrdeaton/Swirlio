@@ -90,7 +90,7 @@ export type SwirlSettings = {
   gravityMarkerVisible: boolean
   // Gates the shared HapticSettingsContext flag every haptic call site in the app already reads
   // through — see _layout.tsx's HapticsSettingsBridge for how this value gets pushed into
-  // @rific/haptic-press's own runtime context. True by default, matching that package's own
+  // @rific/feedback-press's own runtime context. True by default, matching that package's own
   // initialValue={{ vibrate: true }} before this setting existed.
   hapticsEnabled: boolean
   // A second, inner cutoff carved out of the crop circle — a fraction *of* cropRadius (not of the

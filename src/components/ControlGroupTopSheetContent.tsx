@@ -4,6 +4,7 @@ import React from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import { release } from '@/constants/release'
 import { TOP_SHEET_HEADER_CLEARANCE, TOP_SHEET_RIGHT_CLEARANCE } from '@/constants/sheetLayout'
 import { useControlGroups } from '@/hooks/controlGroups'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
@@ -281,12 +282,6 @@ export function ControlGroupTopSheetContent() {
                   resetMirror()
                 }}
               />
-              {/* Manual-only (autoCheck: false above) rather than a silent auto-notify — this is a toy
-              app with no push infra, so "tap to check" is the whole update story, same one-tap-action
-              shape as Randomize/Reset all beside it. Disabled while in flight instead of a spinner —
-              no loading affordance exists on any FAB in this app (see LabeledFab), so this doesn't
-              invent one just for this button. */}
-              <ActionFab icon='download' label='Check for update' disabled={checkingForUpdate} onPress={checkForUpdate} />
               {/* Shares this row with Randomize/Reset rather than getting its own forced break — unlike
               Pattern's type picker or Line's dash style picker (each a wider, self-contained cluster
               worth its own line), appearance is just 3 more buttons, so it wraps in alongside
@@ -321,6 +316,20 @@ export function ControlGroupTopSheetContent() {
               `vibrate` icon, a `vibrate`/`vibrate-off` pair read as near-duplicates at a glance despite
               meaning unrelated things (a physical shake gesture vs. press feedback on every tap). */}
               {!isWeb && <SettingToggleFab icon='gesture-tap' label='Haptics' value={settings.hapticsEnabled} onValueChange={setHapticsEnabled} />}
+              {/* Trails every other control in this sheet now, not just its own row — it's the one FAB
+              here that isn't a look/behavior preference at all, so it reads as a footer action rather
+              than competing with Randomize/Reset all up top for the same "first thing you see" spot.
+              Manual-only (autoCheck: false above) rather than a silent auto-notify — this is a toy app
+              with no push infra, so "tap to check" is the whole update story. Label is the running OTA
+              version (release.ts's otaVersion, bumped by the release script) instead of a fixed "Check
+              for update" caption, so this doubles as a version readout even before it's tapped. Icon
+              swaps to a downloading glyph while checkingForUpdate — still no spinner/animation
+              affordance elsewhere in this app (see LabeledFab), so a second static glyph standing in
+              for "busy" is the same low-key shape every other disabled-while-in-flight state here
+              uses. Hidden on web for the same reason Shake/Audio reactive/Haptics are: expo-updates has
+              no web target, so useUpdater's own check() just shows an "unsupported on web" Alert
+              instead of ever actually checking — nothing here for the button to do. */}
+              {!isWeb && <ActionFab icon={checkingForUpdate ? 'progress-download' : 'download'} label={`Update v${release.otaVersion}`} disabled={checkingForUpdate} onPress={checkForUpdate} />}
             </FabRow>
           </>
         )}

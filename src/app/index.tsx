@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { useVibration } from '@rific/haptic-press'
+import { isDarkColor } from '@rific/auto-paper'
+import { useVibration } from '@rific/feedback-press'
 import { StatusBar } from 'expo-status-bar'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
@@ -13,8 +14,9 @@ import { mapAudioBand } from '@/constants/audioMapping'
 import { clamp } from '@/constants/clamp'
 import { computeEffectiveSwirlValues } from '@/constants/effectiveSwirlValues'
 import { gravityParticleFrictionSpeed } from '@/constants/gravityWellMath'
-import { MAX_MIRROR_LINES, MIN_MIRROR_LINES, mirrorLinesFromSigned, signedMirrorLines } from '@/constants/kaleidoscope'
+import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
 import { PATTERN_ORDER } from '@/constants/patterns'
+import { randomHexColor } from '@/constants/randomColor'
 import { MAX_RADIUS_TO_REFERENCE_RATIO, RIPPLE_BASE_COUNT, rippleModulus, rippleSpacing } from '@/constants/rippleMath'
 import { DASH_STYLE_ORDER } from '@/constants/strokeDash'
 import { controlsAutoHideDelayMs } from '@/constants/swirlSettingsRanges'
@@ -30,7 +32,27 @@ import { useLoopingProgress } from '@/hooks/useLoopingProgress'
 import { useRerollUnits } from '@/hooks/useRerollUnits'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { useSwapColors } from '@/hooks/useSwapColors'
-import { DEFAULT_DASH_STYLE, MAX_BOUNCE_FRICTION, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_MIRROR_GAP, MAX_POLYGON_SIDES, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_BOUNCE_FRICTION, MIN_GRAVITY, MIN_MIRROR_GAP, MIN_POLYGON_SIDES, MIN_STROKE_WIDTH, MIN_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import {
+  DEFAULT_DASH_STYLE,
+  MAX_BOUNCE_FRICTION,
+  MAX_CROP_RADIUS,
+  MAX_CYCLE_SPEED,
+  MAX_GRAVITY,
+  MAX_HOLE_RADIUS,
+  MAX_MIRROR_GAP,
+  MAX_POLYGON_SIDES,
+  MAX_STROKE_WIDTH,
+  MAX_TIGHTNESS,
+  MIN_BOUNCE_FRICTION,
+  MIN_CROP_RADIUS,
+  MIN_GRAVITY,
+  MIN_HOLE_RADIUS,
+  MIN_MIRROR_GAP,
+  MIN_POLYGON_SIDES,
+  MIN_STROKE_WIDTH,
+  MIN_TIGHTNESS,
+  useSwirlSettings
+} from '@/hooks/useSwirlSettings'
 import { TILT_EASE_SPRING, useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const BASE_ROTATION_DURATION_MS = 12000
@@ -83,6 +105,11 @@ const SESSION_STATE_PERSIST_DEBOUNCE_MS = 400
 // (a full randomize), which the settings group's own Randomize/long-press shortcuts and the shake
 // gesture already cover (see randomize/randomizeGesture below).
 const TWEAK_BATCH_COUNT = 4
+// How many entries growForeground (mirror mode's own "rainbow soup" long-press, see OnScreenControls)
+// will keep appending to foregroundColors while held — purely a backstop so a long hold can't grow the
+// list without bound, not a limit the design itself wants. Well above the 1-3 colors the ordinary
+// reroll ever picks, so it still reads as a genuinely wilder, hold-driven mode of its own.
+const MAX_RAINBOW_SOUP_COLORS = 20
 // "Reset rotation" only means undoing manual/gesture drift once the pattern (or mirror) isn't actively
 // spinning — see resetRotation/resetMirrorRotation below. At that point, springing all the way back to
 // a literal 0 can mean a long, weird-looking unwind, since baseRotation accumulates without ever
@@ -95,6 +122,12 @@ const TWEAK_BATCH_COUNT = 4
 function nearestMultipleOf(value: number, increment: number): number {
   return Math.round(value / increment) * increment
 }
+
+// Shared by the background button's own tap/long-press-hold actions below — both need to tell "a real
+// random hue" apart from "one of the two literal colors those actions themselves already landed on".
+function isPureBlackOrWhite(hex: string): boolean {
+  return hex === '#000000' || hex === '#FFFFFF'
+}
 // How much relative pinch scale (event.scale — always measured relative to 1 at gesture start, not
 // a per-frame delta) moves mirrorGap, when the pinch targets the mirror — see targetsMirrorPinch
 // below. Unlike mirror lines (a whole-number count with no meaningful "in between"), a gap is a
@@ -104,6 +137,13 @@ function nearestMultipleOf(value: number, increment: number): number {
 // calibrated so a full, arm's-length pinch spread (scale ~2.5) sweeps close to the whole
 // MIN_MIRROR_GAP..MAX_MIRROR_GAP range; retune by feel on a real device.
 const PINCH_SCALE_TO_MIRROR_GAP_SCALE = 0.6
+// The crop-targeting pinch's own job: cropRadius, live 1:1-tracked the same continuous way
+// mirrorGap/tightness are above — spread grows it toward MAX_CROP_RADIUS (reveal more of the canvas),
+// squeeze shrinks it toward MIN_CROP_RADIUS (crop in tighter), same "spread = more, squeeze = less"
+// direction mirrorGap's own pinch already uses. Calibrated the same way as PINCH_SCALE_TO_TIGHTNESS_SCALE
+// above (a full, arm's-length pinch spread sweeps close to the whole range); retune by feel on a real
+// device, same disclaimer as every other gesture-calibration constant in this file.
+const PINCH_SCALE_TO_CROP_RADIUS_SCALE = (MAX_CROP_RADIUS - MIN_CROP_RADIUS) / 1.5
 // How much relative pinch scale nudges the pattern's own pulse phase live, while the pinch is
 // targeting the pattern — see manualPulseOffset's own comment further down for the full mechanism.
 // Deliberately NOT also driven by the pinch's release velocity — an earlier version fed
@@ -115,14 +155,14 @@ const PINCH_SCALE_TO_MIRROR_GAP_SCALE = 0.6
 // a pinch's scale delta pushes something," just onto a different destination) — a full, arm's-length
 // pinch spread sweeps the ripples through roughly half a lap; retune by feel on a real device.
 const PINCH_SCALE_TO_PULSE_OFFSET_SCALE = 0.5
-// A pinch targeting the pattern moves line thickness together with zoom (see targetsPatternZoom's
-// pinch handling further down) — density lives on the twist/Focus gesture instead (see
-// ROTATION_DEGREES_TO_TIGHTNESS_SCALE below), so pinch's own job here is just "how the outline itself
-// looks," not the shape's underlying density. Live 1:1-tracked the same way
+// A pinch targeting the pattern moves density together with zoom (see targetsPatternZoom's pinch
+// handling further down) — pinching in thins the pattern out on top of the pulse's own shrink, so
+// both read as one "zooming in" motion; line thickness lives on the twist/Focus gesture instead (see
+// ROTATION_DEGREES_TO_STROKE_WIDTH_SCALE below). Live 1:1-tracked the same way
 // PINCH_SCALE_TO_MIRROR_GAP_SCALE drives mirrorGap — calibrated the same way too (a full, arm's-length
-// pinch spread sweeps close to the whole MIN_STROKE_WIDTH..MAX_STROKE_WIDTH range), divided by 1.5
+// pinch spread sweeps close to the whole MIN_TIGHTNESS..MAX_TIGHTNESS range), divided by 1.5
 // (scale ~2.5 at full spread, so event.scale - 1 tops out around 1.5).
-const PINCH_SCALE_TO_STROKE_WIDTH_SCALE = (MAX_STROKE_WIDTH - MIN_STROKE_WIDTH) / 1.5
+const PINCH_SCALE_TO_TIGHTNESS_SCALE = (MAX_TIGHTNESS - MIN_TIGHTNESS) / 1.5
 // How much relative pinch scale nudges gravity's own strength, while the pinch is targeting gravity —
 // against gravity's own *signed, absolute* value, unlike every other pinch-driven value in this file
 // (mirrorGap, strokeWidth, pulse), which move relative to whichever direction was already current.
@@ -135,7 +175,7 @@ const PINCH_SCALE_TO_STROKE_WIDTH_SCALE = (MAX_STROKE_WIDTH - MIN_STROKE_WIDTH) 
 // "shrink the now-negative value" and walking straight back toward 0 instead of continuing on — see
 // GRAVITY_ZERO_STICKY_ZONE below for what makes landing exactly on 0 along the way actually practical
 // by feel, and reverseGravity for the other, one-tap way to flip polarity outright. Calibrated the same
-// way as PINCH_SCALE_TO_STROKE_WIDTH_SCALE above: a full, arm's-length pinch spread or squeeze sweeps
+// way as PINCH_SCALE_TO_TIGHTNESS_SCALE above: a full, arm's-length pinch spread or squeeze sweeps
 // close to the whole [0, MAX_GRAVITY] magnitude range on either side of 0. Same untestable-without-a-
 // device disclaimer as every other pinch-derived scale above.
 const PINCH_SCALE_TO_GRAVITY_SCALE = MAX_GRAVITY / 1.5
@@ -148,12 +188,12 @@ const PINCH_SCALE_TO_GRAVITY_SCALE = MAX_GRAVITY / 1.5
 // reads as a real, findable-by-feel detent without turning the middle of the gesture numb.
 const GRAVITY_ZERO_STICKY_ZONE = MAX_GRAVITY * 0.06
 // The twist/rotation gesture's own job now: "Focus" rather than spin — see rotationGesture's own
-// comment for the full reasoning. How many degrees of twist move the pattern's own density
-// (tightness) through its whole range — live 1:1-tracked the same way every pinch-driven value above
-// is, just keyed off event.rotation (radians, converted to degrees) instead of event.scale. 180°
-// (a comfortable half-turn) sweeps the whole MIN_TIGHTNESS..MAX_TIGHTNESS range; retune by feel on a
-// real device, same disclaimer as every other gesture-derived scale in this file.
-const ROTATION_DEGREES_TO_TIGHTNESS_SCALE = (MAX_TIGHTNESS - MIN_TIGHTNESS) / 180
+// comment for the full reasoning. How many degrees of twist move the pattern's own line thickness
+// (strokeWidth) through its whole range — live 1:1-tracked the same way every pinch-driven value
+// above is, just keyed off event.rotation (radians, converted to degrees) instead of event.scale.
+// 180° (a comfortable half-turn) sweeps the whole MIN_STROKE_WIDTH..MAX_STROKE_WIDTH range; retune by
+// feel on a real device, same disclaimer as every other gesture-derived scale in this file.
+const ROTATION_DEGREES_TO_STROKE_WIDTH_SCALE = (MAX_STROKE_WIDTH - MIN_STROKE_WIDTH) / 180
 // The same twist/Focus gesture's gravity-mode job: pairs with the gravity-targeting pinch above
 // (strength) the way pattern's own pinch+twist pair (zoom+density) already do — twist dials friction
 // live while pinch dials strength, so both of gravity's two numbers sit under one two-finger gesture.
@@ -161,7 +201,14 @@ const ROTATION_DEGREES_TO_TIGHTNESS_SCALE = (MAX_TIGHTNESS - MIN_TIGHTNESS) / 18
 // bounceFriction is a smooth 0..5 range with a meaningful in-between, same as tightness. 180° sweeps
 // the whole MIN_BOUNCE_FRICTION..MAX_BOUNCE_FRICTION range; retune by feel on a real device, same
 // disclaimer as every other gesture-derived scale in this file.
-const ROTATION_DEGREES_TO_FRICTION_SCALE = (MAX_BOUNCE_FRICTION - MIN_BOUNCE_FRICTION) / 180
+const ROTATION_DEGREES_TO_FRICTION_SCALE = -(MAX_BOUNCE_FRICTION - MIN_BOUNCE_FRICTION) / 180
+// The crop target's own Focus job: holeRadius, live 1:1-tracked the same continuous way tightness/
+// bounceFriction are — a plain scrub, no click-stops needed (unlike mirrorLines below), pairing with
+// the crop-targeting pinch's own cropRadius control the same way gravity's pinch+twist pair (strength+
+// friction) already does. Same 180°-sweeps-the-whole-range calibration as every other continuous twist
+// value above; retune by feel on a real device, same disclaimer as every other gesture-calibration
+// constant in this file.
+const ROTATION_DEGREES_TO_HOLE_RADIUS_SCALE = (MAX_HOLE_RADIUS - MIN_HOLE_RADIUS) / 180
 // The same twist/Focus gesture's mirror-mode job: dial mirrorLines up/down a whole step per this many
 // degrees of twist, like a click-stop dial rather than a smooth scrub — mirrorLines is a whole-number
 // count with no meaningful "in between" (see PINCH_SCALE_TO_MIRROR_GAP_SCALE's own comment on the
@@ -249,7 +296,31 @@ const GROUP_GESTURE_TARGET: Partial<Record<ControlGroup, GestureTarget>> = {
 }
 
 export default function SwirlScreen() {
-  const { settings, resetSettings, setBackgroundCycleSpeed, setBounceFriction, setDashStyle, setForegroundCycleSpeed, setGestureTarget, setGravity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setTriggerStackExpanded, setZoomSpeed } = useSwirlSettings()
+  const {
+    settings,
+    resetSettings,
+    setBackgroundColors,
+    setBackgroundCycleSpeed,
+    setBounceFriction,
+    setCropRadius,
+    setDashStyle,
+    setForegroundColors,
+    setForegroundCycleSpeed,
+    setGestureTarget,
+    setGravity,
+    setHoleRadius,
+    setMirrorAlternateColors,
+    setMirrorGap,
+    setMirrorLines,
+    setMirrorRotationSpeed,
+    setPattern,
+    setPolygonSides,
+    setRotationSpeed,
+    setStrokeWidth,
+    setTightness,
+    setTriggerStackExpanded,
+    setZoomSpeed
+  } = useSwirlSettings()
   const { medium, notification, selection } = useVibration()
 
   // The transport row's back/forward FABs (see OnScreenControls) — and every direct on-canvas "hot
@@ -685,6 +756,12 @@ export default function SwirlScreen() {
   // other gesture-driven value in this file uses (see startTightness/startMirrorLines below for
   // rotationGesture's own version of this).
   const startMirrorGap = useSharedValue(0)
+  // Captured at pinch-start the same way startMirrorGap is, for the crop target's own pinch-driven
+  // cropRadius (see PINCH_SCALE_TO_CROP_RADIUS_SCALE's own comment).
+  const startCropRadius = useSharedValue(0)
+  // Captured at Focus-gesture-start the same way startTightness/startBounceFriction are, for the crop
+  // target's own twist-driven holeRadius (see ROTATION_DEGREES_TO_HOLE_RADIUS_SCALE's own comment).
+  const startHoleRadius = useSharedValue(0)
   // Captured at pinch-start the same way startMirrorGap is — the gravity-targeting pinch below reads
   // this as its own starting *signed* value (see PINCH_SCALE_TO_GRAVITY_SCALE's own comment).
   const startGravity = useSharedValue(0)
@@ -695,13 +772,13 @@ export default function SwirlScreen() {
   // transition (see the pinch's own onUpdate/onEnd) — nothing downstream reads this as a value.
   const gravityStuckAtZero = useSharedValue(false)
   // Captured at pinch-start the same way startMirrorGap is, for the one other property a
-  // pattern-targeting pinch drives alongside zoom — see PINCH_SCALE_TO_STROKE_WIDTH_SCALE's own
-  // comment for why line thickness moves together with zoom.
-  const startStrokeWidth = useSharedValue(0)
-  // Captured at Focus-gesture-start (rotationGesture's onStart) instead — see
-  // ROTATION_DEGREES_TO_TIGHTNESS_SCALE's own comment for why density lives on the twist now, not
-  // the pinch.
+  // pattern-targeting pinch drives alongside zoom — see PINCH_SCALE_TO_TIGHTNESS_SCALE's own
+  // comment for why density moves together with zoom.
   const startTightness = useSharedValue(0)
+  // Captured at Focus-gesture-start (rotationGesture's onStart) instead — see
+  // ROTATION_DEGREES_TO_STROKE_WIDTH_SCALE's own comment for why line thickness lives on the twist
+  // now, not the pinch.
+  const startStrokeWidth = useSharedValue(0)
   // Captured at Focus-gesture-start the same way startTightness is — the gravity-targeting twist
   // below reads this for its own starting friction, see ROTATION_DEGREES_TO_FRICTION_SCALE's own
   // comment.
@@ -1136,7 +1213,9 @@ export default function SwirlScreen() {
   // recentres the handle itself (springs back to the screen center — see gravityHandle's own recenter),
   // all three independent of each other rather than one replacing another.
   const recenterGestureTarget = useCallback(() => {
-    if (activeTargets.has('pattern')) resetPattern()
+    // 'crop' rides on the pattern epicentre (see useEpicenter.ts's own targetsPattern fallback) rather
+    // than having a point of its own, so recentring while it's active recentres that same epicentre.
+    if (activeTargets.has('pattern') || activeTargets.has('crop')) resetPattern()
     if (activeTargets.has('mirror')) resetMirror()
     if (activeTargets.has('gravity')) resetGravityPosition()
     selection()
@@ -1392,69 +1471,84 @@ export default function SwirlScreen() {
   // ahead of having anything to act on" comment), so this fits the same tap/hold-does-something-else
   // convention every other transport FAB with a bonus long-press already uses. Wraps rather than
   // clamping, same "cycling is a loop, not a bounded range" feel nextPattern/nextDashStyle already have.
+  // No explicit selection() of its own — this is only ever reached through OnScreenControls' own
+  // cycleSidesHold, which now comes from @rific/feedback-press's useHoldToRepeat and already pulses
+  // a haptic on every tick on its own (see that hook's own comment); a second call here would double
+  // it up.
   const cycleSides = useCallback(() => {
     pushHistory()
     const nextSides = ((settings.polygonSides - MIN_POLYGON_SIDES + 1) % (MAX_POLYGON_SIDES - MIN_POLYGON_SIDES + 1)) + MIN_POLYGON_SIDES
     setPolygonSides(nextSides)
-    selection()
-  }, [pushHistory, selection, setPolygonSides, settings.polygonSides])
+  }, [pushHistory, setPolygonSides, settings.polygonSides])
 
-  // Mirror mode's two transport buttons (see OnScreenControls) — walk the same signed mirrorLines/
-  // mirrorAlternateColors scale the Focus twist gesture already dials through (see rotationGesture's
-  // own targetsMirrorRotation branch below): a ±1 step past 0 crosses into "negative" territory,
-  // flipping mirrorAlternateColors on and counting magnitude back up, rather than dead-ending at 0 the
-  // way a plain mirrorLines clamp would. setMirrorAlternateColors only fires when the sign actually
-  // changed, so a step that stays on the same side doesn't churn a no-op update. The explicit clamp on
-  // the signed step matters even though setMirrorLines self-clamps its own magnitude — it's the signed
-  // value, not just the magnitude, that has to stay in [-MAX_MIRROR_LINES, MAX_MIRROR_LINES] here. The
-  // buttons themselves disable only at the true signed extremes (see OnScreenControls' own mirrorLines/
-  // mirrorAlternateColors props), not at the 0 midpoint — both directions stay valid there.
-  const addMirrorLine = useCallback(() => {
+  // Mirror mode's two transport buttons (see OnScreenControls) — mirrorLines itself lives entirely on
+  // the Focus twist gesture now (see rotationGesture's own targetsMirrorRotation branch below, a
+  // click-stop dial), which is what freed these two flanks up for a foreground/background color pair
+  // instead of a second, redundant way to dial the same count. Both colors are Look-tracked fields, so
+  // every one of these pushes history first, same as swapColorsWithFeedback below.
+  //
+  // Right (foreground): tap picks one fresh random hue, replacing the list outright; long-press-and-
+  // hold keeps appending another random hue on top of whatever's already there instead — the "rainbow
+  // soup" half of the pair, capped at MAX_RAINBOW_SOUP_COLORS purely so a long hold can't grow the list
+  // without bound, not because the design wants a limit. The cap's own early return is what makes this
+  // safe to keep calling on a timer, the same shape mirror's old maxMirrorLines/minMirrorLines already
+  // used for their own hold-repeat guard.
+  const randomizeForeground = useCallback(() => {
     pushHistory()
-    const currentSigned = signedMirrorLines(settings.mirrorLines, settings.mirrorAlternateColors)
-    const next = mirrorLinesFromSigned(clamp(currentSigned + 1, -MAX_MIRROR_LINES, MAX_MIRROR_LINES))
-    setMirrorLines(next.mirrorLines)
-    if (next.mirrorAlternateColors !== settings.mirrorAlternateColors) setMirrorAlternateColors(next.mirrorAlternateColors)
+    setForegroundColors([randomHexColor()])
     selection()
-  }, [pushHistory, selection, setMirrorLines, setMirrorAlternateColors, settings.mirrorLines, settings.mirrorAlternateColors])
-  const removeMirrorLine = useCallback(() => {
+  }, [pushHistory, selection, setForegroundColors])
+  // No explicit selection() of its own — same reasoning as cycleSides above: only ever reached
+  // through growForegroundHold (@rific/feedback-press's useHoldToRepeat), which already pulses on
+  // every tick.
+  const growForeground = useCallback(() => {
+    if (settings.foregroundColors.length >= MAX_RAINBOW_SOUP_COLORS) return
     pushHistory()
-    const currentSigned = signedMirrorLines(settings.mirrorLines, settings.mirrorAlternateColors)
-    const next = mirrorLinesFromSigned(clamp(currentSigned - 1, -MAX_MIRROR_LINES, MAX_MIRROR_LINES))
-    setMirrorLines(next.mirrorLines)
-    if (next.mirrorAlternateColors !== settings.mirrorAlternateColors) setMirrorAlternateColors(next.mirrorAlternateColors)
-    selection()
-  }, [pushHistory, selection, setMirrorLines, setMirrorAlternateColors, settings.mirrorLines, settings.mirrorAlternateColors])
-  // Add/Remove mirror's own long-press bonus (see OnScreenControls) — each treats 0 as a "pass through
-  // first" stop in the direction it points, mirror images of each other: "+" jumps to 0 if currently
-  // negative, otherwise all the way to +MAX_MIRROR_LINES; "-" jumps to 0 if currently positive,
-  // otherwise all the way to -MAX_MIRROR_LINES (MAX_MIRROR_LINES with alternate colors on). Wired to
-  // useHoldToRepeat (see OnScreenControls' own maxMirrorLinesHold/minMirrorLinesHold), so continuing to
-  // hold past the first hop calls this again — landing on 0 the first tick, then the far extreme the
-  // next, the same two-stop journey a tap-tap would take, just automatic. The early return once the
-  // target matches where the dial already sits is what makes that safe to keep calling on a timer:
-  // without it, a hold that outlasts reaching the far extreme would keep pushing no-op history entries
-  // and firing a haptic every tick for as long as the button stayed held.
-  const maxMirrorLines = useCallback(() => {
-    const currentSigned = signedMirrorLines(settings.mirrorLines, settings.mirrorAlternateColors)
-    const targetSigned = currentSigned < 0 ? 0 : MAX_MIRROR_LINES
-    if (targetSigned === currentSigned) return
+    setForegroundColors([...settings.foregroundColors, randomHexColor()])
+  }, [pushHistory, setForegroundColors, settings.foregroundColors])
+
+  // Left (background): both actions are a single function apiece that branch on backgroundColors' own
+  // *current* shape, not a separate "is this the first press" flag — useHoldToRepeat already calls its
+  // action fresh on every tick (see useHoldToRepeat.ts's own latestAction), so the long-press action
+  // below naturally reads as "smart" on its first firing and a plain flip on every one after, just by
+  // inspecting what's already there. isDarkColor is the exact same contrast heuristic the existing
+  // colors reroll already uses (see useRerollUnits.tsx), just read in the other direction here —
+  // background contrasted against the current foreground, not foreground driving a fresh background.
+  //
+  // Tap: alternates a single solid color. Lands on whichever of black/white contrasts against the
+  // current foreground if it isn't already one of the two; if it already is, just flips to the other.
+  const alternateBackground = useCallback(() => {
     pushHistory()
-    const next = mirrorLinesFromSigned(targetSigned)
-    setMirrorLines(next.mirrorLines)
-    if (next.mirrorAlternateColors !== settings.mirrorAlternateColors) setMirrorAlternateColors(next.mirrorAlternateColors)
+    const [onlyBackgroundColor] = settings.backgroundColors
+    if (settings.backgroundColors.length === 1 && isPureBlackOrWhite(onlyBackgroundColor)) {
+      setBackgroundColors([onlyBackgroundColor === '#FFFFFF' ? '#000000' : '#FFFFFF'])
+    } else {
+      setBackgroundColors([isDarkColor(settings.foregroundColors[0]) ? '#FFFFFF' : '#000000'])
+    }
     selection()
-  }, [pushHistory, selection, setMirrorLines, setMirrorAlternateColors, settings.mirrorLines, settings.mirrorAlternateColors])
-  const minMirrorLines = useCallback(() => {
-    const currentSigned = signedMirrorLines(settings.mirrorLines, settings.mirrorAlternateColors)
-    const targetSigned = currentSigned > 0 ? 0 : -MAX_MIRROR_LINES
-    if (targetSigned === currentSigned) return
+  }, [pushHistory, selection, setBackgroundColors, settings.backgroundColors, settings.foregroundColors])
+  // Long-press-and-hold: manages a real two-color list instead of a single value. Sets a contrast-
+  // picked black/white pair if it isn't already one; if it already is, reverses it instead. Reversing a
+  // cycling list's own order reads as an instant jump mid-cycle, so calling this again every hold-repeat
+  // tick (see OnScreenControls' own useHoldToRepeat-wrapped wiring) is what produces a strobe while
+  // held — releasing just leaves whichever order it last landed on for backgroundCycleSpeed's own
+  // already-existing color-cycle animation to keep animating on its own from there, no new animation
+  // code needed.
+  // No explicit selection() of its own — same reasoning as cycleSides above: only ever reached
+  // through cycleBackgroundTwoToneHold (@rific/feedback-press's useHoldToRepeat), which already
+  // pulses on every tick.
+  const cycleBackgroundTwoTone = useCallback(() => {
     pushHistory()
-    const next = mirrorLinesFromSigned(targetSigned)
-    setMirrorLines(next.mirrorLines)
-    if (next.mirrorAlternateColors !== settings.mirrorAlternateColors) setMirrorAlternateColors(next.mirrorAlternateColors)
-    selection()
-  }, [pushHistory, selection, setMirrorLines, setMirrorAlternateColors, settings.mirrorLines, settings.mirrorAlternateColors])
+    const [firstBackgroundColor, secondBackgroundColor] = settings.backgroundColors
+    const isTwoTone = settings.backgroundColors.length === 2 && isPureBlackOrWhite(firstBackgroundColor) && isPureBlackOrWhite(secondBackgroundColor) && firstBackgroundColor !== secondBackgroundColor
+    if (isTwoTone) {
+      setBackgroundColors([secondBackgroundColor, firstBackgroundColor])
+    } else {
+      const calculated = isDarkColor(settings.foregroundColors[0]) ? '#FFFFFF' : '#000000'
+      const opposite = calculated === '#FFFFFF' ? '#000000' : '#FFFFFF'
+      setBackgroundColors([calculated, opposite])
+    }
+  }, [pushHistory, setBackgroundColors, settings.backgroundColors, settings.foregroundColors])
 
   // A canvas tap is just as much a direct look-changing "hot key" as any on-screen FAB — foreground/
   // backgroundColors are Look-tracked fields, so this needs pushHistory just like every FAB-driven
@@ -1526,7 +1620,7 @@ export default function SwirlScreen() {
   // the forward transport FAB's tweak (goForward/goForwardBatch further down — rerolls just one or a
   // few units at a time) share the exact same per-field random logic instead of two copies that can
   // drift apart.
-  const { rerollUnits, rerollUnitsByGroup } = useRerollUnits()
+  const { rerollUnits, rerollUnitsByGroup, rerollUnitsCropHole } = useRerollUnits()
 
   // pushHistoryAndReroll is captureLook/pushHistory's own batch-of-setters cousin — see pushHistory's
   // own comment (moved up near the top of this component, alongside captureLook/restoreLook/
@@ -1547,7 +1641,7 @@ export default function SwirlScreen() {
   )
 
   // Only the shake gesture drives this directly now (via randomizeGesture below, which is why it needs
-  // its own explicit notification() there — a shake has no Pressable of its own for @rific/haptic-press
+  // its own explicit notification() there — a shake has no Pressable of its own for @rific/feedback-press
   // to wire a haptic onto). The on-screen "randomize everything" shortcuts (the settings group's own
   // Randomize button, and a long press on the cog/chevron — see OnScreenControls/
   // ControlGroupTopSheetContent) go through randomizeGroup('settings') instead, whose own
@@ -1575,6 +1669,34 @@ export default function SwirlScreen() {
   )
 
   useRegisterSwirlRandomize(randomizeGroup)
+
+  // The gesture-target fan's own long-press-in-place bonus (see OnScreenControls' own
+  // handlePhaseChanged) — holding still on a fanned-out wedge randomizes whatever that mode's own
+  // Randomize button would, one level more targeted than randomizeGroup's plain per-ControlGroup slice:
+  // 'mirror' folds 'colors' in too, since colors has no gesture-target/drawer presence of its own and
+  // already rides along on mirror's own on-canvas contextual pair (see GROUP_GESTURE_TARGET's own
+  // comment) — a mirror-scoped randomize that left colors untouched would read as incomplete for the
+  // one target where they're presented as a matched pair. Both slices land as a single pushHistoryAndReroll
+  // call (not two randomizeGroup calls back to back), so it's one undo entry, not two. 'crop' has no
+  // ControlGroup of its own to begin with (its two radii are gesture-driven, not reroll units — see
+  // useEpicenter.ts's own crop comment) — rerollUnitsCropHole is its own narrow slice (see
+  // useRerollUnits.tsx) rather than the full 'pattern' group, which would also reroll the shape/sides
+  // underneath it. 'pattern' and 'gravity' have nothing special about them here, so they just fall
+  // through to the same per-group slice randomizeGroup itself already uses.
+  const randomizeGestureTarget = useCallback(
+    (target: GestureTarget) => {
+      if (target === 'mirror') {
+        pushHistoryAndReroll([...rerollUnitsByGroup.mirror, ...rerollUnitsByGroup.colors], { backgroundCycleSpeed: settings.backgroundCycleSpeed, foregroundCycleSpeed: settings.foregroundCycleSpeed })
+        return
+      }
+      if (target === 'crop') {
+        pushHistoryAndReroll(rerollUnitsCropHole)
+        return
+      }
+      pushHistoryAndReroll(rerollUnitsByGroup[target])
+    },
+    [pushHistoryAndReroll, rerollUnitsByGroup, rerollUnitsCropHole, settings.backgroundCycleSpeed, settings.foregroundCycleSpeed]
+  )
 
   // The top-right EdgeRevealZone's own long-press bonus (see its own onRandomizeEverything prop
   // comment) — the exact same 'settings' slice (every group's units combined) a long press on the
@@ -1608,9 +1730,11 @@ export default function SwirlScreen() {
   const targetsPatternRotation = activeTargets.has('pattern')
   const targetsMirrorRotation = activeTargets.has('mirror')
   const targetsGravityRotation = activeTargets.has('gravity')
+  const targetsCropRotation = activeTargets.has('crop')
   const targetsPatternZoom = activeTargets.has('pattern')
   const targetsMirrorPinch = activeTargets.has('mirror')
   const targetsGravityPinch = activeTargets.has('gravity')
+  const targetsCropPinch = activeTargets.has('crop')
 
   // Scoped to this same ref (not window) so the web wheel-pinch effect below only ever fires over
   // the canvas — never while the pointer is over the on-screen FAB controls or the settings sheets,
@@ -1621,8 +1745,9 @@ export default function SwirlScreen() {
     .onStart(() => {
       startMirrorGap.value = mirrorGap.value
       startPulseOffset.value = manualPulseOffset.value
-      startStrokeWidth.value = strokeWidth.value
+      startTightness.value = tightness.value
       startGravity.value = gravity.value
+      startCropRadius.value = cropRadius.value
       gravityStuckAtZero.value = Math.abs(gravity.value) <= GRAVITY_ZERO_STICKY_ZONE
       runOnJS(hideControls)()
     })
@@ -1645,15 +1770,16 @@ export default function SwirlScreen() {
       // true regardless of which way the pattern already happens to be zooming — without it, this
       // would visually run backwards whenever zoomSpeed is currently negative, which is an ordinary
       // state, not an edge case.
-      // strokeWidth rides along live too, the same direct way mirrorGap does above — see
-      // PINCH_SCALE_TO_STROKE_WIDTH_SCALE's own comment for why: unlike pulse (bipolar via zoomSpeed's
+      // Density rides along live too, the same direct way mirrorGap does above — see
+      // PINCH_SCALE_TO_TIGHTNESS_SCALE's own comment for why: unlike pulse (bipolar via zoomSpeed's
       // own sign), it's a plain unsigned magnitude with no "reversed" concept of its own, so spreading
-      // always grows it and pinching always shrinks it, no sign flip needed.
+      // always grows it and pinching always shrinks it, no sign flip needed — pinching in thins the
+      // pattern out on top of the pulse's own shrink, so both read as one "zooming in" motion.
       if (targetsPatternZoom) {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         manualPulseOffset.value = startPulseOffset.value + (reversed.value ? -1 : 1) * (event.scale - 1) * PINCH_SCALE_TO_PULSE_OFFSET_SCALE
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
-        strokeWidth.value = clamp(startStrokeWidth.value + (event.scale - 1) * PINCH_SCALE_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
+        tightness.value = clamp(startTightness.value + (event.scale - 1) * PINCH_SCALE_TO_TIGHTNESS_SCALE, MIN_TIGHTNESS, MAX_TIGHTNESS)
       }
       // Signed, unclamped-through-zero, and — unlike every other pinch-driven value in this file — not
       // anchored to whichever direction was already current at gesture-start either. See
@@ -1674,6 +1800,13 @@ export default function SwirlScreen() {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         gravity.value = stuckAtZero ? 0 : clamp(rawGravity, MIN_GRAVITY, MAX_GRAVITY)
       }
+      // The crop target's own zoom: cropRadius, live 1:1-tracked the same direct way mirrorGap is
+      // above — see PINCH_SCALE_TO_CROP_RADIUS_SCALE's own comment for the spread-grows/squeeze-
+      // shrinks direction.
+      if (targetsCropPinch) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        cropRadius.value = clamp(startCropRadius.value + (event.scale - 1) * PINCH_SCALE_TO_CROP_RADIUS_SCALE, MIN_CROP_RADIUS, MAX_CROP_RADIUS)
+      }
     })
     .onEnd((event) => {
       if (targetsPatternZoom) {
@@ -1690,14 +1823,14 @@ export default function SwirlScreen() {
         // zoomSpeed itself is deliberately left alone here — see PINCH_SCALE_TO_PULSE_OFFSET_SCALE's
         // own comment above for why a pinch doesn't feed its release velocity into it. The live pulse
         // nudge above is still the pinch's own zoom feedback, it just doesn't outlive the gesture as a
-        // new sustained speed. Recomputed from event.scale rather than trusting strokeWidth.value
+        // new sustained speed. Recomputed from event.scale rather than trusting tightness.value
         // already landed here from the last onUpdate — same "onEnd's own event is authoritative"
         // reasoning as mirrorGap's own commit below, and the same dual-write (SharedValue and setting
         // agree immediately) shape too.
-        const nextStrokeWidth = clamp(startStrokeWidth.value + (event.scale - 1) * PINCH_SCALE_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
+        const nextTightness = clamp(startTightness.value + (event.scale - 1) * PINCH_SCALE_TO_TIGHTNESS_SCALE, MIN_TIGHTNESS, MAX_TIGHTNESS)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
-        strokeWidth.value = nextStrokeWidth
-        runOnJS(setStrokeWidth)(nextStrokeWidth)
+        tightness.value = nextTightness
+        runOnJS(setTightness)(nextTightness)
       }
       if (targetsMirrorPinch) {
         // Recomputed from event.scale with the same formula as onUpdate above, rather than trusting
@@ -1727,6 +1860,15 @@ export default function SwirlScreen() {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         gravity.value = nextGravity
         runOnJS(setGravity)(nextGravity)
+      }
+      if (targetsCropPinch) {
+        // Recomputed from event.scale rather than trusting cropRadius.value already landed here from
+        // the last onUpdate — same "onEnd's own event is authoritative" reasoning as mirrorGap's own
+        // commit above.
+        const nextCropRadius = clamp(startCropRadius.value + (event.scale - 1) * PINCH_SCALE_TO_CROP_RADIUS_SCALE, MIN_CROP_RADIUS, MAX_CROP_RADIUS)
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        cropRadius.value = nextCropRadius
+        runOnJS(setCropRadius)(nextCropRadius)
       }
       // Fired again on release (not just on start) so the on-screen controls get a full,
       // uninterrupted hide window measured from the end of the pinch — same reasoning as the
@@ -1766,10 +1908,11 @@ export default function SwirlScreen() {
         const foldedPulse = basePulse.value + manualPulseOffset.value
         basePulse.value = ((foldedPulse % 1) + 1) % 1
         manualPulseOffset.value = 0
-        setStrokeWidth(strokeWidth.value)
+        setTightness(tightness.value)
       }
       if (targetsMirrorPinch) setMirrorGap(mirrorGap.value)
       if (targetsGravityPinch) setGravity(gravity.value)
+      if (targetsCropPinch) setCropRadius(cropRadius.value)
       hideControls()
     }
 
@@ -1785,8 +1928,9 @@ export default function SwirlScreen() {
         // First tick since going idle — the wheel equivalent of onStart above.
         startMirrorGap.value = mirrorGap.value
         startPulseOffset.value = manualPulseOffset.value
-        startStrokeWidth.value = strokeWidth.value
+        startTightness.value = tightness.value
         startGravity.value = gravity.value
+        startCropRadius.value = cropRadius.value
         gravityStuckAtZero.value = Math.abs(gravity.value) <= GRAVITY_ZERO_STICKY_ZONE
         scale = 1
         hideControls()
@@ -1799,7 +1943,7 @@ export default function SwirlScreen() {
       }
       if (targetsPatternZoom) {
         manualPulseOffset.value = startPulseOffset.value + (reversed.value ? -1 : 1) * (scale - 1) * PINCH_SCALE_TO_PULSE_OFFSET_SCALE
-        strokeWidth.value = clamp(startStrokeWidth.value + (scale - 1) * PINCH_SCALE_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
+        tightness.value = clamp(startTightness.value + (scale - 1) * PINCH_SCALE_TO_TIGHTNESS_SCALE, MIN_TIGHTNESS, MAX_TIGHTNESS)
       }
       if (targetsGravityPinch) {
         const rawGravity = startGravity.value - (scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
@@ -1807,6 +1951,9 @@ export default function SwirlScreen() {
         if (stuckAtZero && !gravityStuckAtZero.value) selection()
         gravityStuckAtZero.value = stuckAtZero
         gravity.value = stuckAtZero ? 0 : clamp(rawGravity, MIN_GRAVITY, MAX_GRAVITY)
+      }
+      if (targetsCropPinch) {
+        cropRadius.value = clamp(startCropRadius.value + (scale - 1) * PINCH_SCALE_TO_CROP_RADIUS_SCALE, MIN_CROP_RADIUS, MAX_CROP_RADIUS)
       }
       idleTimer = setTimeout(endGesture, WHEEL_PINCH_IDLE_MS)
     }
@@ -1816,18 +1963,43 @@ export default function SwirlScreen() {
       node.removeEventListener?.('wheel', onWheel)
       if (idleTimer !== null) clearTimeout(idleTimer)
     }
-  }, [targetsMirrorPinch, targetsPatternZoom, targetsGravityPinch, hideControls, setMirrorGap, setStrokeWidth, setGravity, selection, basePulse, manualPulseOffset, mirrorGap, gravity, reversed, startMirrorGap, startPulseOffset, startStrokeWidth, startGravity, strokeWidth, gravityStuckAtZero])
+  }, [
+    targetsMirrorPinch,
+    targetsPatternZoom,
+    targetsGravityPinch,
+    targetsCropPinch,
+    hideControls,
+    setMirrorGap,
+    setTightness,
+    setGravity,
+    setCropRadius,
+    selection,
+    basePulse,
+    manualPulseOffset,
+    mirrorGap,
+    gravity,
+    cropRadius,
+    reversed,
+    startMirrorGap,
+    startPulseOffset,
+    startTightness,
+    startGravity,
+    startCropRadius,
+    tightness,
+    gravityStuckAtZero
+  ])
 
   // The twist/rotation gesture's job is Focus now, not "spin the pattern": rotationSpeed/
   // mirrorRotationSpeed live on the canvas's own outer-field drag instead (see useEpicenter.ts). Pattern
-  // gets a live, continuous density scrub; mirror gets a discrete, click-stop dial over mirrorLines;
-  // gravity gets a live, continuous friction scrub, pairing with the gravity-targeting pinch's own
-  // strength control — each reuses the same physical twist, mapped independently per active target,
-  // the same shape every other gesture in this file already uses.
+  // gets a live, continuous line-thickness scrub; mirror gets a discrete, click-stop dial over
+  // mirrorLines; gravity gets a live, continuous friction scrub, pairing with the gravity-targeting
+  // pinch's own strength control — each reuses the same physical twist, mapped independently per active
+  // target, the same shape every other gesture in this file already uses.
   const rotationGesture = Gesture.Rotation()
     .onStart(() => {
-      startTightness.value = tightness.value
+      startStrokeWidth.value = strokeWidth.value
       startBounceFriction.value = bounceFriction.value
+      startHoleRadius.value = holeRadius.value
       startMirrorLines.value = settings.mirrorLines
       mirrorLinesLive.value = settings.mirrorLines
       // Seeded from the real, current mirrorAlternateColors — not hardcoded false — so a gesture that
@@ -1841,12 +2013,12 @@ export default function SwirlScreen() {
     .onUpdate((event) => {
       const degrees = (event.rotation * 180) / Math.PI
       // Live 1:1 tracking while the fingers move — same shape as every pinch-driven value in this
-      // file (mirrorGap, strokeWidth, gravity's strength): recomputed from startTightness each event
+      // file (mirrorGap, tightness, gravity's strength): recomputed from startStrokeWidth each event
       // rather than accumulated onto the previous frame's value, since event.rotation is already
       // relative to gesture start.
       if (targetsPatternRotation) {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
-        tightness.value = clamp(startTightness.value + degrees * ROTATION_DEGREES_TO_TIGHTNESS_SCALE, MIN_TIGHTNESS, MAX_TIGHTNESS)
+        strokeWidth.value = clamp(startStrokeWidth.value + degrees * ROTATION_DEGREES_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
       }
       // Gravity's own Focus job: friction, live 1:1-tracked the same continuous way tightness is
       // above — see ROTATION_DEGREES_TO_FRICTION_SCALE's own comment for why this pairs with the
@@ -1854,6 +2026,12 @@ export default function SwirlScreen() {
       if (targetsGravityRotation) {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         bounceFriction.value = clamp(startBounceFriction.value + degrees * ROTATION_DEGREES_TO_FRICTION_SCALE, MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION)
+      }
+      // The crop target's own Focus job: holeRadius, live 1:1-tracked the same continuous way
+      // strokeWidth/bounceFriction are above — see ROTATION_DEGREES_TO_HOLE_RADIUS_SCALE's own comment.
+      if (targetsCropRotation) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        holeRadius.value = clamp(startHoleRadius.value + degrees * ROTATION_DEGREES_TO_HOLE_RADIUS_SCALE, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS)
       }
       // Discrete rather than continuous: mirrorLines is a whole-number count, so this steps like a
       // click-stop dial instead of a smooth scrub — one line per ROTATION_DEGREES_PER_MIRROR_LINE of
@@ -1897,14 +2075,14 @@ export default function SwirlScreen() {
     })
     .onEnd((event) => {
       if (targetsPatternRotation) {
-        // Recomputed from event.rotation rather than trusting tightness.value already landed here
+        // Recomputed from event.rotation rather than trusting strokeWidth.value already landed here
         // from the last onUpdate — same "onEnd's own event is authoritative" reasoning every other
         // gesture-driven commit in this file uses.
         const degrees = (event.rotation * 180) / Math.PI
-        const nextTightness = clamp(startTightness.value + degrees * ROTATION_DEGREES_TO_TIGHTNESS_SCALE, MIN_TIGHTNESS, MAX_TIGHTNESS)
+        const nextStrokeWidth = clamp(startStrokeWidth.value + degrees * ROTATION_DEGREES_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
-        tightness.value = nextTightness
-        runOnJS(setTightness)(nextTightness)
+        strokeWidth.value = nextStrokeWidth
+        runOnJS(setStrokeWidth)(nextStrokeWidth)
       }
       if (targetsGravityRotation) {
         // Recomputed from event.rotation rather than trusting bounceFriction.value already landed
@@ -1915,6 +2093,16 @@ export default function SwirlScreen() {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         bounceFriction.value = nextBounceFriction
         runOnJS(setBounceFriction)(nextBounceFriction)
+      }
+      if (targetsCropRotation) {
+        // Recomputed from event.rotation rather than trusting holeRadius.value already landed here
+        // from the last onUpdate — same "onEnd's own event is authoritative" reasoning as
+        // bounceFriction's own commit above.
+        const degrees = (event.rotation * 180) / Math.PI
+        const nextHoleRadius = clamp(startHoleRadius.value + degrees * ROTATION_DEGREES_TO_HOLE_RADIUS_SCALE, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS)
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        holeRadius.value = nextHoleRadius
+        runOnJS(setHoleRadius)(nextHoleRadius)
       }
       // mirrorLines has nothing left to commit here — every step already went through setMirrorLines
       // live, in onUpdate, the instant it crossed each threshold.
@@ -2023,7 +2211,7 @@ export default function SwirlScreen() {
       </GestureDetector>
       {/* Forced on (independent of controlsVisible) while the group sheet is open — see
       OnScreenControls' own Portal, which keeps the trigger stack reachable the whole time. */}
-      <OnScreenControls visible={controlsVisible || groupSheetVisible} activeTargets={activeTargets} backDisabled={backDisabled} frozen={frozen} onToggleFrozen={toggleFrozen} onRecenterEverything={recenterEverything} gestureFanOpen={gestureFanOpen} onGestureFanOpenChange={setGestureFanOpen} onSelectGestureTarget={selectGestureTarget} onRecenter={recenterGestureTarget} onGoBack={goBack} onResetAllSettings={resetAllSettings} onGoForward={goForward} onGoForwardBatch={goForwardBatch} mirrorLines={settings.mirrorLines} mirrorAlternateColors={settings.mirrorAlternateColors} onAddMirrorLine={addMirrorLine} onRemoveMirrorLine={removeMirrorLine} onMaxMirrorLines={maxMirrorLines} onMinMirrorLines={minMirrorLines} onCycleShape={nextPattern} onCycleLineType={nextDashStyle} onCycleSides={cycleSides} onResetLineToSolid={resetLineToSolid} gravityRepelling={settings.gravity < 0} onReverseGravity={reverseGravity} onHideControls={hideControls} />
+      <OnScreenControls visible={controlsVisible || groupSheetVisible} activeTargets={activeTargets} backDisabled={backDisabled} frozen={frozen} onToggleFrozen={toggleFrozen} onRecenterEverything={recenterEverything} gestureFanOpen={gestureFanOpen} onGestureFanOpenChange={setGestureFanOpen} onSelectGestureTarget={selectGestureTarget} onRandomizeGestureTarget={randomizeGestureTarget} onRecenter={recenterGestureTarget} onGoBack={goBack} onResetAllSettings={resetAllSettings} onGoForward={goForward} onGoForwardBatch={goForwardBatch} onAlternateBackground={alternateBackground} onCycleBackgroundTwoTone={cycleBackgroundTwoTone} onRandomizeForeground={randomizeForeground} onGrowForeground={growForeground} onCycleShape={nextPattern} onCycleLineType={nextDashStyle} onCycleSides={cycleSides} onResetLineToSolid={resetLineToSolid} gravityRepelling={settings.gravity < 0} onReverseGravity={reverseGravity} onHideControls={hideControls} />
       <EdgeRevealZones active={!controlsVisible} onReveal={revealControls} triggerStackExpanded={settings.triggerStackExpanded} onPause={pause} onRecenterEverything={recenterEverything} onExpandTriggerStack={expandTriggerStack} onRandomizeEverything={randomizeEverything} />
     </View>
   )

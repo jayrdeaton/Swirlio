@@ -4,7 +4,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons'
 import * as AutoPaper from '@rific/auto-paper'
 import { Provider as AutoPaperProvider, useThemeSettings } from '@rific/auto-paper'
 import { DrawerProvider } from '@rific/drawer'
-import { HapticPressProvider, useHapticSettings } from '@rific/haptic-press'
+import { FeedbackPressProvider, useHapticSettings } from '@rific/feedback-press'
 import * as ExpoBlur from 'expo-blur'
 import { useFonts } from 'expo-font'
 import { Stack } from 'expo-router'
@@ -68,7 +68,7 @@ function FontsGate() {
   return null
 }
 
-// Bridges the persisted hapticsEnabled setting into @rific/haptic-press's own runtime context —
+// Bridges the persisted hapticsEnabled setting into @rific/feedback-press's own runtime context —
 // every haptic call site in the app (manual useVibration() calls and every auto-haptic FAB/button)
 // already gates on HapticSettingsContext.settings.vibrate, so this is the only place the toggle
 // needs to be wired in. Same shape as MonochromeThemeBridge above: read one context, push into
@@ -115,16 +115,16 @@ export default function RootLayout() {
           PortalHost near its own root — react-native-paper's Portal (used by OnScreenControls' trigger
           stack while a sheet is open, and by @rific/auto-paper's own Dialog) renders its content as a
           child of THAT PortalHost in the fiber tree, not as a child of wherever <Portal> was written.
-          With HapticPressProvider nested inside AutoPaperProvider, portaled content sat outside
-          HapticPressProvider's own subtree entirely, so useHapticPressPaper() saw no injected `paper`
-          there and every haptic-press Paper wrapper (FAB, etc.) silently rendered its bare-RN
+          With FeedbackPressProvider nested inside AutoPaperProvider, portaled content sat outside
+          FeedbackPressProvider's own subtree entirely, so useFeedbackPressPaper() saw no injected `paper`
+          there and every feedback-press Paper wrapper (FAB, etc.) silently rendered its bare-RN
           fallback — letters instead of icons — the instant its content got portaled. Hoisting
-          HapticPressProvider above AutoPaperProvider makes it an ancestor of PortalHost too, so
+          FeedbackPressProvider above AutoPaperProvider makes it an ancestor of PortalHost too, so
           portaled content stays inside its context regardless of where react-native-paper decides to
-          mount the host. HapticPressProvider itself has no dependency on AutoPaperProvider being an
+          mount the host. FeedbackPressProvider itself has no dependency on AutoPaperProvider being an
           ancestor (paper is a static import, not read from AutoPaper's own context), so this reorder
           is free. */}
-          <HapticPressProvider initialValue={{ vibrate: true }} paper={RNPaper}>
+          <FeedbackPressProvider initialValue={{ vibrate: true }} paper={RNPaper}>
             <HapticsSettingsBridge />
             <AutoPaperProvider initialValue={{ appearance: 'system', color: initialScheme === 'dark' ? MONOCHROME_WHITE : MONOCHROME_BLACK }} expoBlur={ExpoBlur}>
               <MonochromeThemeBridge />
@@ -155,7 +155,7 @@ export default function RootLayout() {
                 </SwirlResetProvider>
               </DrawerProvider>
             </AutoPaperProvider>
-          </HapticPressProvider>
+          </FeedbackPressProvider>
         </SwirlSettingsProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

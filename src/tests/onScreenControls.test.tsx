@@ -1,8 +1,20 @@
 import { act, fireEvent, render, within } from '@testing-library/react-native'
 import React, { useState } from 'react'
+import * as gestureHandlerModule from 'react-native-gesture-handler'
 
+import { fanItemOffset } from '@/components/GestureFanItem'
 import { OnScreenControls } from '@/components/OnScreenControls'
-import { GestureTarget } from '@/hooks/useEpicenter'
+import { GESTURE_TARGET_ORDER, GestureTarget } from '@/hooks/useEpicenter'
+
+// react-native-gesture-handler is mocked globally (see jest.setup.ts) — same registry-plus-handlers
+// shape swirlScreen.gesture.test.tsx already drives the canvas's own gestures through. This file only
+// ever renders OnScreenControls itself (never the canvas), so there's no other 'Pan' gesture in play to
+// disambiguate from — getLastGesture('Pan') always means the primary FAB's own fanGesture here.
+const gestureTestUtils = (gestureHandlerModule as typeof gestureHandlerModule & { __gestureTestUtils: unknown }).__gestureTestUtils as {
+  getGestures: (type: string) => any[]
+  getLastGesture: (type: string) => any
+  reset: () => void
+}
 
 // jest.mock factories can't close over module-scope imports — require() inside the factory is the
 // standard escape hatch (see colorListEditor.test.tsx for the same pattern).
@@ -16,9 +28,16 @@ jest.mock('react-native-paper', () => {
   }
 })
 
-// FAB now comes from @rific/haptic-press rather than react-native-paper (see OnScreenControls/
+// FAB now comes from @rific/feedback-press rather than react-native-paper (see OnScreenControls/
 // GlassToggleFab/LabeledFab) — mocked the same shallow way, still without pulling in the real
-// @rific/drawer/@rific/haptic-press chain (see the controlGroups mock below's own comment). Pattern's
+// @rific/drawer chain (see the controlGroups mock below's own comment). useHoldToRepeat/
+// useHoldToRepeatByKey are left as their real implementation via jest.requireActual — they're
+// pure, dependency-light hooks already covered by that package's own test suite, and this file's
+// own hold-repeat tests below (mockRandomizeGroup's call-count/timing assertions) are testing
+// OnScreenControls' *wiring* to them, not reinventing hook-level coverage. Their own internal
+// useVibration() call is a relative import inside that package, unaffected by this mock overriding
+// the package's own top-level useVibration export below — it hits the real one, backed by
+// jest-expo's own built-in expo-haptics mock, not mockSelection/mockNotification. Pattern's
 // trigger passes a custom icon-rendering function rather than a MaterialCommunityIcons name (see
 // OnScreenControls' GROUP_TRIGGERS) — stringifying that for a testID would embed its whole source, so
 // it gets one fixed name instead, same as every string icon gets its own. An explicit testID prop
@@ -27,17 +46,26 @@ jest.mock('react-native-paper', () => {
 // Pattern group trigger whenever it's showing 'pattern' too, so the icon-derived fallback alone can't
 // tell the two apart. icon is also forwarded as a plain prop (harmless — the real FAB ignores it) so
 // tests can assert which icon a given FAB actually received.
-jest.mock('@rific/haptic-press', () => {
+// mockSelection/mockNotification back the gesture-target fan's own haptics now (see OnScreenControls'
+// own fanGesture) — the "mock"-prefixed name is what lets a jest.mock factory (hoisted above these
+// declarations by babel-jest) reference them at all, the same convention every other mock* binding in
+// this file already relies on (see mockOpenGroup and friends below).
+const mockSelection = jest.fn()
+const mockNotification = jest.fn()
+jest.mock('@rific/feedback-press', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
+  const actual = jest.requireActual('@rific/feedback-press')
   return {
-    FAB: ({ icon, onPress, onLongPress, onPressIn, onPressOut, disabled, color, style, testID }: any) => <RN.Pressable testID={testID ?? `fab-${typeof icon === 'string' ? icon : 'pattern'}`} icon={icon} onPress={onPress} onLongPress={onLongPress} onPressIn={onPressIn} onPressOut={onPressOut} disabled={disabled} color={color} style={style} />
+    ...actual,
+    FAB: ({ icon, onPress, onLongPress, onPressIn, onPressOut, disabled, color, style, testID }: any) => <RN.Pressable testID={testID ?? `fab-${typeof icon === 'string' ? icon : 'pattern'}`} icon={icon} onPress={onPress} onLongPress={onLongPress} onPressIn={onPressIn} onPressOut={onPressOut} disabled={disabled} color={color} style={style} />,
+    useVibration: () => ({ selection: mockSelection, notification: mockNotification })
   }
 })
 
 // OnScreenControls only needs useOpenControlGroup()/useControlGroups()/useControlGroupSheetDrawer()
 // themselves — mocked here (rather than letting the real modules load) so this test never has to pull
-// in the real @rific/drawer/@rific/haptic-press chain, which controlGroups.test.tsx already covers.
+// in the real @rific/drawer chain, which controlGroups.test.tsx already covers.
 // isVisible (not isOpen) is what the component reads — see @rific/drawer's isVisible for why: it
 // stays true through the close animation, not just until something asks to close.
 const mockOpenGroup = jest.fn()
@@ -80,7 +108,19 @@ jest.mock('@/hooks/useSwirlSettings', () => {
     useSwirlSettings: () => {
       const [triggerStackExpanded, setTriggerStackExpanded] = useState(true)
       const [gravityMarkerVisible, setGravityMarkerVisible] = useState(false)
-      return { settings: { triggerStackExpanded, gravityMarkerVisible, pattern: mockPattern, dashStyle: mockDashStyle }, setTriggerStackExpanded, setGravityMarkerVisible }
+      // cropShaped/holeShaped back the crop target's own flanking toggles (see OnScreenControls'
+      // activeTargets.has('crop') branch) — same real-useState treatment as gravityMarkerVisible above,
+      // for the same reason: the toggle tests need a press to actually flip what this component reads
+      // back. Defaults match the real settings' own (both true — see useSwirlSettings.tsx).
+      const [cropShaped, setCropShaped] = useState(true)
+      const [holeShaped, setHoleShaped] = useState(true)
+      return {
+        settings: { triggerStackExpanded, gravityMarkerVisible, cropShaped, holeShaped, pattern: mockPattern, dashStyle: mockDashStyle },
+        setTriggerStackExpanded,
+        setGravityMarkerVisible,
+        setCropShaped,
+        setHoleShaped
+      }
     }
   }
 })
@@ -116,19 +156,16 @@ const defaultProps = {
   gestureFanOpen: false,
   onGestureFanOpenChange: jest.fn(),
   onSelectGestureTarget: jest.fn(),
+  onRandomizeGestureTarget: jest.fn(),
   onRecenter: jest.fn(),
   onGoBack: jest.fn(),
   onResetAllSettings: jest.fn(),
   onGoForward: jest.fn(),
   onGoForwardBatch: jest.fn(),
-  // Mid-range, not a boundary value, so boundary-disabled tests below can opt into 0/MAX explicitly
-  // rather than this default silently already being there.
-  mirrorLines: 2,
-  mirrorAlternateColors: false,
-  onAddMirrorLine: jest.fn(),
-  onRemoveMirrorLine: jest.fn(),
-  onMaxMirrorLines: jest.fn(),
-  onMinMirrorLines: jest.fn(),
+  onAlternateBackground: jest.fn(),
+  onCycleBackgroundTwoTone: jest.fn(),
+  onRandomizeForeground: jest.fn(),
+  onGrowForeground: jest.fn(),
   onCycleShape: jest.fn(),
   onCycleLineType: jest.fn(),
   onCycleSides: jest.fn(),
@@ -165,12 +202,43 @@ async function renderControls(overrides: Partial<typeof defaultProps> = {}) {
 describe('OnScreenControls', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    gestureTestUtils.reset()
     mockGroupSheetOpen = false
     mockActiveGroup = null
     mockBlurEnabled = true
     mockPattern = 'spiral'
     mockDashStyle = 'solid'
   })
+
+  // Drives the primary FAB's own press-drag-release gesture (see OnScreenControls' own fanGesture) the
+  // same way swirlScreen.gesture.test.tsx already drives the canvas's gestures — grabbing the mocked
+  // Pan gesture's recorded __handlers and invoking them directly rather than simulating a real native
+  // touch stream, which RNGH's own mock (see jest.setup.ts) has no native recognizer to produce.
+  // translationX/Y default to (0, 0) — dead center, right where a fresh touch-down lands.
+  async function fanBegin() {
+    await act(async () => {
+      gestureTestUtils.getLastGesture('Pan').__handlers.begin?.()
+    })
+  }
+
+  async function fanUpdate(translationX: number, translationY: number) {
+    await act(async () => {
+      gestureTestUtils.getLastGesture('Pan').__handlers.update?.({ translationX, translationY })
+    })
+  }
+
+  async function fanFinalize() {
+    await act(async () => {
+      gestureTestUtils.getLastGesture('Pan').__handlers.finalize?.()
+    })
+  }
+
+  // The exact dx/dy fanGesture's own onUpdate hit-tests each wedge against (see GestureFanItem's own
+  // fanItemOffset) — dragging to exactly this point always lands well within FAN_CAPTURE_RADIUS_PX of
+  // the wedge it names, regardless of the radius/angle-span constants' own current tuning.
+  function wedgeOffset(target: GestureTarget) {
+    return fanItemOffset(GESTURE_TARGET_ORDER.indexOf(target), GESTURE_TARGET_ORDER.length)
+  }
 
   // Faded via animated opacity rather than conditionally rendered (see EdgeRevealZones, which relies
   // on the real controls being non-interactive — not absent — while hidden), so "not visible" now
@@ -378,63 +446,79 @@ describe('OnScreenControls', () => {
   }
 
   // Cycling gave way to a fan (see OnScreenControls' own comment on why — cycling stopped scaling
-  // once the option count grew) — tapping the primary FAB no longer selects anything on its own, it
-  // just reveals the other targets; tapping one of those is what actually calls back out.
-  it('tapping the primary FAB opens the gesture-target fan without selecting anything, and tapping a fan item selects it and closes the fan back up', async () => {
+  // once the option count grew), and the fan itself gave way to a single press-drag-release (see
+  // fanGesture) — pressing down on the primary FAB opens it immediately, without selecting anything on
+  // its own; dragging onto a fan item live-selects it the instant the drag crosses in, well before any
+  // release.
+  it('pressing down on the primary FAB opens the gesture-target fan without selecting anything, and dragging onto a fan item live-selects it', async () => {
     const onSelectGestureTarget = jest.fn()
     const screen = await renderControls({ activeTargets: new Set(['pattern']), onSelectGestureTarget })
 
     // Collapsed at rest — every fan item sits at zero opacity, retracted onto the primary FAB.
     expect(fanItemOpacity(screen, 'mirror')).toBe(0)
 
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target'))
-    })
+    await fanBegin()
     expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
     expect(onSelectGestureTarget).not.toHaveBeenCalled()
 
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target-gravity'))
-    })
+    const { dx, dy } = wedgeOffset('gravity')
+    await fanUpdate(dx, dy)
     expect(onSelectGestureTarget).toHaveBeenCalledTimes(1)
     expect(onSelectGestureTarget).toHaveBeenCalledWith('gravity')
-    // Selecting closes the fan back up, same as if the primary FAB had been tapped again.
+
+    // Releasing just ends the picking session — whatever's already live stays selected, no separate
+    // confirm step.
+    await fanFinalize()
+    expect(onSelectGestureTarget).toHaveBeenCalledTimes(1)
     expect(fanItemOpacity(screen, 'mirror')).toBe(0)
   })
 
-  it('tapping the primary FAB again while the fan is open closes it without selecting anything', async () => {
+  it('releasing without ever dragging onto a wedge closes the fan without selecting anything', async () => {
     const onSelectGestureTarget = jest.fn()
     const screen = await renderControls({ onSelectGestureTarget })
 
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target'))
-    })
+    await fanBegin()
     expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
 
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target'))
-    })
+    await fanFinalize()
     expect(fanItemOpacity(screen, 'mirror')).toBe(0)
     expect(onSelectGestureTarget).not.toHaveBeenCalled()
+  })
+
+  // Sweeping onto a wedge and back off it without releasing reverts the live preview to whatever was
+  // already active before this gesture started, rather than leaving activeTargets on whatever the drag
+  // happened to pass through on the way elsewhere.
+  it('reverts the live selection to the original target when the drag leaves a wedge without releasing', async () => {
+    const onSelectGestureTarget = jest.fn()
+    await renderControls({ activeTargets: new Set(['pattern']), onSelectGestureTarget })
+
+    await fanBegin()
+    const { dx, dy } = wedgeOffset('gravity')
+    await fanUpdate(dx, dy)
+    expect(onSelectGestureTarget).toHaveBeenLastCalledWith('gravity')
+
+    // Back to dead center — the primary FAB's own position, not any wedge.
+    await fanUpdate(0, 0)
+    expect(onSelectGestureTarget).toHaveBeenLastCalledWith('pattern')
+    expect(onSelectGestureTarget).toHaveBeenCalledTimes(2)
+
+    await fanFinalize()
   })
 
   // Mirror is always a selectable gesture target now, even at 0 mirror lines (see index.tsx's
   // mirrorAvailable comment) — every fan item, including mirror, is reachable regardless of mode.
   it('leaves every fan item, including mirror, fully opaque and reachable regardless of mirrorLines', async () => {
     const onSelectGestureTarget = jest.fn()
-    const screen = await renderControls({ mirrorLines: 0, onSelectGestureTarget })
+    const screen = await renderControls({ onSelectGestureTarget })
 
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target'))
-    })
+    await fanBegin()
 
     expect(fanItemOpacity(screen, 'mirror')).toBe(1)
     expect(fanItemOpacity(screen, 'pattern')).toBe(1)
     expect(fanItemOpacity(screen, 'gravity')).toBe(1)
 
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target-mirror'))
-    })
+    const { dx, dy } = wedgeOffset('mirror')
+    await fanUpdate(dx, dy)
     expect(onSelectGestureTarget).toHaveBeenCalledWith('mirror')
   })
 
@@ -445,9 +529,7 @@ describe('OnScreenControls', () => {
   it('closes the gesture-target fan when a group trigger is pressed, without blocking the group from opening', async () => {
     const screen = await renderControls()
 
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target'))
-    })
+    await fanBegin()
     expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
 
     await act(async () => {
@@ -461,9 +543,7 @@ describe('OnScreenControls', () => {
   it('closes the gesture-target fan when the trigger-stack collapse toggle is pressed', async () => {
     const screen = await renderControls()
 
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target'))
-    })
+    await fanBegin()
     expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
 
     await act(async () => {
@@ -477,95 +557,47 @@ describe('OnScreenControls', () => {
   // is driven purely by activeTargets. Exactly one of the four cases below applies for any given
   // activeTargets value.
   describe('the transport row contextual slots', () => {
-    it('shows Add mirror / Remove mirror when mirror is the sole active target, disabled only at the signed +/-MAX_MIRROR_LINES extremes', async () => {
-      const onAddMirrorLine = jest.fn()
-      const onRemoveMirrorLine = jest.fn()
-      const mid = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 2, onAddMirrorLine, onRemoveMirrorLine })
-      expect(mid.getByTestId('fab-add-mirror').props.accessibilityState.disabled).toBe(false)
-      expect(mid.getByTestId('fab-remove-mirror').props.accessibilityState.disabled).toBe(false)
-      expect(mid.queryByTestId('fab-cycle-shape')).toBeNull()
+    it('shows Alternate background / Randomize foreground when mirror is the sole active target', async () => {
+      const onAlternateBackground = jest.fn()
+      const onRandomizeForeground = jest.fn()
+      const screen = await renderControls({ activeTargets: new Set(['mirror']), onAlternateBackground, onRandomizeForeground })
+      expect(screen.queryByTestId('fab-cycle-shape')).toBeNull()
 
       await act(async () => {
-        fireEvent.press(mid.getByTestId('fab-add-mirror'))
+        fireEvent.press(screen.getByTestId('fab-alternate-background'))
       })
-      expect(onAddMirrorLine).toHaveBeenCalledTimes(1)
+      expect(onAlternateBackground).toHaveBeenCalledTimes(1)
       await act(async () => {
-        fireEvent.press(mid.getByTestId('fab-remove-mirror'))
+        fireEvent.press(screen.getByTestId('fab-randomize-foreground'))
       })
-      expect(onRemoveMirrorLine).toHaveBeenCalledTimes(1)
-      await mid.unmount()
-
-      // 0 is the midpoint of the signed dial now, not a boundary — both directions stay valid from
-      // here (remove crosses into alternate-colors-on territory instead of dead-ending).
-      const atZero = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 0, mirrorAlternateColors: false })
-      expect(atZero.getByTestId('fab-remove-mirror').props.accessibilityState.disabled).toBe(false)
-      expect(atZero.getByTestId('fab-add-mirror').props.accessibilityState.disabled).toBe(false)
-      await atZero.unmount()
-
-      const atPositiveMax = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 6, mirrorAlternateColors: false })
-      expect(atPositiveMax.getByTestId('fab-add-mirror').props.accessibilityState.disabled).toBe(true)
-      expect(atPositiveMax.getByTestId('fab-remove-mirror').props.accessibilityState.disabled).toBe(false)
-      await atPositiveMax.unmount()
-
-      // The true negative extreme (max lines, alternate colors on) — mirror image of the positive case.
-      const atNegativeMax = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 6, mirrorAlternateColors: true })
-      expect(atNegativeMax.getByTestId('fab-remove-mirror').props.accessibilityState.disabled).toBe(true)
-      expect(atNegativeMax.getByTestId('fab-add-mirror').props.accessibilityState.disabled).toBe(false)
+      expect(onRandomizeForeground).toHaveBeenCalledTimes(1)
     })
 
-    it('wires a long-press on Add/Remove mirror to onMaxMirrorLines/onMinMirrorLines, independent of the plain ±1 taps', async () => {
-      const onAddMirrorLine = jest.fn()
-      const onRemoveMirrorLine = jest.fn()
-      const onMaxMirrorLines = jest.fn()
-      const onMinMirrorLines = jest.fn()
-      const screen = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 2, onAddMirrorLine, onRemoveMirrorLine, onMaxMirrorLines, onMinMirrorLines })
+    it('wires a long-press on background/foreground to onCycleBackgroundTwoTone/onGrowForeground, independent of the plain taps', async () => {
+      const onAlternateBackground = jest.fn()
+      const onRandomizeForeground = jest.fn()
+      const onCycleBackgroundTwoTone = jest.fn()
+      const onGrowForeground = jest.fn()
+      const screen = await renderControls({ activeTargets: new Set(['mirror']), onAlternateBackground, onRandomizeForeground, onCycleBackgroundTwoTone, onGrowForeground })
 
       await act(async () => {
-        fireEvent(screen.getByTestId('fab-add-mirror'), 'longPress')
+        fireEvent(screen.getByTestId('fab-alternate-background'), 'longPress')
       })
-      expect(onMaxMirrorLines).toHaveBeenCalledTimes(1)
-      expect(onAddMirrorLine).not.toHaveBeenCalled()
+      expect(onCycleBackgroundTwoTone).toHaveBeenCalledTimes(1)
+      expect(onAlternateBackground).not.toHaveBeenCalled()
 
       await act(async () => {
-        fireEvent(screen.getByTestId('fab-remove-mirror'), 'longPress')
+        fireEvent(screen.getByTestId('fab-randomize-foreground'), 'longPress')
       })
-      expect(onMinMirrorLines).toHaveBeenCalledTimes(1)
-      expect(onRemoveMirrorLine).not.toHaveBeenCalled()
+      expect(onGrowForeground).toHaveBeenCalledTimes(1)
+      expect(onRandomizeForeground).not.toHaveBeenCalled()
     })
 
-    // onMaxMirrorLines/onMinMirrorLines (see index.tsx) do have their own no-op guard now (needed so a
-    // held long-press stops cleanly once it reaches the far extreme — see the hold-to-repeat tests
-    // below), but the FAB's own disabled prop is still what stops longPress from reaching the handler
-    // at all here (see the boundary test above, which only checks accessibilityState.disabled
-    // visually). This is the behavioral half: actually firing longPress at the boundary and confirming
-    // disabled genuinely blocks it, not just reads as disabled — otherwise a long-press there would
-    // still push a spurious no-op history entry, and a user's very next "back" tap would silently do
-    // nothing.
-    it('a long-press at the signed +/-MAX_MIRROR_LINES extreme never reaches onMaxMirrorLines/onMinMirrorLines — disabled genuinely blocks it, not just visually', async () => {
-      const onMaxMirrorLines = jest.fn()
-      const onMinMirrorLines = jest.fn()
-
-      const atMax = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 6, mirrorAlternateColors: false, onMaxMirrorLines, onMinMirrorLines })
-      await act(async () => {
-        fireEvent(atMax.getByTestId('fab-add-mirror'), 'longPress')
-      })
-      expect(onMaxMirrorLines).not.toHaveBeenCalled()
-      await atMax.unmount()
-
-      const atMin = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 6, mirrorAlternateColors: true, onMaxMirrorLines, onMinMirrorLines })
-      await act(async () => {
-        fireEvent(atMin.getByTestId('fab-remove-mirror'), 'longPress')
-      })
-      expect(onMinMirrorLines).not.toHaveBeenCalled()
-    })
-
-    // Add/Remove mirror's own hold-repeat twin to Cycle shape's/Forward's (see useHoldToRepeat,
-    // maxMirrorLinesHold/minMirrorLinesHold) — the mechanism itself is already thoroughly covered by
-    // useHoldToRepeat.test.ts and the "forward held down" describe block above, so this is just
-    // confirming Add/Remove mirror are actually wired to it: continuing to hold past the first stop
-    // (index.tsx's own onMaxMirrorLines/onMinMirrorLines land on 0 first) carries on toward the far
-    // extreme instead of requiring a release and a second press-and-hold.
-    describe('mirror long-press held down (repeat effect)', () => {
+    // Background/foreground's own hold-repeat twin to Cycle shape's/Forward's (see useHoldToRepeat,
+    // cycleBackgroundTwoToneHold/growForegroundHold) — the mechanism itself is already thoroughly
+    // covered by useHoldToRepeat.test.ts and the "forward held down" describe block above, so this is
+    // just confirming these two are actually wired to it.
+    describe('background/foreground held down (repeat effect)', () => {
       beforeEach(() => {
         jest.useFakeTimers()
       })
@@ -574,20 +606,20 @@ describe('OnScreenControls', () => {
         jest.useRealTimers()
       })
 
-      it('keeps calling onMaxMirrorLines every HOLD_REPEAT_MS while held, and stops on release', async () => {
-        const onMaxMirrorLines = jest.fn()
-        const screen = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 2, onMaxMirrorLines })
-        const fab = screen.getByTestId('fab-add-mirror')
+      it('keeps calling onCycleBackgroundTwoTone every HOLD_REPEAT_MS while held, and stops on release', async () => {
+        const onCycleBackgroundTwoTone = jest.fn()
+        const screen = await renderControls({ activeTargets: new Set(['mirror']), onCycleBackgroundTwoTone })
+        const fab = screen.getByTestId('fab-alternate-background')
 
         await act(async () => {
           fireEvent(fab, 'longPress')
         })
-        expect(onMaxMirrorLines).toHaveBeenCalledTimes(1)
+        expect(onCycleBackgroundTwoTone).toHaveBeenCalledTimes(1)
 
         await act(async () => {
           await jest.advanceTimersByTimeAsync(400)
         })
-        expect(onMaxMirrorLines).toHaveBeenCalledTimes(2)
+        expect(onCycleBackgroundTwoTone).toHaveBeenCalledTimes(2)
 
         await act(async () => {
           fireEvent(fab, 'pressOut')
@@ -595,23 +627,23 @@ describe('OnScreenControls', () => {
         await act(async () => {
           await jest.advanceTimersByTimeAsync(2000)
         })
-        expect(onMaxMirrorLines).toHaveBeenCalledTimes(2)
+        expect(onCycleBackgroundTwoTone).toHaveBeenCalledTimes(2)
       })
 
-      it('keeps calling onMinMirrorLines every HOLD_REPEAT_MS while held, and stops on release', async () => {
-        const onMinMirrorLines = jest.fn()
-        const screen = await renderControls({ activeTargets: new Set(['mirror']), mirrorLines: 2, onMinMirrorLines })
-        const fab = screen.getByTestId('fab-remove-mirror')
+      it('keeps calling onGrowForeground every HOLD_REPEAT_MS while held, and stops on release', async () => {
+        const onGrowForeground = jest.fn()
+        const screen = await renderControls({ activeTargets: new Set(['mirror']), onGrowForeground })
+        const fab = screen.getByTestId('fab-randomize-foreground')
 
         await act(async () => {
           fireEvent(fab, 'longPress')
         })
-        expect(onMinMirrorLines).toHaveBeenCalledTimes(1)
+        expect(onGrowForeground).toHaveBeenCalledTimes(1)
 
         await act(async () => {
           await jest.advanceTimersByTimeAsync(400)
         })
-        expect(onMinMirrorLines).toHaveBeenCalledTimes(2)
+        expect(onGrowForeground).toHaveBeenCalledTimes(2)
 
         await act(async () => {
           fireEvent(fab, 'pressOut')
@@ -619,15 +651,34 @@ describe('OnScreenControls', () => {
         await act(async () => {
           await jest.advanceTimersByTimeAsync(2000)
         })
-        expect(onMinMirrorLines).toHaveBeenCalledTimes(2)
+        expect(onGrowForeground).toHaveBeenCalledTimes(2)
       })
+    })
+
+    it('shows the crop/hole shape toggles when crop is the sole active target', async () => {
+      const screen = await renderControls({ activeTargets: new Set(['crop']) })
+      expect(screen.queryByTestId('fab-cycle-shape')).toBeNull()
+
+      // Both default on (true), matching the real settings' own default — see this file's own
+      // useSwirlSettings mock above.
+      expect(screen.getByTestId('fab-crop-shaped').props.style.backgroundColor).toBe('#6750a4')
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('fab-crop-shaped'))
+      })
+      expect(screen.getByTestId('fab-crop-shaped').props.style.backgroundColor).toBe('transparent')
+
+      expect(screen.getByTestId('fab-hole-shaped').props.style.backgroundColor).toBe('#6750a4')
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('fab-hole-shaped'))
+      })
+      expect(screen.getByTestId('fab-hole-shaped').props.style.backgroundColor).toBe('transparent')
     })
 
     it('shows Cycle shape / Cycle line type when pattern is the sole active target', async () => {
       const onCycleShape = jest.fn()
       const onCycleLineType = jest.fn()
       const screen = await renderControls({ activeTargets: new Set(['pattern']), onCycleShape, onCycleLineType })
-      expect(screen.queryByTestId('fab-add-mirror')).toBeNull()
+      expect(screen.queryByTestId('fab-randomize-foreground')).toBeNull()
 
       await act(async () => {
         fireEvent.press(screen.getByTestId('fab-cycle-shape'))
@@ -828,15 +879,15 @@ describe('OnScreenControls', () => {
     it("keeps Cycle shape/Cycle line type's own icon identity stable across an unrelated re-render, changing only when its own setting does", async () => {
       mockPattern = 'rings'
       mockDashStyle = 'dashDot'
-      const screen = await renderControls({ activeTargets: new Set(['pattern']), mirrorLines: 2 })
+      const screen = await renderControls({ activeTargets: new Set(['pattern']), gravityRepelling: false })
 
       const cycleShapeIconBefore = screen.getByTestId('fab-cycle-shape').props.icon
       const cycleLineTypeIconBefore = screen.getByTestId('fab-cycle-line-type').props.icon
 
-      // An unrelated prop change (mirrorLines — nothing to do with pattern or dashStyle) still
+      // An unrelated prop change (gravityRepelling — nothing to do with pattern or dashStyle) still
       // re-renders this whole component, exactly the scenario that used to shake both icons.
       await act(async () => {
-        screen.rerender(<ControlledOnScreenControls {...defaultProps} activeTargets={new Set(['pattern'])} mirrorLines={3} />)
+        screen.rerender(<ControlledOnScreenControls {...defaultProps} activeTargets={new Set(['pattern'])} gravityRepelling={true} />)
       })
       expect(screen.getByTestId('fab-cycle-shape').props.icon).toBe(cycleShapeIconBefore)
       expect(screen.getByTestId('fab-cycle-line-type').props.icon).toBe(cycleLineTypeIconBefore)
@@ -845,7 +896,7 @@ describe('OnScreenControls', () => {
       // one — dashStyle didn't move).
       mockPattern = 'star'
       await act(async () => {
-        screen.rerender(<ControlledOnScreenControls {...defaultProps} activeTargets={new Set(['pattern'])} mirrorLines={3} />)
+        screen.rerender(<ControlledOnScreenControls {...defaultProps} activeTargets={new Set(['pattern'])} gravityRepelling={true} />)
       })
       expect(screen.getByTestId('fab-cycle-shape').props.icon).not.toBe(cycleShapeIconBefore)
       expect(screen.getByTestId('fab-cycle-line-type').props.icon).toBe(cycleLineTypeIconBefore)
@@ -890,40 +941,98 @@ describe('OnScreenControls', () => {
     })
   })
 
-  // The primary FAB's own long press — see its own comment in OnScreenControls.tsx for why this moved
-  // here from the canvas's one-finger long press (it fought the new touch-tracking glide).
-  it('recentres on a long press of the primary FAB, independent of the ordinary tap-to-open-fan press', async () => {
-    const onRecenter = jest.fn()
-    const onSelectGestureTarget = jest.fn()
-    const screen = await renderControls({ onRecenter, onSelectGestureTarget })
-
-    await act(async () => {
-      fireEvent(screen.getByTestId('fab-target'), 'longPress')
+  // The primary FAB's own long-press-equivalent — see its own comment in OnScreenControls.tsx for why
+  // recentring moved here from the canvas's one-finger long press in the first place (it fought the new
+  // touch-tracking glide), and for why it's now a dwell inside the drag itself (fanGesture) rather than
+  // a separate onLongPress: RNGH's own LongPress gesture fails outright once a touch has moved more
+  // than its own small built-in tolerance, so it could never fire for "moved to a wedge, then held
+  // still there" (see the wedge case below) — only for "held still from the very start."
+  describe('primary FAB held down (recenter / randomize dwell)', () => {
+    beforeEach(() => {
+      jest.useFakeTimers()
     })
 
-    expect(onRecenter).toHaveBeenCalledTimes(1)
-    // A long press is exclusive of the ordinary press (see the FAB's own comment) — it doesn't also
-    // open the fan.
-    expect(fanItemOpacity(screen, 'mirror')).toBe(0)
-  })
-
-  // A long press landing while the fan is spread out should close it first, same as every other
-  // button in this file that can fire mid-pick.
-  it('closes the gesture-target fan when the primary FAB is long-pressed while it is open', async () => {
-    const onRecenter = jest.fn()
-    const screen = await renderControls({ onRecenter })
-
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target'))
-    })
-    expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
-
-    await act(async () => {
-      fireEvent(screen.getByTestId('fab-target'), 'longPress')
+    afterEach(() => {
+      jest.useRealTimers()
     })
 
-    expect(onRecenter).toHaveBeenCalledTimes(1)
-    expect(fanItemOpacity(screen, 'mirror')).toBe(0)
+    // TRANSPORT_LONG_PRESS_MS is OnScreenControls' own private constant, duplicated here as a literal
+    // like every other timing constant this file references (see the "randomize long-press held down"
+    // describe block further down for the same convention).
+    it('recentres after holding still on the primary FAB past TRANSPORT_LONG_PRESS_MS, and closes the fan', async () => {
+      const onRecenter = jest.fn()
+      const onSelectGestureTarget = jest.fn()
+      const screen = await renderControls({ onRecenter, onSelectGestureTarget })
+
+      await fanBegin()
+      expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(400)
+      })
+
+      expect(onRecenter).toHaveBeenCalledTimes(1)
+      expect(onSelectGestureTarget).not.toHaveBeenCalled()
+      expect(fanItemOpacity(screen, 'mirror')).toBe(0)
+    })
+
+    it('does not recentre if released before the hold reaches TRANSPORT_LONG_PRESS_MS', async () => {
+      const onRecenter = jest.fn()
+      await renderControls({ onRecenter })
+
+      await fanBegin()
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(300)
+      })
+      await fanFinalize()
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1000)
+      })
+
+      expect(onRecenter).not.toHaveBeenCalled()
+    })
+
+    // The same dwell, reached through a wedge instead of the center — see OnScreenControls' own
+    // handleFanZoneChanged for why landing on a target swaps the armed bonus from onRecenter to
+    // onRandomizeGestureTarget rather than stacking both.
+    it('randomizes the targeted mode after holding still on its wedge past TRANSPORT_LONG_PRESS_MS, and closes the fan', async () => {
+      const onRecenter = jest.fn()
+      const onRandomizeGestureTarget = jest.fn()
+      const screen = await renderControls({ onRecenter, onRandomizeGestureTarget })
+
+      await fanBegin()
+      const { dx, dy } = wedgeOffset('gravity')
+      await fanUpdate(dx, dy)
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(400)
+      })
+
+      expect(onRandomizeGestureTarget).toHaveBeenCalledTimes(1)
+      expect(onRandomizeGestureTarget).toHaveBeenCalledWith('gravity')
+      expect(onRecenter).not.toHaveBeenCalled()
+      expect(fanItemOpacity(screen, 'mirror')).toBe(0)
+    })
+
+    // Adrift between wedges — not close enough to any one of them, and not back at the center either
+    // (see fanItemOffset's own FAN_RADIUS/FAN_ANGLE_SPAN_DEG for why straight up, well past every
+    // wedge's own radius, always lands here) — holding still means nothing in this zone, unlike either
+    // of the two above.
+    it('does not arm any dwell while adrift in the dead zone between wedges', async () => {
+      const onRecenter = jest.fn()
+      const onRandomizeGestureTarget = jest.fn()
+      await renderControls({ onRecenter, onRandomizeGestureTarget })
+
+      await fanBegin()
+      await fanUpdate(0, -500)
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000)
+      })
+
+      expect(onRecenter).not.toHaveBeenCalled()
+      expect(onRandomizeGestureTarget).not.toHaveBeenCalled()
+    })
   })
 
   // Empty look-history (see index.tsx's lookHistory) means there's nothing for "back" to undo to yet —
@@ -1190,9 +1299,7 @@ describe('OnScreenControls', () => {
   it('closes the gesture-target fan when a group trigger is long-pressed', async () => {
     const screen = await renderControls()
 
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('fab-target'))
-    })
+    await fanBegin()
     expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
 
     await act(async () => {

@@ -1,4 +1,4 @@
-import { useVibration } from '@rific/haptic-press'
+import { useVibration } from '@rific/feedback-press'
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
 import React from 'react'
 import { Dimensions } from 'react-native'
@@ -17,7 +17,7 @@ import { useAudioReactive } from '@/hooks/useAudioReactive'
 import { GRAVITY_SETTLE_DISTANCE } from '@/hooks/useDragPointPhysics'
 import { GestureTarget } from '@/hooks/useEpicenter'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
-import { MAX_GRAVITY, MAX_MIRROR_GAP, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_GRAVITY, MIN_STROKE_WIDTH, MIN_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { MAX_GRAVITY, MAX_MIRROR_GAP, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_GRAVITY, MIN_STROKE_WIDTH, useSwirlSettings } from '@/hooks/useSwirlSettings'
 import { useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const mockSpiralSpy = jest.fn()
@@ -158,7 +158,13 @@ jest.mock('@rific/auto-paper', () => ({
   isDarkColor: jest.fn(() => false)
 }))
 
-jest.mock('@rific/haptic-press', () => ({
+// useHoldToRepeat is left as its real implementation (jest.requireActual) — EdgeRevealZones (not
+// mocked away here, unlike OnScreenControls above) calls it directly, and it's a pure,
+// dependency-light hook already covered by @rific/feedback-press's own test suite. Its internal
+// useVibration() call is a relative import inside that package, unaffected by this mock overriding
+// the package's own top-level useVibration export below.
+jest.mock('@rific/feedback-press', () => ({
+  ...jest.requireActual('@rific/feedback-press'),
   useVibration: jest.fn()
 }))
 
@@ -392,10 +398,10 @@ describe('SwirlScreen gestures', () => {
     mockedUseControlGroups.mockReturnValue({ activeGroup: null, setActiveGroup: jest.fn() })
   })
 
-  it('leaves zoomSpeed untouched on a pinch release, and still adjusts density from a simultaneous twist', async () => {
+  it('leaves zoomSpeed untouched on a pinch release, and still adjusts line thickness from a simultaneous twist', async () => {
     await renderScreen()
 
-    const initialTightness = getLastSpiralProps().tightness.value
+    const initialStrokeWidth = getLastSpiralProps().strokeWidth.value
 
     const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
     const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
@@ -412,7 +418,7 @@ describe('SwirlScreen gestures', () => {
 
     expect(setZoomSpeed).not.toHaveBeenCalled()
     const after = getLastSpiralProps()
-    expect(after.tightness.value).not.toBe(initialTightness)
+    expect(after.strokeWidth.value).not.toBe(initialStrokeWidth)
   })
 
   it('never sets zoomSpeed from a pinch release, regardless of velocity magnitude or sign', async () => {
@@ -1890,7 +1896,7 @@ describe('SwirlScreen gestures', () => {
       mockedUseControlGroupSheetDrawer.mockReturnValue({ close: jest.fn(), isOpen: true, isVisible: true, open: jest.fn() })
       await renderScreen()
 
-      const initialTightness = getLastSpiralProps().tightness.value
+      const initialStrokeWidth = getLastSpiralProps().strokeWidth.value
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
       const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
 
@@ -1903,15 +1909,16 @@ describe('SwirlScreen gestures', () => {
 
       expect(setZoomSpeed).not.toHaveBeenCalled()
       const after = getLastSpiralProps()
-      expect(after.tightness.value).not.toBe(initialTightness)
+      expect(after.strokeWidth.value).not.toBe(initialStrokeWidth)
     })
   })
 
   describe('rotation', () => {
     // The twist gesture is Focus now, not "set rotationSpeed" — see index.tsx's rotationGesture
-    // comment. For pattern, that means a live, continuous density (tightness) scrub, the same
-    // 1:1-tracked-then-committed-on-release shape every other gesture-driven value in this file uses.
-    it('live-tracks tightness from the twist, then commits the release-derived value on end', async () => {
+    // comment. For pattern, that means a live, continuous line-thickness (strokeWidth) scrub, the
+    // same 1:1-tracked-then-committed-on-release shape every other gesture-driven value in this file
+    // uses. Density (tightness) moved onto the pinch instead — see the 'pinch' describe block below.
+    it('live-tracks strokeWidth from the twist, then commits the release-derived value on end', async () => {
       await renderScreen()
       const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
 
@@ -1919,20 +1926,20 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.start?.()
         rotationGesture.__handlers.update?.({ rotation: Math.PI / 4 })
       })
-      // ROTATION_DEGREES_TO_TIGHTNESS_SCALE is (MAX_TIGHTNESS - MIN_TIGHTNESS) / 180; a 45° twist from
-      // the default tightness of 1 moves it up by 45 * that scale.
-      const liveTightness = getLastSpiralProps().tightness.value
-      expect(liveTightness).toBeGreaterThan(1)
-      expect(setTightness).not.toHaveBeenCalled()
+      // ROTATION_DEGREES_TO_STROKE_WIDTH_SCALE is (MAX_STROKE_WIDTH - MIN_STROKE_WIDTH) / 180; a 45°
+      // twist from the mocked strokeWidth of 6 moves it up by 45 * that scale.
+      const liveStrokeWidth = getLastSpiralProps().strokeWidth.value
+      expect(liveStrokeWidth).toBeGreaterThan(6)
+      expect(setStrokeWidth).not.toHaveBeenCalled()
 
       await act(async () => {
         rotationGesture.__handlers.end?.({ rotation: Math.PI / 4 })
       })
 
-      expect(setTightness).toHaveBeenCalledWith(liveTightness)
+      expect(setStrokeWidth).toHaveBeenCalledWith(liveStrokeWidth)
     })
 
-    it('twisting the other way decreases tightness instead of increasing it', async () => {
+    it('twisting the other way decreases strokeWidth instead of increasing it', async () => {
       await renderScreen()
       const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
 
@@ -1942,10 +1949,10 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.end?.({ rotation: -Math.PI / 4 })
       })
 
-      expect(getLastSpiralProps().tightness.value).toBeLessThan(1)
+      expect(getLastSpiralProps().strokeWidth.value).toBeLessThan(6)
     })
 
-    it('clamps the twist-derived tightness to MAX_TIGHTNESS', async () => {
+    it('clamps the twist-derived strokeWidth to MAX_STROKE_WIDTH', async () => {
       await renderScreen()
       const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
 
@@ -1955,10 +1962,10 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.end?.({ rotation: 100 })
       })
 
-      expect(setTightness).toHaveBeenCalledWith(MAX_TIGHTNESS)
+      expect(setStrokeWidth).toHaveBeenCalledWith(MAX_STROKE_WIDTH)
     })
 
-    it('clamps the twist-derived tightness to MIN_TIGHTNESS', async () => {
+    it('clamps the twist-derived strokeWidth to MIN_STROKE_WIDTH', async () => {
       await renderScreen()
       const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
 
@@ -1968,7 +1975,7 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.end?.({ rotation: -100 })
       })
 
-      expect(setTightness).toHaveBeenCalledWith(MIN_TIGHTNESS)
+      expect(setStrokeWidth).toHaveBeenCalledWith(MIN_STROKE_WIDTH)
     })
 
     // Regression: rotationSpeed used to only apply to Rings/Star/Polygon when a separate "Rotate"
@@ -3158,14 +3165,40 @@ describe('SwirlScreen gestures', () => {
         rotationGesture.__handlers.end?.({ rotation: Math.PI / 6 })
       })
 
-      // ROTATION_DEGREES_TO_FRICTION_SCALE is (5 - 0) / 180 ≈ 0.0278, so a 30° twist (Math.PI / 6) moves
-      // bounceFriction up by 30 * 0.0278 ≈ 0.833 above the mocked start of 1 — the friction counterpart
-      // to gravity's own pinch-driven strength control.
+      // ROTATION_DEGREES_TO_FRICTION_SCALE is -(5 - 0) / 180 ≈ -0.0278 (negated, so a positive twist
+      // now lowers friction instead of raising it), so a 30° twist (Math.PI / 6) moves bounceFriction
+      // down by 30 * 0.0278 ≈ 0.833 below the mocked start of 1 — the friction counterpart to gravity's
+      // own pinch-driven strength control.
       const [committedFriction] = setBounceFriction.mock.calls[setBounceFriction.mock.calls.length - 1]
-      expect(committedFriction).toBeCloseTo(1 + 30 * (5 / 180), 5)
+      expect(committedFriction).toBeCloseTo(1 - 30 * (5 / 180), 5)
       expect(setTightness).not.toHaveBeenCalled()
       expect(setMirrorLines).not.toHaveBeenCalled()
       expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
+    })
+
+    it("in 'crop' mode, a twist dials holeRadius instead of tightness/bounceFriction/mirrorLines, then commits on release", async () => {
+      mockSettings({ holeRadius: 0 })
+      await renderScreen()
+      await selectGestureTarget('crop')
+
+      const rotationGesture = gestureTestUtils.getLastGesture('Rotation')
+      await act(async () => {
+        rotationGesture.__handlers.start?.()
+        // ROTATION_DEGREES_TO_HOLE_RADIUS_SCALE is (1 - 0) / 180 ≈ 0.00556, so a 30° twist
+        // (Math.PI / 6) moves holeRadius up by 30 * 0.00556 ≈ 0.1667 above the mocked start of 0 —
+        // live-tracked mid-gesture, the same 1:1 feel as bounceFriction's own twist above.
+        rotationGesture.__handlers.update?.({ rotation: Math.PI / 6 })
+      })
+      expect(getLastSpiralProps().holeRadius.value).toBeCloseTo(30 * (1 / 180), 5)
+
+      await act(async () => {
+        rotationGesture.__handlers.end?.({ rotation: Math.PI / 6 })
+      })
+      const [committedHoleRadius] = setHoleRadius.mock.calls[setHoleRadius.mock.calls.length - 1]
+      expect(committedHoleRadius).toBeCloseTo(30 * (1 / 180), 5)
+      expect(setTightness).not.toHaveBeenCalled()
+      expect(setBounceFriction).not.toHaveBeenCalled()
+      expect(setMirrorLines).not.toHaveBeenCalled()
     })
 
     it("in 'mirror' mode, a pinch live-tracks mirrorGap instead of zoomSpeed, then commits on release", async () => {
@@ -3193,6 +3226,33 @@ describe('SwirlScreen gestures', () => {
       // should move at all while the pinch is mirror-only.
       expect(setStrokeWidth).not.toHaveBeenCalled()
       expect(setTightness).not.toHaveBeenCalled()
+    })
+
+    it("in 'crop' mode, a pinch live-tracks cropRadius instead of zoomSpeed/mirrorGap/gravity, then commits on release", async () => {
+      mockSettings({ cropRadius: 1 })
+      await renderScreen()
+      await selectGestureTarget('crop')
+
+      const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
+      await act(async () => {
+        pinchGesture.__handlers.start?.()
+        // PINCH_SCALE_TO_CROP_RADIUS_SCALE is (1 - 0.05) / 1.5 ≈ 0.6333, so squeezing (scale 0.8)
+        // moves cropRadius down by (0.8 - 1) * 0.6333 ≈ -0.1267 below the mocked start of 1 — crop in
+        // tighter, the same "squeeze = less" direction as gravity's own pinch (unlike mirrorGap's own
+        // spread-grows-it convention).
+        pinchGesture.__handlers.update?.({ scale: 0.8 })
+      })
+      const expectedCropRadius = 1 + (0.8 - 1) * ((1 - 0.05) / 1.5)
+      expect(getLastSpiralProps().cropRadius.value).toBeCloseTo(expectedCropRadius, 5)
+
+      await act(async () => {
+        pinchGesture.__handlers.end?.({ scale: 0.8, velocity: 0 })
+      })
+      const [committedCropRadius] = setCropRadius.mock.calls[setCropRadius.mock.calls.length - 1]
+      expect(committedCropRadius).toBeCloseTo(expectedCropRadius, 5)
+      expect(setZoomSpeed).not.toHaveBeenCalled()
+      expect(setMirrorGap).not.toHaveBeenCalled()
+      expect(setGravity).not.toHaveBeenCalled()
     })
 
     it("in 'pattern' mode (the default), a pinch live-tracks the ripple pulse phase before any release", async () => {
@@ -3247,45 +3307,44 @@ describe('SwirlScreen gestures', () => {
       expect(getLastSpiralProps().pulse.value).toBeCloseTo(expectedFold, 5)
     })
 
-    it("in 'pattern' mode (the default), a pinch live-tracks line thickness alongside zoom, then commits it on release", async () => {
+    it("in 'pattern' mode (the default), a pinch live-tracks density alongside zoom, then commits it on release", async () => {
       await renderScreen()
 
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
       await act(async () => {
         pinchGesture.__handlers.start?.()
-        // PINCH_SCALE_TO_STROKE_WIDTH_SCALE is (36 - 1) / 1.5 ≈ 23.333, so (1.2 - 1) * 23.333 ≈ 4.667
-        // above the mocked strokeWidth: 6. Density (tightness) no longer rides along with pinch at
+        // PINCH_SCALE_TO_TIGHTNESS_SCALE is (2.5 - 0.4) / 1.5 = 1.4, so (1.2 - 1) * 1.4 = 0.28 above
+        // the mocked tightness: 1. Line thickness (strokeWidth) no longer rides along with pinch at
         // all — see the 'rotation' describe block above for where it moved.
         pinchGesture.__handlers.update?.({ scale: 1.2 })
       })
       // Live-tracked mid-gesture, before release — the same 1:1 feel as mirrorGap's own pinch tracking.
-      expect(getLastSpiralProps().strokeWidth.value).toBeCloseTo(10.667, 3)
-      expect(setTightness).not.toHaveBeenCalled()
+      expect(getLastSpiralProps().tightness.value).toBeCloseTo(1.28, 5)
+      expect(setStrokeWidth).not.toHaveBeenCalled()
 
       await act(async () => {
         pinchGesture.__handlers.end?.({ scale: 1.2, velocity: 0 })
       })
-      expect(setStrokeWidth).toHaveBeenCalledTimes(1)
-      expect(setStrokeWidth.mock.calls[0][0]).toBeCloseTo(10.667, 3)
-      expect(setTightness).not.toHaveBeenCalled()
+      expect(setTightness).toHaveBeenCalledTimes(1)
+      expect(setTightness.mock.calls[0][0]).toBeCloseTo(1.28, 5)
+      expect(setStrokeWidth).not.toHaveBeenCalled()
     })
 
-    it("in 'pattern' mode, a pinch clamps line thickness to its own MIN/MAX range, live and on release", async () => {
+    it("in 'pattern' mode, a pinch clamps density to its own MIN/MAX range, live and on release", async () => {
       await renderScreen()
 
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
       await act(async () => {
         pinchGesture.__handlers.start?.()
-        // (2.5 - 1) * 23.333 ≈ 35 above the mocked strokeWidth: 6 — comfortably past MAX_STROKE_WIDTH
-        // (36).
+        // (2.5 - 1) * 1.4 = 2.1 above the mocked tightness: 1 — comfortably past MAX_TIGHTNESS (2.5).
         pinchGesture.__handlers.update?.({ scale: 2.5 })
       })
-      expect(getLastSpiralProps().strokeWidth.value).toBe(36)
+      expect(getLastSpiralProps().tightness.value).toBe(MAX_TIGHTNESS)
 
       await act(async () => {
         pinchGesture.__handlers.end?.({ scale: 2.5, velocity: 0 })
       })
-      expect(setStrokeWidth).toHaveBeenLastCalledWith(36)
+      expect(setTightness).toHaveBeenLastCalledWith(MAX_TIGHTNESS)
     })
 
     it('clamps a mirror-targeted pinch to MAX_MIRROR_GAP rather than an out-of-range gap, live and on release', async () => {
@@ -4705,134 +4764,114 @@ describe('SwirlScreen gestures', () => {
       expect(setPolygonSides).toHaveBeenLastCalledWith(5)
     })
 
-    it('onAddMirrorLine/onRemoveMirrorLine each push their own history entry before their own ±1 step', async () => {
-      mockSettings({ mirrorLines: 2 })
+    const HEX_COLOR = /^#[0-9a-f]{6}$/i
+
+    it('onRandomizeForeground pushes history before picking one fresh random color', async () => {
+      mockSettings({ foregroundColors: ['#123456'] })
       await renderScreen()
 
       await act(async () => {
-        getLastControlsProps().onAddMirrorLine()
+        getLastControlsProps().onRandomizeForeground()
       })
       expect(getLastControlsProps().backDisabled).toBe(false)
-      expect(setMirrorLines).toHaveBeenCalledWith(3)
+      expect(setForegroundColors).toHaveBeenCalled()
+      const [calledForeground] = setForegroundColors.mock.calls[setForegroundColors.mock.calls.length - 1]
+      expect(calledForeground).toHaveLength(1)
+      expect(calledForeground[0]).toMatch(HEX_COLOR)
 
       await act(async () => {
         getLastControlsProps().onGoBack()
       })
-      expect(setMirrorLines).toHaveBeenLastCalledWith(2)
-      expect(getLastControlsProps().backDisabled).toBe(true)
+      expect(setForegroundColors).toHaveBeenLastCalledWith(['#123456'])
+    })
+
+    it('onGrowForeground pushes history before appending another random color on top of the existing list', async () => {
+      mockSettings({ foregroundColors: ['#123456', '#abcdef'] })
+      await renderScreen()
 
       await act(async () => {
-        getLastControlsProps().onRemoveMirrorLine()
+        getLastControlsProps().onGrowForeground()
       })
       expect(getLastControlsProps().backDisabled).toBe(false)
-      expect(setMirrorLines).toHaveBeenCalledWith(1)
+      expect(setForegroundColors).toHaveBeenCalled()
+      const [calledForeground] = setForegroundColors.mock.calls[setForegroundColors.mock.calls.length - 1]
+      expect(calledForeground).toHaveLength(3)
+      expect(calledForeground.slice(0, 2)).toEqual(['#123456', '#abcdef'])
+      expect(calledForeground[2]).toMatch(HEX_COLOR)
 
       await act(async () => {
         getLastControlsProps().onGoBack()
       })
-      expect(setMirrorLines).toHaveBeenLastCalledWith(2)
+      expect(setForegroundColors).toHaveBeenLastCalledWith(['#123456', '#abcdef'])
     })
 
-    it("onMaxMirrorLines/onMinMirrorLines (Add/Remove mirror's own long-press bonus) each push their own history entry before jumping to the boundary", async () => {
-      mockSettings({ mirrorLines: 2 })
+    // index.tsx's own MAX_RAINBOW_SOUP_COLORS (20) backstop — nothing stops a long hold from calling
+    // this every HOLD_REPEAT_MS, so once the list's already at the cap this has to be a genuine no-op
+    // rather than pushing a fresh no-op history entry (and firing a haptic) on every tick past it.
+    it('onGrowForeground is a no-op once foregroundColors is already at the cap', async () => {
+      const cappedForeground = Array.from({ length: 20 }, (_, i) => `#${i.toString(16).padStart(6, '0')}`)
+      mockSettings({ foregroundColors: cappedForeground })
       await renderScreen()
 
       await act(async () => {
-        getLastControlsProps().onMaxMirrorLines()
+        getLastControlsProps().onGrowForeground()
       })
-      expect(getLastControlsProps().backDisabled).toBe(false)
-      expect(setMirrorLines).toHaveBeenCalledWith(MAX_MIRROR_LINES)
-
-      await act(async () => {
-        getLastControlsProps().onGoBack()
-      })
-      expect(setMirrorLines).toHaveBeenLastCalledWith(2)
-
-      await act(async () => {
-        getLastControlsProps().onMinMirrorLines()
-      })
-      expect(getLastControlsProps().backDisabled).toBe(false)
-
-      await act(async () => {
-        getLastControlsProps().onGoBack()
-      })
-      expect(setMirrorLines).toHaveBeenLastCalledWith(2)
-    })
-
-    // The buttons now walk the same signed mirrorLines/mirrorAlternateColors scale the Focus twist
-    // gesture already dials through (see rotationGesture's own targetsMirrorRotation branch) — dialing
-    // past 0 crosses into "negative" territory (mirrorAlternateColors on) instead of dead-ending, and
-    // the long-press bonuses treat 0 as a "pass through first" stop before their own far extreme.
-    it('onRemoveMirrorLine crosses 0 into negative territory, turning alternate colors on', async () => {
-      mockSettings({ mirrorLines: 0, mirrorAlternateColors: false })
-      await renderScreen()
-
-      await act(async () => {
-        getLastControlsProps().onRemoveMirrorLine()
-      })
-      expect(setMirrorLines).toHaveBeenCalledWith(1)
-      expect(setMirrorAlternateColors).toHaveBeenCalledWith(true)
-    })
-
-    it('onAddMirrorLine crosses back to 0 from negative territory, turning alternate colors back off', async () => {
-      mockSettings({ mirrorLines: 1, mirrorAlternateColors: true })
-      await renderScreen()
-
-      await act(async () => {
-        getLastControlsProps().onAddMirrorLine()
-      })
-      expect(setMirrorLines).toHaveBeenCalledWith(0)
-      expect(setMirrorAlternateColors).toHaveBeenCalledWith(false)
-    })
-
-    it('onMaxMirrorLines jumps only to 0 from negative territory, not all the way to MAX_MIRROR_LINES', async () => {
-      mockSettings({ mirrorLines: 3, mirrorAlternateColors: true })
-      await renderScreen()
-
-      await act(async () => {
-        getLastControlsProps().onMaxMirrorLines()
-      })
-      expect(setMirrorLines).toHaveBeenCalledWith(0)
-      expect(setMirrorAlternateColors).toHaveBeenCalledWith(false)
-    })
-
-    it('onMinMirrorLines jumps to the far negative extreme when already at 0', async () => {
-      mockSettings({ mirrorLines: 0, mirrorAlternateColors: false })
-      await renderScreen()
-
-      await act(async () => {
-        getLastControlsProps().onMinMirrorLines()
-      })
-      expect(setMirrorLines).toHaveBeenCalledWith(MAX_MIRROR_LINES)
-      expect(setMirrorAlternateColors).toHaveBeenCalledWith(true)
-    })
-
-    // The long-press bonuses are wired to useHoldToRepeat in OnScreenControls, so continuing to hold
-    // past the first stop calls these again — once the dial's already sitting at the target, this is
-    // what keeps that a genuine no-op instead of pushing a fresh no-op history entry (and firing a
-    // haptic) on every single tick for as long as the hold continues past reaching the far extreme.
-    it('onMaxMirrorLines is a no-op once already at +MAX_MIRROR_LINES', async () => {
-      mockSettings({ mirrorLines: MAX_MIRROR_LINES, mirrorAlternateColors: false })
-      await renderScreen()
-
-      await act(async () => {
-        getLastControlsProps().onMaxMirrorLines()
-      })
-      expect(setMirrorLines).not.toHaveBeenCalled()
-      expect(setMirrorAlternateColors).not.toHaveBeenCalled()
+      expect(setForegroundColors).not.toHaveBeenCalled()
       expect(getLastControlsProps().backDisabled).toBe(true)
     })
 
-    it('onMinMirrorLines is a no-op once already at the far negative extreme', async () => {
-      mockSettings({ mirrorLines: MAX_MIRROR_LINES, mirrorAlternateColors: true })
+    it('onAlternateBackground picks the contrast color when the background is not already solid black/white', async () => {
+      // isDarkColor is mocked to always return false (see this file's own @rific/auto-paper mock), so
+      // the contrast pick is deterministically '#000000' regardless of foregroundColors' own value.
+      mockSettings({ backgroundColors: ['#123456'] })
       await renderScreen()
 
       await act(async () => {
-        getLastControlsProps().onMinMirrorLines()
+        getLastControlsProps().onAlternateBackground()
       })
-      expect(setMirrorLines).not.toHaveBeenCalled()
-      expect(setMirrorAlternateColors).not.toHaveBeenCalled()
-      expect(getLastControlsProps().backDisabled).toBe(true)
+      expect(getLastControlsProps().backDisabled).toBe(false)
+      expect(setBackgroundColors).toHaveBeenCalledWith(['#000000'])
+
+      await act(async () => {
+        getLastControlsProps().onGoBack()
+      })
+      expect(setBackgroundColors).toHaveBeenLastCalledWith(['#123456'])
+    })
+
+    it('onAlternateBackground flips to the other solid color once it already is black or white', async () => {
+      mockSettings({ backgroundColors: ['#000000'] })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onAlternateBackground()
+      })
+      expect(setBackgroundColors).toHaveBeenCalledWith(['#FFFFFF'])
+    })
+
+    it('onCycleBackgroundTwoTone sets a fresh contrast-picked pair when the background is not already two-tone', async () => {
+      mockSettings({ backgroundColors: ['#123456'] })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onCycleBackgroundTwoTone()
+      })
+      expect(getLastControlsProps().backDisabled).toBe(false)
+      expect(setBackgroundColors).toHaveBeenCalledWith(['#000000', '#FFFFFF'])
+
+      await act(async () => {
+        getLastControlsProps().onGoBack()
+      })
+      expect(setBackgroundColors).toHaveBeenLastCalledWith(['#123456'])
+    })
+
+    it('onCycleBackgroundTwoTone reverses the pair once it already is one, producing the strobe while held', async () => {
+      mockSettings({ backgroundColors: ['#000000', '#FFFFFF'] })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onCycleBackgroundTwoTone()
+      })
+      expect(setBackgroundColors).toHaveBeenCalledWith(['#FFFFFF', '#000000'])
     })
 
     it('onReverseGravity pushes history before flipping the sign, so onGoBack restores the original gravity', async () => {
@@ -4940,23 +4979,23 @@ describe('SwirlScreen gestures', () => {
     // first, then the one before it (not, say, the first push getting silently dropped/overwritten by
     // the second).
     it('accumulates multiple pushes without an intervening undo, and onGoBack unwinds them in reverse order', async () => {
-      mockSettings({ mirrorLines: 2, pattern: 'spiral' })
+      mockSettings({ foregroundColors: ['#123456'], pattern: 'spiral' })
       await renderScreen()
 
       await act(async () => {
         getLastControlsProps().onCycleShape()
       })
       await act(async () => {
-        getLastControlsProps().onAddMirrorLine()
+        getLastControlsProps().onRandomizeForeground()
       })
       expect(getLastControlsProps().backDisabled).toBe(false)
 
-      // First back undoes the more recent push (mirrorLines' own +1) — mirrorLines back to 2, pattern
-      // untouched by this step.
+      // First back undoes the more recent push (foreground's own randomize) — foregroundColors back to
+      // its original single entry, pattern untouched by this step.
       await act(async () => {
         getLastControlsProps().onGoBack()
       })
-      expect(setMirrorLines).toHaveBeenLastCalledWith(2)
+      expect(setForegroundColors).toHaveBeenLastCalledWith(['#123456'])
       expect(getLastControlsProps().backDisabled).toBe(false)
 
       // Second back undoes the older push (the pattern cycle) — only now does the stack empty out.

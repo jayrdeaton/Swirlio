@@ -1,5 +1,5 @@
 import { BlurView } from '@rific/auto-paper'
-import { FAB } from '@rific/haptic-press'
+import { FAB } from '@rific/feedback-press'
 import React from 'react'
 import { StyleSheet, View } from 'react-native'
 import { useTheme } from 'react-native-paper'
@@ -13,7 +13,10 @@ import { useToggleFabAppearance } from './useToggleFabAppearance'
 type GlassToggleFabProps = {
   icon: string | ((props: { size: number; color: string }) => React.ReactNode)
   active: boolean
-  onPress: () => void
+  // Optional now that the gesture-target fan (see OnScreenControls/GestureFanItem) drives its own
+  // wedges purely as hit-tested visuals rather than individually pressable FABs — every other caller
+  // still passes a real handler, this just stops the fan wedges from needing a no-op one.
+  onPress?: () => void
   // Optional bonus gesture layered on top of onPress, same tap/hold-does-something-else convention
   // every other FAB with a long press in this app already uses (skip-previous, Add/Remove mirror,
   // Cycle shape/line type — see OnScreenControls' own comments) — not every caller needs one, so

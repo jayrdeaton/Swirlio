@@ -1,18 +1,17 @@
 import { BlurView, useBlur } from '@rific/auto-paper'
-import { FAB } from '@rific/haptic-press'
-import React, { useMemo } from 'react'
+import { FAB, useHoldToRepeat, useHoldToRepeatByKey, useVibration } from '@rific/feedback-press'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import { StyleSheet, View } from 'react-native'
+import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Portal, useTheme } from 'react-native-paper'
-import Animated, { Easing, useAnimatedStyle, withTiming } from 'react-native-reanimated'
+import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { contrastColor, DISABLED_ON_CANVAS_SCRIM_COLOR, disabledOnCanvasFabTheme, TOGGLE_OFF_BLUR_TINT_OPACITY, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
 import { RANDOMIZE_HOLD_REPEAT_MS } from '@/constants/holdToRepeat'
-import { MAX_MIRROR_LINES, signedMirrorLines } from '@/constants/kaleidoscope'
 import { ControlGroup, useControlGroups, useControlGroupSheetDrawer, useOpenControlGroup } from '@/hooks/controlGroups'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { GESTURE_TARGET_ORDER, GestureTarget } from '@/hooks/useEpicenter'
-import { useHoldToRepeat, useHoldToRepeatByKey } from '@/hooks/useHoldToRepeat'
 import { useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { DashStyleIcon } from './DashStyleIcon'
@@ -26,11 +25,23 @@ import { PatternIcon } from './PatternIcon'
 const FAB_EDGE_MARGIN = 16
 // Matches the canvas's own two-finger/long-press gesture threshold (see index.tsx's LONG_PRESS_MS) —
 // one consistent "how long is a hold" feel everywhere in the app. Shared by every transport-row FAB that
-// layers a hold on top of its ordinary tap — skip-previous (onResetAllSettings), Add/Remove mirror
-// (onMaxMirrorLines/onMinMirrorLines), forward (onGoForwardBatch), Cycle line type (reset to solid),
+// layers a hold on top of its ordinary tap — skip-previous (onResetAllSettings), mirror mode's own
+// background/foreground pair (onCycleBackgroundTwoTone/onGrowForeground), forward (onGoForwardBatch), Cycle line type (reset to solid),
 // Cycle shape (onCycleSides), and the primary gesture-target FAB (onRecenter) — not a separate tuning
 // for any one of them.
 const TRANSPORT_LONG_PRESS_MS = 400
+// How far a drag has to land from the primary FAB's own center before it still counts as "hasn't gone
+// anywhere" — see fanGesture's own onUpdate further down. Roughly the primary FAB's own radius
+// (FAB_HEIGHT_MEDIUM / 2), so this reads as "still basically touching the button", not an arbitrary
+// number. Retune by feel on a real device, same disclaimer as every other gesture-calibration constant
+// in this codebase.
+const FAN_CENTER_RADIUS_PX = FAB_HEIGHT_MEDIUM / 2
+// How close a drag has to land to one wedge's own resting dx/dy (see GestureFanItem's fanItemOffset)
+// to count as aiming at it. Comfortably bigger than a wedge's own visual footprint (FAB_HEIGHT_SMALL)
+// so it doesn't take pixel-perfect aim, but still well under half the ~68px gap between adjacent
+// wedges at FAN_RADIUS/4 items, so neighboring wedges don't fight over the same touch. Retune by feel
+// on a real device, same disclaimer as every other gesture-calibration constant in this codebase.
+const FAN_CAPTURE_RADIUS_PX = 32
 // How fast Cycle shape and Forward's own long-presses (see useHoldToRepeat) keep stepping for as long
 // as they're held, once the initial TRANSPORT_LONG_PRESS_MS hold has already fired the first step via
 // onLongPress — a "keep going while held" effect rather than the single step every other long-press
@@ -98,7 +109,10 @@ const GESTURE_TARGET_ICONS: Record<GestureTarget, IconOrRenderFn> = {
   // Same icon the Gravity slider itself uses (see ControlGroupBottomSheetContent) — this is about
   // the on-screen draggable well specifically, not the broader physics group's own trigger icon
   // (see GROUP_TRIGGERS above, now 'atom'), so it keeps the magnet regardless of that split.
-  gravity: 'magnet'
+  gravity: 'magnet',
+  // Same glyph as the Hole slider itself (see ControlGroupBottomSheetContent) — two concentric
+  // circles reads as "crop and hole" together, the two radii this target actually drives.
+  crop: 'circle-double'
 }
 
 type OnScreenControlsProps = {
@@ -124,8 +138,14 @@ type OnScreenControlsProps = {
   // gravity), unconditionally, regardless of which gesture target happens to be active. Distinct from
   // onRecenter below, which only touches whichever target(s) activeTargets currently holds.
   onRecenterEverything: () => void
-  // Tapping a fan item — replaces activeTargets outright with just this one.
+  // Live-selecting a fan item mid-drag (see fanGesture's own onUpdate/handlePhaseChanged further
+  // down) — replaces activeTargets outright with just this one.
   onSelectGestureTarget: (target: GestureTarget) => void
+  // Holding still on a fanned-out wedge past TRANSPORT_LONG_PRESS_MS, without releasing — a bonus
+  // layered onto the same drag as onSelectGestureTarget, the same tap/hold-does-something-else
+  // convention every other long press in this file already uses, just reached through the picker's own
+  // drag instead of a second, separate FAB. index.tsx's randomizeGestureTarget straight through.
+  onRandomizeGestureTarget: (target: GestureTarget) => void
   // Whether the gesture-target fan is spread out — lifted up and controlled by index.tsx (rather than
   // local state in here) purely so its own idle-fade effect can see it and suspend the auto-hide timer
   // while it's open: picking a target is deliberate, "not touching anything" time that shouldn't read
@@ -143,30 +163,21 @@ type OnScreenControlsProps = {
   // Bonus long-press gesture on the same skip-previous FAB as onGoBack — the settings drawer's own
   // "Reset all" button (see ControlGroupTopSheetContent's 'settings' branch), reachable without
   // opening that sheet. Layered onto the exact same FAB as onGoBack (same disabled/backDisabled
-  // gating — see Add/Remove mirror's own onLongPress for the same pattern), so it shares that FAB's
-  // one existing dead end: nothing to reach here while backDisabled is true. The sheet's own "Reset
-  // all" button stays the reliable fallback in that state.
+  // gating), so it shares that FAB's one existing dead end: nothing to reach here while backDisabled
+  // is true. The sheet's own "Reset all" button stays the reliable fallback in that state.
   onResetAllSettings: () => void
   onGoForward: () => void
   onGoForwardBatch: () => void
   // The transport row's two contextual slots (see the render body's own comment for the full mode
   // table) — everything below this point is for whichever single-target or linked pair is currently
-  // showing there. mirrorLines/mirrorAlternateColors together drive Add/Remove mirror's boundary-
-  // disabled treatment (see signedMirrorLines — the pair is treated as one signed dial, disabled only
-  // at its true +/-MAX_MIRROR_LINES extremes, never at the 0 midpoint), the same disableableSmallFabWrapper
-  // pattern skip-previous already uses for backDisabled.
-  mirrorLines: number
-  mirrorAlternateColors: boolean
-  onAddMirrorLine: () => void
-  onRemoveMirrorLine: () => void
-  // Add/Remove mirror's own long-press bonus — each treats 0 as a "pass through first" stop in the
-  // direction it points before reaching the far signed extreme (see index.tsx's maxMirrorLines/
-  // minMirrorLines), rather than a plain jump straight to MAX_MIRROR_LINES/MIN_MIRROR_LINES the way
-  // every other "jump to boundary" long press on this row still does. Wired through useHoldToRepeat
-  // (see maxMirrorLinesHold/minMirrorLinesHold below), so continuing to hold past the first stop
-  // carries straight on to the far extreme instead of requiring a release and a second long-press.
-  onMaxMirrorLines: () => void
-  onMinMirrorLines: () => void
+  // showing there. Mirror mode's own pair — onAlternateBackground/onRandomizeForeground are the tap
+  // actions; onCycleBackgroundTwoTone/onGrowForeground are their long-press-and-hold counterparts, both
+  // wired through useHoldToRepeat below the same "keep going while held" way Cycle shape's own
+  // onCycleSides already is (see cycleSidesHold).
+  onAlternateBackground: () => void
+  onCycleBackgroundTwoTone: () => void
+  onRandomizeForeground: () => void
+  onGrowForeground: () => void
   // Pattern mode's pair — onCycleShape reuses index.tsx's existing nextPattern; onCycleLineType is the
   // one on-canvas way to change dash style at all, since 'line' has no GestureTarget of its own. Both
   // carry a long-press bonus too, same tap/hold-does-something-else convention every other transport
@@ -212,7 +223,7 @@ type OnScreenControlsProps = {
 // controls' own hit areas capture anything. Faded via opacity rather than conditionally rendered so
 // hiding/revealing transitions smoothly instead of popping instantly — see EdgeRevealZones for how it
 // comes back once fully hidden and no longer touchable.
-export function OnScreenControls({ visible, activeTargets, backDisabled, frozen, onToggleFrozen, onRecenterEverything, gestureFanOpen, onGestureFanOpenChange, onSelectGestureTarget, onRecenter, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, mirrorLines, mirrorAlternateColors, onAddMirrorLine, onRemoveMirrorLine, onMaxMirrorLines, onMinMirrorLines, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, gravityRepelling, onReverseGravity, onHideControls }: OnScreenControlsProps) {
+export function OnScreenControls({ visible, activeTargets, backDisabled, frozen, onToggleFrozen, onRecenterEverything, gestureFanOpen, onGestureFanOpenChange, onSelectGestureTarget, onRandomizeGestureTarget, onRecenter, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, onAlternateBackground, onCycleBackgroundTwoTone, onRandomizeForeground, onGrowForeground, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, gravityRepelling, onReverseGravity, onHideControls }: OnScreenControlsProps) {
   const insets = useSafeAreaInsets()
   const { colors, roundness } = useTheme()
   const blurEnabled = useBlur()
@@ -226,27 +237,34 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   const { randomizeGroup } = useSwirlRandomize()
 
   // Cycle shape's own "keep spinning while held" effect, and Forward's own "keep tweaking while held"
-  // twin — see useHoldToRepeat's own comment for the stale-closure bug this hook exists to avoid (a
-  // real, shipped bug the first of these two shipped with, before the mechanism was pulled out into
-  // its own tested hook). Both call their own action once immediately on long-press, same as before
-  // this hook existed, then again every HOLD_REPEAT_MS for as long as the hold continues.
+  // twin — both from @rific/feedback-press now (formerly a local hook here; see that package's own
+  // useHoldToRepeat.ts for the stale-closure bug it exists to avoid, a real, shipped bug the first of
+  // these two shipped with before the mechanism was pulled into its own tested hook). Both call their
+  // own action once immediately on long-press, then again every HOLD_REPEAT_MS for as long as the
+  // hold continues — and, since the library hook fires its own selection() pulse on every one of
+  // those calls (not just the first), cycleSides/onGoForwardBatch no longer need an explicit haptic
+  // call of their own; see their own comments in index.tsx.
   const cycleSidesHold = useHoldToRepeat(onCycleSides, HOLD_REPEAT_MS)
   const goForwardBatchHold = useHoldToRepeat(onGoForwardBatch, HOLD_REPEAT_MS)
-  // Add/Remove mirror's own long-press bonus is a two-stop journey, not an open-ended cycle (see
-  // index.tsx's maxMirrorLines/minMirrorLines) — the same hold-to-repeat mechanism just means holding
-  // past the first stop (0) carries on to the far extreme instead of requiring a release and a second
-  // press-and-hold. index.tsx's own early-return once the dial's already at the target is what keeps
-  // this a no-op rather than churning once the hold outlasts reaching the far extreme.
-  const maxMirrorLinesHold = useHoldToRepeat(onMaxMirrorLines, HOLD_REPEAT_MS)
-  const minMirrorLinesHold = useHoldToRepeat(onMinMirrorLines, HOLD_REPEAT_MS)
+  // Mirror mode's own long-press-and-hold pair — background keeps re-flipping a black/white pair's own
+  // order (see index.tsx's cycleBackgroundTwoTone), foreground keeps appending another random color
+  // (see growForeground) — both "keep going while held" the same way cycleSidesHold above does, same
+  // free per-tick haptic pulse included. index.tsx's own MAX_RAINBOW_SOUP_COLORS cap is what keeps
+  // growForeground safe to call on a timer without growing the list forever.
+  const cycleBackgroundTwoToneHold = useHoldToRepeat(onCycleBackgroundTwoTone, HOLD_REPEAT_MS)
+  const growForegroundHold = useHoldToRepeat(onGrowForeground, HOLD_REPEAT_MS)
   // Every group trigger's own randomize bonus (including the cog/chevron's 'settings' shortcut) keeps
   // rerolling for as long as the hold continues, the same "keep going while held" upgrade the above
   // four already give their own single-shot actions — except one hook call backs all six FABs at once
-  // (see useHoldToRepeatByKey's own comment for why the plain useHoldToRepeat above can't, since these
-  // are rendered from a `.map()` over GROUP_TRIGGERS rather than each getting its own fixed call site).
-  // RANDOMIZE_HOLD_REPEAT_MS rather than this file's own HOLD_REPEAT_MS — a full reroll needs more time
-  // to actually look at than a single Cycle-shape/Forward step does (see that constant's own comment for
-  // why it's shared centrally instead of duplicated the way this file's other timing constants are).
+  // (see @rific/feedback-press's useHoldToRepeatByKey for why the plain useHoldToRepeat above can't,
+  // since these are rendered from a `.map()` over GROUP_TRIGGERS rather than each getting its own
+  // fixed call site). randomizeGroup itself stays haptic-free (it's shared with each group's own
+  // plain-tap Randomize button in ControlGroupTopSheetContent, which already gets its own tap haptic
+  // from the FAB it's wired to — see useSwirlRandomize's own comment above) — the per-tick pulse while
+  // *held* comes from this hook itself, not from randomizeGroup. RANDOMIZE_HOLD_REPEAT_MS rather than
+  // this file's own HOLD_REPEAT_MS — a full reroll needs more time to actually look at than a single
+  // Cycle-shape/Forward step does (see that constant's own comment for why it's shared centrally
+  // instead of duplicated the way this file's other timing constants are).
   const randomizeGroupHold = useHoldToRepeatByKey(randomizeGroup, RANDOMIZE_HOLD_REPEAT_MS)
 
   // Whether the trigger stack's own group triggers (cog + GROUP_TRIGGERS) are showing, independent of
@@ -257,7 +275,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // useSwirlSettings.tsx's own triggerStackExpanded comment) rather than plain useState, so a user who
   // collapses the stack once has it stay collapsed on the next launch too, not just for the rest of
   // this session.
-  const { settings, setGravityMarkerVisible, setTriggerStackExpanded } = useSwirlSettings()
+  const { settings, setCropShaped, setGravityMarkerVisible, setHoleShaped, setTriggerStackExpanded } = useSwirlSettings()
   const siblingsVisible = settings.triggerStackExpanded
 
   // Cycle line type/Cycle shape's own icons preview the *current* dashStyle/pattern (see the 'pattern'
@@ -304,6 +322,165 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     onGestureFanOpenChange(false)
     action()
   }
+
+  // Backs the primary FAB's own press-drag-release gesture (see fanGesture further down) — every
+  // wedge's own resting dx/dy (see GestureFanItem/fanItemOffset), computed once up front rather than
+  // inside the gesture's own worklet, since GESTURE_TARGET_ORDER never changes at runtime. Captured
+  // fresh by fanGesture's closure every render, the same way useEpicenter.ts's own worklets close over
+  // plain per-render constants (wedgeAngleDeg, copyCount, etc.) rather than needing a SharedValue.
+  const fanWedgeOffsets = useMemo(() => GESTURE_TARGET_ORDER.map((target, index) => ({ target, ...fanItemOffset(index, GESTURE_TARGET_ORDER.length) })), [])
+  const { selection, notification } = useVibration()
+  // Which "zone" the drag is currently sitting in, mirrored on the UI thread so fanGesture's own
+  // onUpdate can tell whether anything's actually changed since the last frame without crossing to JS
+  // every single frame — only an actual zone change below ever calls runOnJS. -2 is the dead zone
+  // between wedges (drifted away from center without landing on any one wedge — no dwell timer runs
+  // here at all, same as releasing there does nothing); -1 is "still basically on the primary FAB
+  // itself" (dwell-eligible for onRecenter, the same recenter a plain long-press on this FAB always
+  // meant); 0 and up is a GESTURE_TARGET_ORDER index (dwell-eligible for onRandomizeGestureTarget).
+  const fanZone = useSharedValue(-1)
+  // Whichever target this drag actually started from — restored (see applyTarget below) any time the
+  // drag drifts back to the center or the dead zone without releasing, so "swipe onto a wedge, then
+  // change your mind and drift back off it" reads as a genuine live preview (reversible mid-gesture),
+  // not a commitment the instant you first cross into a wedge. A plain ref rather than a SharedValue:
+  // it's only ever read/written from the JS-thread handlers below (handleFanBegin/applyTarget), never
+  // from inside a worklet.
+  const initialTarget = [...activeTargets][0]
+  const startTargetRef = useRef<GestureTarget>(initialTarget)
+  // Whichever target onSelectGestureTarget was most recently called with this drag — lets applyTarget
+  // skip a redundant call (and the Set churn/re-render that comes with it) when the zone changes but
+  // the target it resolves to hasn't, e.g. sweeping from the dead zone back to the center while
+  // startTargetRef is already the active one. Seeded from the same initialTarget as startTargetRef
+  // above (not read from that ref's own .current) purely to keep this a plain-value initializer too.
+  const appliedTargetRef = useRef<GestureTarget>(initialTarget)
+  // The dwell timer backing both onRecenter (zone -1) and onRandomizeGestureTarget (zone >= 0) below —
+  // a plain JS setTimeout rather than RNGH's own LongPressGesture, since a LongPress gesture fails
+  // outright once the touch has already moved more than its own small built-in tolerance, so it can
+  // never fire for "moved to a wedge, then held still there" the way this needs to, only for "held
+  // still from the very start." A single ref is enough: only one zone is ever dwell-eligible at a time,
+  // and handlePhaseChanged below always clears whatever was pending before starting a new one.
+  const fanDwellTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearFanDwell = useCallback(() => {
+    if (!fanDwellTimeout.current) return
+    clearTimeout(fanDwellTimeout.current)
+    fanDwellTimeout.current = null
+  }, [])
+
+  const applyTarget = useCallback(
+    (target: GestureTarget) => {
+      if (appliedTargetRef.current === target) return
+      appliedTargetRef.current = target
+      onSelectGestureTarget(target)
+    },
+    [onSelectGestureTarget]
+  )
+
+  // The single JS-thread handler every zone change (see fanGesture's own onUpdate) and the gesture's
+  // own onBegin funnel through — always clears whatever dwell timer was already pending first, since a
+  // zone change always means whatever was about to fire no longer applies. wedgeIndex >= 0: live-select
+  // that wedge (with its own lighter "just moved onto something" tick) and arm the randomize-this-mode
+  // dwell; anything else: fall back to startTargetRef (the live-preview-reverts-on-leaving behavior —
+  // see its own comment), and additionally arm the recenter dwell only for -1 (still on the primary FAB
+  // itself), never for -2 (adrift in the dead zone, where holding still means nothing).
+  const handleFanZoneChanged = useCallback(
+    (zone: number) => {
+      clearFanDwell()
+      if (zone >= 0) {
+        const target = GESTURE_TARGET_ORDER[zone]
+        selection()
+        applyTarget(target)
+        fanDwellTimeout.current = setTimeout(() => {
+          fanDwellTimeout.current = null
+          notification()
+          onRandomizeGestureTarget(target)
+          onGestureFanOpenChange(false)
+        }, TRANSPORT_LONG_PRESS_MS)
+        return
+      }
+      applyTarget(startTargetRef.current)
+      if (zone === -1) {
+        fanDwellTimeout.current = setTimeout(() => {
+          fanDwellTimeout.current = null
+          notification()
+          onRecenter()
+          onGestureFanOpenChange(false)
+        }, TRANSPORT_LONG_PRESS_MS)
+      }
+    },
+    [applyTarget, clearFanDwell, notification, onGestureFanOpenChange, onRandomizeGestureTarget, onRecenter, selection]
+  )
+
+  // Touch-down on the primary FAB — opens the fan immediately (rather than waiting for a completed tap)
+  // so pressing and dragging can pick a target in one continuous motion instead of two separate taps.
+  // Captures whichever target was already active as this gesture's own startTargetRef/appliedTargetRef
+  // (see their own comments), then reuses handleFanZoneChanged for zone -1 (the primary FAB's own
+  // position) so a hold that never moves at all still arms the recenter dwell, the exact same way it
+  // always has.
+  const handleFanBegin = useCallback(() => {
+    const current = [...activeTargets][0]
+    startTargetRef.current = current
+    appliedTargetRef.current = current
+    selection()
+    onGestureFanOpenChange(true)
+    handleFanZoneChanged(-1)
+  }, [activeTargets, handleFanZoneChanged, onGestureFanOpenChange, selection])
+
+  const handleFanFinalize = useCallback(() => {
+    clearFanDwell()
+    onGestureFanOpenChange(false)
+  }, [clearFanDwell, onGestureFanOpenChange])
+
+  // Belt-and-suspenders for the fan closing through some other path entirely (closeFanFirst, pressing a
+  // group trigger mid-drag) — gestureFanOpen going false is the one signal guaranteed to cover every one
+  // of those, not just this gesture's own onFinalize, so a dwell that was still pending never fires late
+  // against a fan that's already closed.
+  useEffect(() => {
+    if (!gestureFanOpen) clearFanDwell()
+  }, [clearFanDwell, gestureFanOpen])
+
+  // maxPointers(1): a second finger landing mid-drag (e.g. reaching for a group trigger with the other
+  // hand) shouldn't also feed into this gesture's own hit-testing. onStart/onEnd are deliberately unused
+  // — onBegin already does everything "the gesture started" needs (see handleFanBegin), and onFinalize
+  // (fires exactly once, on every path: a clean release, a cancel, or RNGH deciding this was never
+  // really a pan) is the one place cleanup needs to happen, so there's no separate "did it actually
+  // activate" case to handle the way useEpicenter.ts's own panGesture/longPressGesture pair does.
+  const fanGesture = Gesture.Pan()
+    .maxPointers(1)
+    // react-hooks/refs flags runOnJS(handleFanBegin/handleFanZoneChanged/handleFanFinalize) below as
+    // "may read a ref during render" — a false positive for this whole chain: runOnJS just wraps each
+    // callback for the UI thread to invoke later, off an actual gesture event, so the refs those
+    // callbacks close over are never touched while this chain itself is being built during render, the
+    // same class of known-false-positive this codebase already disables react-hooks/immutability for
+    // elsewhere (see index.tsx's resetRotation comment).
+    // eslint-disable-next-line react-hooks/refs
+    .onBegin(() => {
+      fanZone.value = -1
+      runOnJS(handleFanBegin)()
+    })
+    // eslint-disable-next-line react-hooks/refs
+    .onUpdate((event) => {
+      let nearestIndex = -1
+      let nearestDistance = Infinity
+      for (let i = 0; i < fanWedgeOffsets.length; i++) {
+        const dx = event.translationX - fanWedgeOffsets[i].dx
+        const dy = event.translationY - fanWedgeOffsets[i].dy
+        const distance = Math.sqrt(dx * dx + dy * dy)
+        if (distance < nearestDistance) {
+          nearestDistance = distance
+          nearestIndex = i
+        }
+      }
+      const centerDistance = Math.sqrt(event.translationX * event.translationX + event.translationY * event.translationY)
+      const nextZone = nearestDistance <= FAN_CAPTURE_RADIUS_PX ? nearestIndex : centerDistance <= FAN_CENTER_RADIUS_PX ? -1 : -2
+      if (nextZone !== fanZone.value) {
+        fanZone.value = nextZone
+        runOnJS(handleFanZoneChanged)(nextZone)
+      }
+    })
+    // eslint-disable-next-line react-hooks/refs
+    .onFinalize(() => {
+      runOnJS(handleFanFinalize)()
+    })
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: withTiming(visible ? 1 : 0, { duration: FADE_DURATION_MS, easing: Easing.out(Easing.quad) })
@@ -360,7 +537,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   const fabOutlineStyle = { borderColor: solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH }
   const solidFabStyle = { backgroundColor: colors.primary, ...fabOutlineStyle }
   const disabledBackdropStyle = { borderRadius: BORDER_RADIUS_MULTIPLIER_SMALL * (roundness ?? 4), overflow: 'hidden' as const }
-  // Every boundary-disabled small FAB (skip-previous, Add/Remove mirror below) needs this conditional
+  // Every boundary-disabled small FAB (skip-previous below) needs this conditional
   // treatment rather than plain solidFabStyle: react-native-paper's FAB reads a `customBackgroundColor`
   // out of the raw `style` prop and correctly ignores it while disabled in favor of the theme's
   // surfaceDisabled — but then re-spreads that same raw `style` prop again, last, over its own computed
@@ -524,28 +701,23 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   let slotA: React.ReactNode = null
   let slotB: React.ReactNode = null
   if (activeTargets.has('mirror')) {
-    // Plain ±1 steps on mirrorLines (see index.tsx's addMirrorLine/removeMirrorLine) — one-shot
-    // actions, not toggles, so these use the same solid FAB look as Recenter/Reset below rather than
-    // GlassToggleFab's on/off language. Boundary-disabled the same disableableSmallFabWrapper +
-    // BlurView way skip-previous already is for backDisabled — mirrorLines/mirrorAlternateColors
-    // treated as one signed dial (see signedMirrorLines), so only the true +/-MAX_MIRROR_LINES extremes
-    // disable either button; the 0 midpoint leaves both enabled, since either direction is still valid
-    // from there.
-    const signedMirror = signedMirrorLines(mirrorLines, mirrorAlternateColors)
-    const mirrorAtMax = signedMirror >= MAX_MIRROR_LINES
-    const mirrorAtMin = signedMirror <= -MAX_MIRROR_LINES
-    slotA = (
-      <View style={styles.disableableSmallFabWrapper}>
-        {mirrorAtMin && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, disabledBackdropStyle]} />}
-        <FAB testID='fab-remove-mirror' icon={resolveIcon('minus')} size='small' disabled={mirrorAtMin} color={solidFabColor} style={disabledAwareFabStyle(mirrorAtMin)} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onRemoveMirrorLine} onLongPress={minMirrorLinesHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={minMirrorLinesHold.onPressOut} />
-      </View>
-    )
-    slotB = (
-      <View style={styles.disableableSmallFabWrapper}>
-        {mirrorAtMax && <BlurView blur={blurEnabled} tintColor={DISABLED_ON_CANVAS_SCRIM_COLOR} tintOpacity={blurEnabled ? TOGGLE_OFF_BLUR_TINT_OPACITY : 1} style={[StyleSheet.absoluteFill, disabledBackdropStyle]} />}
-        <FAB testID='fab-add-mirror' icon={resolveIcon('plus')} size='small' disabled={mirrorAtMax} color={solidFabColor} style={disabledAwareFabStyle(mirrorAtMax)} theme={disabledOnCanvasFabTheme(colors.primary)} onPress={onAddMirrorLine} onLongPress={maxMirrorLinesHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={maxMirrorLinesHold.onPressOut} />
-      </View>
-    )
+    // mirrorLines itself lives entirely on the Focus twist gesture now (see index.tsx's own
+    // rotationGesture), which freed this pair up for foreground/background color actions instead of a
+    // second, redundant way to dial the same count. Neither has a boundary to hit (a fresh random hue
+    // and a black/white flip are always reachable), so — unlike the old +/- pair — these are plain
+    // always-enabled solid FABs, no disableableSmallFabWrapper/BlurView needed.
+    //
+    // Left (background): tap alternates a solid black/white; long-press-and-hold manages a real
+    // two-color pair instead, strobing while held — see index.tsx's own alternateBackground/
+    // cycleBackgroundTwoTone for the full mechanism. 'circle-half-full' reads as "black and white"
+    // directly, the same reason mirror's own icon above is a literal mirror glyph rather than an
+    // abstract stand-in.
+    slotA = <FAB testID='fab-alternate-background' icon={resolveIcon('circle-half-full')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onAlternateBackground} onLongPress={cycleBackgroundTwoToneHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={cycleBackgroundTwoToneHold.onPressOut} />
+    // Right (foreground): tap picks one fresh random hue; long-press-and-hold keeps appending another
+    // on top of whatever's there — the "rainbow soup" half of the pair (see index.tsx's own
+    // randomizeForeground/growForeground). Same 'dice-multiple' glyph the Colors sheet's own Randomize
+    // button already uses (see ControlGroupTopSheetContent), so both read as the same action.
+    slotB = <FAB testID='fab-randomize-foreground' icon={resolveIcon('dice-multiple')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onRandomizeForeground} onLongPress={growForegroundHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={growForegroundHold.onPressOut} />
   } else if (activeTargets.has('pattern')) {
     // Cycle shape reuses index.tsx's existing nextPattern (already reachable via a two-finger canvas
     // tap); cycle line type is the only on-canvas way to reach dash style at all — 'line' has no
@@ -603,6 +775,14 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     // other and neither can drift out of sync with it.
     slotA = <GlassToggleFab icon='eye' testID='fab-gravity-marker-visible' active={settings.gravityMarkerVisible} onPress={() => setGravityMarkerVisible(!settings.gravityMarkerVisible)} />
     slotB = <GlassToggleFab icon='plus-minus-variant' testID='fab-reverse-gravity' active={gravityRepelling} onPress={onReverseGravity} />
+  } else if (activeTargets.has('crop')) {
+    // Same shape as the gravity branch above: two real toggles, not one-shot actions — cropRadius/
+    // holeRadius themselves live on this target's pinch/twist instead (see index.tsx's own
+    // targetsCropPinch/targetsCropRotation), so the flanking pair is free for their own shape toggles.
+    // Same icons as the Crop/Line sheet's own copies (see ControlGroupTopSheetContent), which read/
+    // write the exact same persisted cropShaped/holeShaped settings.
+    slotA = <GlassToggleFab icon='shape-outline' testID='fab-crop-shaped' active={settings.cropShaped} onPress={() => setCropShaped(!settings.cropShaped)} />
+    slotB = <GlassToggleFab icon='contain' testID='fab-hole-shaped' active={settings.holeShaped} onPress={() => setHoleShaped(!settings.holeShaped)} />
   }
 
   return (
@@ -635,57 +815,59 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
             {slotA}
           </Animated.View>
           {/* The row's primary/biggest FAB (medium, centered) — switching what a drag/twist controls
-          is the thing you're actually doing most of the time in this app. Tapping it fans
-          the other targets out in an arc above it (see GestureFanItem) rather than cycling through
-          them one at a time — cycling stopped scaling once gravity brought the option count to four,
-          and more are coming (particles, camera), which would make "tap N times to reach the one you
-          want" worse with every addition; a fan reaches any of them in one tap regardless of count.
-          Tapping this FAB again while the fan is open just closes it back up — whatever was selected
-          stays selected, this only ever ends the picking session, never changes the selection on its
-          own. gestureFanOpen is lifted up to index.tsx (see its own prop comment) so opening the fan
-          also suspends the idle auto-hide timer — picking a target shouldn't have the whole row fade
-          out from underneath you mid-pick. Closing the fan (this same FAB, or picking a target) hands
-          idle-hide back control with a fresh countdown, same as any other activity would.
-          icon is always the one active target's own icon — activeTargets is always exactly one entry
-          (see slotA/slotB's own comment), so this FAB is always a live summary of it, not just whatever
-          was last explicitly tapped.
+          is the thing you're actually doing most of the time in this app, so it's a single press-drag-
+          release rather than the tap-to-open/tap-to-select two-step this used to be: pressing down
+          fans the other targets out in an arc above it (see GestureFanItem) immediately, dragging onto
+          one live-switches activeTargets to it the instant the finger crosses in (fanGesture's own
+          onUpdate, above), and releasing just ends the picking session — whatever's currently live
+          stays selected, there's no separate "confirm" step. A fan (rather than cycling through targets
+          one at a time) is what makes this reach any of them in a single motion regardless of count —
+          cycling stopped scaling once gravity brought the option count to four, and more are coming
+          (particles, camera). Dragging back off a wedge without releasing reverts the live preview to
+          whatever was active before this gesture started (see fanGesture's own startTargetRef), so
+          sweeping through on the way to somewhere else — or changing your mind — doesn't leave you on
+          whatever you happened to pass over. Holding still — either right on this FAB, or on a wedge
+          once the drag's landed on one — arms a bonus after TRANSPORT_LONG_PRESS_MS: recenter
+          (onRecenter) at the center, randomize that mode (onRandomizeGestureTarget) on a wedge, the same
+          tap/hold-does-something-else convention every other FAB in this file already uses, just
+          reached through this drag instead of a second press. gestureFanOpen is lifted up to index.tsx
+          (see its own prop comment) so opening the fan also suspends the idle auto-hide timer — picking
+          a target shouldn't have the whole row fade out from underneath you mid-pick.
+          The FAB itself renders inert (pointerEvents='none', no onPress/onLongPress of its own) —
+          fanGesture attached to the cluster below is what actually owns every touch here now, hit-
+          testing against the drag's own translation rather than needing a Pressable under the finger
+          for every wedge. icon is always the one active target's own icon — activeTargets is always
+          exactly one entry (see slotA/slotB's own comment) — so it's always a live summary of whatever
+          this drag has (or hasn't) switched to, not just whatever was last explicitly picked.
           testID is a fixed 'fab-target' rather than left to derive from the icon: GESTURE_TARGET_ICONS'
           own 'pattern' entry renders the exact same PatternIcon closure shape as the Pattern group
           trigger above (see GROUP_TRIGGERS), so anything deriving an identity from the icon prop alone
           can't tell the two apart once this FAB is showing 'pattern' too — a fixed testID sidesteps that
-          regardless of which icon is currently showing.
-          onLongPress recentres whatever's currently active (onRecenter — see its own prop comment) —
-          this used to live on a one-finger canvas long press instead, but that fought the canvas's own
-          touch-tracking glide (see useEpicenter.ts's panGesture): pressing and holding would ease
-          toward your finger, then immediately get yanked back to center the instant the long press
-          finished. Living here instead keeps every canvas gesture about moving things around, with
-          recentring as its own explicit, separate action. closeFanFirst (same as every other button in
-          this file that can fire while the fan is open) closes it first if a long press happens to land
-          while it's spread out, same as any other action would. React Native's own touchable already
-          treats onLongPress as exclusive of onPress within the same gesture (same guarantee every other
-          long-press-carrying FAB in this file relies on), so a hold doesn't also toggle the fan open on
-          release. */}
-          <View testID='gesture-target-cluster' style={styles.gestureTargetCluster} pointerEvents='box-none'>
-            {GESTURE_TARGET_ORDER.map((target, index) => {
-              const { dx, dy } = fanItemOffset(index, GESTURE_TARGET_ORDER.length)
-              return (
-                <GestureFanItem
-                  key={target}
-                  icon={GESTURE_TARGET_ICONS[target]}
-                  testID={`fab-target-${target}`}
-                  active={activeTargets.has(target)}
-                  open={gestureFanOpen}
-                  dx={dx}
-                  dy={dy}
-                  onPress={() => {
-                    onSelectGestureTarget(target)
-                    onGestureFanOpenChange(false)
-                  }}
-                />
-              )
-            })}
-            <FAB testID='fab-target' icon={resolveIcon(GESTURE_TARGET_ICONS[[...activeTargets][0]])} size='medium' color={solidFabColor} style={[solidFabStyle, solidFabSizeMedium]} onPress={() => onGestureFanOpenChange(!gestureFanOpen)} onLongPress={closeFanFirst(onRecenter)} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
-          </View>
+          regardless of which icon is currently showing. */}
+          <GestureDetector gesture={fanGesture}>
+            {/* collapsable={false} keeps this View from being flattened out of the native view tree,
+            the same reason index.tsx's own canvas wrapper needs it (see its own comment) — without it,
+            a GestureDetector whose only child renders nothing interactive of its own is exactly what
+            view-flattening optimizes away on native, leaving GestureDetector with no real view left to
+            attach its gesture recognizer to. */}
+            <View testID='gesture-target-cluster' collapsable={false} style={styles.gestureTargetCluster}>
+              {GESTURE_TARGET_ORDER.map((target, index) => {
+                const { dx, dy } = fanItemOffset(index, GESTURE_TARGET_ORDER.length)
+                return <GestureFanItem key={target} icon={GESTURE_TARGET_ICONS[target]} testID={`fab-target-${target}`} active={activeTargets.has(target)} open={gestureFanOpen} dx={dx} dy={dy} />
+              })}
+              <View pointerEvents='none'>
+                <FAB testID='fab-target' icon={resolveIcon(GESTURE_TARGET_ICONS[[...activeTargets][0]])} size='medium' color={solidFabColor} style={[solidFabStyle, solidFabSizeMedium]} />
+              </View>
+              {/* The real hit target — on web, react-native-paper's FAB renders its own inner container
+              with pointer-events explicitly reset to 'auto' regardless of an ancestor's 'none' (a plain
+              wrapper doesn't override that once a descendant re-asserts its own value), so a touch
+              landing on the FAB above would otherwise be claimed by that inner container and never reach
+              this cluster's own GestureDetector at all. A dedicated, topmost, purely transparent layer —
+              painted last, so it wins hit-testing for this whole area regardless of what pointer-events
+              value anything underneath it ends up with — sidesteps that instead of depending on it. */}
+              <View testID='fab-target-hit-layer' style={StyleSheet.absoluteFill} />
+            </View>
+          </GestureDetector>
           {/* Grouped with forward into its own row for the same fanFlanksStyle reason as the back/slot-A
           flank above. */}
           <Animated.View testID='transport-row-flank-right' style={[styles.transportRowFlank, fanFlanksStyle]} pointerEvents={gestureFanOpen ? 'none' : 'auto'}>
@@ -720,8 +902,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
 const styles = StyleSheet.create({
   // Sized to react-native-paper's own small-FAB footprint (FAB_HEIGHT_SMALL) so the BlurView backdrop
   // rendered behind a disabled FAB matches its bounds exactly, the same wrapper shape GlassToggleFab
-  // uses for its own off-state backdrop. Used by the back FAB (backDisabled) and mirror mode's own
-  // Add/Remove mirror pair (boundary-disabled at the signed +/-MAX_MIRROR_LINES extremes — see slotA/slotB above).
+  // uses for its own off-state backdrop. Used by the back FAB (backDisabled).
   disableableSmallFabWrapper: {
     height: FAB_HEIGHT_SMALL,
     width: FAB_HEIGHT_SMALL

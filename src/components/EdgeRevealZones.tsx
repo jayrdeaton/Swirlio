@@ -1,9 +1,9 @@
+import { useHoldToRepeat } from '@rific/feedback-press'
 import React from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { RANDOMIZE_HOLD_REPEAT_MS } from '@/constants/holdToRepeat'
-import { useHoldToRepeat } from '@/hooks/useHoldToRepeat'
 
 import { FAB_ROW_GAP } from './FabRow'
 import { FAB_HEIGHT_SMALL } from './LabeledFab'
@@ -90,7 +90,11 @@ export function EdgeRevealZones({ onReveal, active, triggerStackExpanded, onPaus
   // its group triggers (see that shared constant's own comment for why randomize gets a real shared
   // constant instead of the usual per-file duplication) — this zone is reachable independently of those
   // (see the top-of-file comment: it's what catches a long press while the real controls are hidden
-  // entirely), so it needs its own instance rather than sharing theirs.
+  // entirely), so it needs its own instance rather than sharing theirs. This zone's own Pressables are
+  // plain react-native ones, not @rific/feedback-press wrappers (nothing here is Paper-themed), so
+  // useHoldToRepeat's own built-in per-tick selection() pulse is the *only* haptic this corner gets at
+  // all — unlike OnScreenControls' FAB-backed triggers, there's no auto-wired notification() from a
+  // wrapper component underneath to layer on top of.
   const randomizeHold = useHoldToRepeat(onRandomizeEverything, RANDOMIZE_HOLD_REPEAT_MS)
 
   if (!active) return null

@@ -34,7 +34,6 @@ type GestureFanItemProps = {
   open: boolean
   dx: number
   dy: number
-  onPress: () => void
 }
 
 // One per GESTURE_TARGET_ORDER entry (see OnScreenControls), each a real component (not a shared style
@@ -47,14 +46,23 @@ type GestureFanItemProps = {
 // useAnimatedReaction (see useDragPointPhysics.ts's frozenShared for that other case). Collapsed
 // (open: false) sits exactly on top of the primary FAB (dx/dy both animate back to 0) rather than just
 // fading out in place, so it visibly retracts into the button it came from.
-export function GestureFanItem({ icon, testID, active, open, dx, dy, onPress }: GestureFanItemProps) {
+//
+// Purely a visual now, no onPress of its own: picking a target is a single press-drag-release on the
+// primary FAB (see OnScreenControls' own fanGesture), which hit-tests against this same dx/dy live as
+// the finger moves rather than waiting for a discrete tap on whichever wedge is currently fanned out —
+// pointerEvents='none' unconditionally (not just while closed) is what lets that drag sweep straight
+// through a wedge's own pixels to the cluster's GestureDetector underneath instead of this wedge's own
+// FAB claiming the touch. `active` still comes straight from activeTargets, so once the drag calls
+// onSelectGestureTarget mid-gesture, whichever wedge is currently under the finger lights up on its
+// own — no separate "hovered" state needed here.
+export function GestureFanItem({ icon, testID, active, open, dx, dy }: GestureFanItemProps) {
   const style = useAnimatedStyle(() => ({
     opacity: withTiming(open ? 1 : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }),
     transform: [{ translateX: withTiming(open ? dx : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }) }, { translateY: withTiming(open ? dy : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }) }]
   }))
   return (
-    <Animated.View testID={`${testID}-fan-item`} style={[styles.fanItem, style]} pointerEvents={open ? 'auto' : 'none'}>
-      <GlassToggleFab icon={icon} testID={testID} active={active} onPress={onPress} />
+    <Animated.View testID={`${testID}-fan-item`} style={[styles.fanItem, style]} pointerEvents='none'>
+      <GlassToggleFab icon={icon} testID={testID} active={active} />
     </Animated.View>
   )
 }

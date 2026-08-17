@@ -1,5 +1,5 @@
 import { BlurView } from '@rific/auto-paper'
-import { FAB } from '@rific/haptic-press'
+import { FAB } from '@rific/feedback-press'
 import React from 'react'
 import { StyleSheet, View } from 'react-native'
 import { Text, useTheme } from 'react-native-paper'
