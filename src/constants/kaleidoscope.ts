@@ -255,3 +255,13 @@ export function wedgeVector(dx: number, dy: number, copyIndex: number, wedgeAngl
   const d = -Math.cos(twiceRad)
   return { dx: a * dx + c * dy, dy: b * dx + d * dy }
 }
+
+// Distance from (x, y) to whichever of the four screen corners is furthest away — a fixed
+// half-diagonal would leave a bare wedge of screen once a point is dragged off-centre. Not wedge
+// math itself, but factored out here (rather than left inline in Spiral.tsx, where it originated)
+// so useParticleField.ts's own containment boundary can compute the exact same reach independently,
+// without duplicating the formula or routing through Spiral.tsx's own render tree to get it.
+export function farthestCornerDistance(x: number, y: number, width: number, height: number): number {
+  'worklet'
+  return Math.max(Math.hypot(x, y), Math.hypot(width - x, y), Math.hypot(x, height - y), Math.hypot(width - x, height - y))
+}

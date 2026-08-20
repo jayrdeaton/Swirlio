@@ -39,6 +39,14 @@ type LabeledFabProps = LabeledFabColorProps & {
   // toggles, which are already distinguishable by icon/aria-label alone.
   testID?: string
   onPress: () => void
+  // Optional hold-to-repeat trio — undefined unless a caller actually wires one up (see
+  // useColorListFabs.tsx's own growColors for the one place that does), in which case they pass
+  // straight through to the underlying FAB exactly like every on-canvas hold-to-repeat FAB
+  // (OnScreenControls' own growForeground/growParticleColors pair) already wires these same three
+  // props directly.
+  onLongPress?: () => void
+  onPressOut?: () => void
+  delayLongPress?: number
 }
 
 // A single square icon button, optionally captioned — every FAB-style control on screen (group
@@ -51,7 +59,7 @@ type LabeledFabProps = LabeledFabColorProps & {
 // two used to drift). ActionFab (no on/off state at all — a one-shot action) just always passes
 // active={true}, reusing that branch's solid-fill-plus-contrasting-icon look rather than computing its
 // own copy of the same two colors.
-export function LabeledFab({ icon, label, active, colorOverride, disabled = false, testID, onPress }: LabeledFabProps) {
+export function LabeledFab({ icon, label, active, colorOverride, disabled = false, testID, onPress, onLongPress, onPressOut, delayLongPress }: LabeledFabProps) {
   const { settings } = useSwirlSettings()
   const { colors, roundness } = useTheme()
   // Called unconditionally regardless of which color mode this instance is in — rules of hooks — and
@@ -94,7 +102,7 @@ export function LabeledFab({ icon, label, active, colorOverride, disabled = fals
     <View style={styles.column}>
       <View style={wrapperStyle}>
         {showBlurBackdrop && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, backdropStyle]} />}
-        <FAB testID={testID} size={size} icon={resolveIcon(icon)} disabled={disabled} accessibilityLabel={label} accessibilityState={{ disabled, selected: active }} color={iconColor} style={fabStyle} theme={disabledFabTheme(colors.primary)} onPress={onPress} />
+        <FAB testID={testID} size={size} icon={resolveIcon(icon)} disabled={disabled} accessibilityLabel={label} accessibilityState={{ disabled, selected: active }} color={iconColor} style={fabStyle} theme={disabledFabTheme(colors.primary)} onPress={onPress} onLongPress={onLongPress} onPressOut={onPressOut} delayLongPress={delayLongPress} />
       </View>
       {/* One word per line via an explicit break, rather than letting a long caption wrap on its
       own: a browser sizes an auto-width block to its max-width whenever IT has to wrap the text

@@ -1,4 +1,4 @@
-import { copyCountForMirrorLines, inverseWedgeVector, mirrorLinesFromSigned, reflectionMatrix, rotationMatrix, signedMirrorLines, wedgeAngleDegrees, wedgeClipPath, wedgeContentTransform, wedgeIndexAtPoint, wedgePath, wedgeVector } from './kaleidoscope'
+import { copyCountForMirrorLines, farthestCornerDistance, inverseWedgeVector, mirrorLinesFromSigned, reflectionMatrix, rotationMatrix, signedMirrorLines, wedgeAngleDegrees, wedgeClipPath, wedgeContentTransform, wedgeIndexAtPoint, wedgePath, wedgeVector } from './kaleidoscope'
 
 describe('copyCountForMirrorLines', () => {
   it('is 1 at 0 lines (unmirrored), and 2x lines otherwise', () => {
@@ -273,5 +273,20 @@ describe('wedgeVector', () => {
       expect(actual.dx).toBeCloseTo(expected.dx)
       expect(actual.dy).toBeCloseTo(expected.dy)
     }
+  })
+})
+
+describe('farthestCornerDistance', () => {
+  it('reaches the far corner exactly, for a point centred in the window', () => {
+    expect(farthestCornerDistance(50, 50, 100, 100)).toBeCloseTo(Math.hypot(50, 50))
+  })
+
+  it('picks whichever corner is actually furthest once the point is off-centre', () => {
+    // Point near the top-left — the bottom-right corner is the furthest one.
+    expect(farthestCornerDistance(10, 10, 100, 100)).toBeCloseTo(Math.hypot(90, 90))
+  })
+
+  it('is symmetric — the furthest corner from a point near any single corner is always the opposite one', () => {
+    expect(farthestCornerDistance(95, 5, 100, 100)).toBeCloseTo(Math.hypot(95, 95))
   })
 })

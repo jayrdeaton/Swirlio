@@ -3,9 +3,10 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { Platform } from 'react-native'
 
 import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
+import { ParticleShape } from '@/constants/particleShapes'
 import { PatternType } from '@/constants/patterns'
 import { DashStyle } from '@/constants/strokeDash'
-import { defaultSettings, MAX_BOUNCE_FRICTION, MAX_CONTROLS_AUTO_HIDE_SPEED, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CONTROLS_AUTO_HIDE_SPEED, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED } from '@/constants/swirlSettingsRanges'
+import { defaultSettings, MAX_BOUNCE_FRICTION, MAX_CONTROLS_AUTO_HIDE_SPEED, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_PARTICLE_BORDER_WIDTH, MAX_PARTICLE_COUNT, MAX_PARTICLE_SIZE, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CONTROLS_AUTO_HIDE_SPEED, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_PARTICLE_BORDER_WIDTH, MIN_PARTICLE_COUNT, MIN_PARTICLE_SIZE, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED } from '@/constants/swirlSettingsRanges'
 
 import { loadSkiaWeb } from './loadSkiaWeb'
 import { useReady } from './splashGate'
@@ -16,12 +17,17 @@ import { GestureTarget } from './useEpicenter'
 // settings migration logic to swirlSettingsMigration.ts — re-exported here so every existing caller
 // that already imports these from '@/hooks/useSwirlSettings' (ControlGroupBottomSheetContent, Spiral,
 // SettingSlider, and others) keeps working without touching its own imports.
-export { DEFAULT_BACKGROUND_COLORS, DEFAULT_BOUNCE_FRICTION, DEFAULT_DASH_STYLE, DEFAULT_FIXED_SPACING, DEFAULT_FOREGROUND_COLORS, DEFAULT_GRAVITY, DEFAULT_MIRROR_ALTERNATE_COLORS, DEFAULT_MIRROR_GAP, DEFAULT_MIRROR_LINES, DEFAULT_MIRROR_ROTATION_SPEED, DEFAULT_STROKE_WIDTH, DEFAULT_TIGHTNESS, MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED } from '@/constants/swirlSettingsRanges'
+export { DEFAULT_BACKGROUND_COLORS, DEFAULT_BOUNCE_FRICTION, DEFAULT_DASH_STYLE, DEFAULT_FIXED_SPACING, DEFAULT_FOREGROUND_COLORS, DEFAULT_GRAVITY, DEFAULT_MIRROR_ALTERNATE_COLORS, DEFAULT_MIRROR_GAP, DEFAULT_MIRROR_LINES, DEFAULT_MIRROR_ROTATION_SPEED, DEFAULT_PARTICLE_BORDER_COLORS, DEFAULT_PARTICLE_BORDER_WIDTH, DEFAULT_PARTICLE_COLORS, DEFAULT_PARTICLE_COUNT, DEFAULT_PARTICLE_SHAPES, DEFAULT_PARTICLE_SIZE, DEFAULT_STROKE_WIDTH, DEFAULT_TIGHTNESS, MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_PARTICLE_BORDER_WIDTH, MAX_PARTICLE_COUNT, MAX_PARTICLE_SIZE, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_PARTICLE_BORDER_WIDTH, MIN_PARTICLE_COUNT, MIN_PARTICLE_SIZE, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED } from '@/constants/swirlSettingsRanges'
 
 export type SwirlSettings = {
   audioReactiveEnabled: boolean
   backgroundColors: string[]
   backgroundCycleSpeed: number
+  // The drag-released epicentre/mirror-anchor's own exponential velocity decay — also what
+  // useParticleField.ts's frame callback decays bead velocity by, straight off this same SharedValue
+  // (see index.tsx's own useParticleField call). Beads used to have their own dedicated particleFriction
+  // dial; removed so turning this down (or up) always affects everything that bounces/tumbles at once,
+  // rather than needing two sliders kept in sync by hand.
   bounceFriction: number
   // A rate dial for the on-screen controls' idle-fade timer, the same "0/5" shape as bounceFriction
   // just above — not a raw delay in seconds. 0 means the controls never auto-hide from inactivity at
@@ -78,7 +84,10 @@ export type SwirlSettings = {
   // useEpicenter.ts's own patternManualControl/mirrorManualControl) — this only governs the *separate*,
   // always-on ambient pull toward wherever gravity's own center happens to be sitting. Nonzero by
   // default so gravity mode itself (and that ambient pull) does something the moment it's turned on,
-  // without also needing this slider raised first.
+  // without also needing this slider raised first. Also what pulls/pushes beads toward the same well
+  // (see particleMath.ts's own applyGravityAndFriction) — useParticleField.ts reads this exact
+  // SharedValue directly rather than a dedicated particleGravity dial of its own, so beads and the
+  // pattern/mirror epicentre always agree on how strong gravity currently is.
   gravity: number
   // Whether the gravity marker (GravityWell in Spiral.tsx) shows at all — independent of
   // gestureTarget, so it's reachable regardless of which gesture mode is active. Shared by the
@@ -125,7 +134,53 @@ export type SwirlSettings = {
   // each wedge (see Spiral.tsx's outer AnimatedG). Bipolar like rotationSpeed/zoomSpeed: negative
   // reverses, 0 (the default) leaves the wedges exactly as fixed as they've always been.
   mirrorRotationSpeed: number
+  // Each bead's own outline color list — same "list, each live particle resolves a random pick from it
+  // at render time" convention particleColors/particleShapes already establish (see
+  // useParticleField.ts's own borderColorIndex comment for the mechanism), independent of that fill
+  // list rather than derived from it: an earlier version computed this automatically per bead
+  // (getContrastColor against the bead's own fill), which guaranteed readability but meant there was no
+  // way to just pick a border color and have it stick. Defaults to just black (see
+  // DEFAULT_PARTICLE_BORDER_COLORS' own comment) specifically so a fresh install's own out-of-the-box
+  // look is unchanged from what that computed version already produced against the default white fill.
+  particleBorderColors: string[]
+  // Flat px width of that outline — see MIN_PARTICLE_BORDER_WIDTH's own comment for why this is a
+  // direct, user-facing value now rather than a fraction of particleSize. 0 turns the border off
+  // entirely (see Spiral.tsx's own particleBucketPaths derivation), the same "0 is this feature's own
+  // off switch" shape MIN_PARTICLE_COUNT already uses for the whole particle layer.
+  particleBorderWidth: number
+  // The beads' own dedicated color list — deliberately separate from foregroundColors/backgroundColors
+  // (see this field's own reasoning: beads should read as their own little glass chips, not tied to
+  // whatever the pattern/background are doing). Each live particle stores just an index into this list
+  // (see useParticleField.ts), resolved to an actual hex string only at render time, which is what
+  // lets editing this list recolor every already-tumbling bead instantly rather than only new ones.
+  particleColors: string[]
+  // How many beads are alive at once — a live loop cutoff over a fixed-size pool (see
+  // useParticleField.ts), not something that re-seeds or teleports already-tumbling particles when
+  // it changes.
+  particleCount: number
+  // Which shapes are in play at all — a list, not a single active shape, the same "list, each live
+  // particle resolves a random pick from it at render time" convention this file's own particleColors
+  // field already established (see useParticleField.ts's own particleShapeIndex comment for the
+  // mechanism, and particleColors' own comment for why that split is what makes editing the list
+  // re-shape every already-tumbling bead instantly). Side/point/petal count for
+  // whichever shapes actually have one (star/polygon/flower) piggybacks on polygonSides below, the
+  // same live value the active pattern itself uses — not a dedicated field of its own (see gravity/
+  // bounceFriction's own comment above this type for why beads deliberately stopped having independent
+  // physics dials, same reasoning extends to sides: one shared "how many sides" knob, not two that can
+  // drift apart).
+  particleShapes: ParticleShape[]
+  // Radius in px, at the pattern's own live scale — a fixed physical size regardless of how far the
+  // epicentre has wandered, the same way strokeWidth already is.
+  particleSize: number
   pattern: PatternType
+  // Whether the pattern's own linework draws at all — independent of which pattern is selected, so
+  // beads can be shown alone without switching pattern away entirely (see Spiral.tsx's own
+  // patternVisible prop). True by default: this is a deliberate hide, not a starting state anyone
+  // would expect. index.tsx's own nextPattern forces this back on whenever the pattern itself is
+  // changed via the pattern mode's own transport-row flanking button — cycling the shape should always
+  // show you the shape you just cycled to, not silently do nothing because visibility happened to be
+  // off (see that handler's own comment).
+  patternVisible: boolean
   polygonSides: number
   rotationSpeed: number
   shakeEnabled: boolean
@@ -174,7 +229,14 @@ type SwirlSettingsContextValue = {
   setMirrorGap: (gap: number) => void
   setMirrorLines: (lines: number) => void
   setMirrorRotationSpeed: (speed: number) => void
+  setParticleBorderColors: (colors: string[]) => void
+  setParticleBorderWidth: (width: number) => void
+  setParticleColors: (colors: string[]) => void
+  setParticleCount: (count: number) => void
+  setParticleShapes: (shapes: ParticleShape[]) => void
+  setParticleSize: (size: number) => void
   setPattern: (pattern: PatternType) => void
+  setPatternVisible: (visible: boolean) => void
   setPolygonSides: (sides: number) => void
   setRotationSpeed: (speed: number) => void
   setShakeEnabled: (enabled: boolean) => void
@@ -284,7 +346,18 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setMirrorGap: (gap) => setSettings((prev) => (Number.isFinite(gap) ? { ...prev, mirrorGap: clamp(gap, MIN_MIRROR_GAP, MAX_MIRROR_GAP) } : prev)),
       setMirrorLines: (lines) => setSettings((prev) => (Number.isFinite(lines) ? { ...prev, mirrorLines: clampInt(lines, MIN_MIRROR_LINES, MAX_MIRROR_LINES) } : prev)),
       setMirrorRotationSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, mirrorRotationSpeed: clamp(speed, MIN_MIRROR_ROTATION_SPEED, MAX_MIRROR_ROTATION_SPEED) } : prev)),
+      // Empty lists are refused, same as setForegroundColors/setBackgroundColors above.
+      // Empty lists are refused, same as setParticleColors below — there'd be nothing left for a
+      // border to be drawn as.
+      setParticleBorderColors: (colors) => setSettings((prev) => (colors.length > 0 ? { ...prev, particleBorderColors: colors } : prev)),
+      setParticleBorderWidth: (width) => setSettings((prev) => (Number.isFinite(width) ? { ...prev, particleBorderWidth: clamp(width, MIN_PARTICLE_BORDER_WIDTH, MAX_PARTICLE_BORDER_WIDTH) } : prev)),
+      setParticleColors: (colors) => setSettings((prev) => (colors.length > 0 ? { ...prev, particleColors: colors } : prev)),
+      setParticleCount: (count) => setSettings((prev) => (Number.isFinite(count) ? { ...prev, particleCount: clampInt(count, MIN_PARTICLE_COUNT, MAX_PARTICLE_COUNT) } : prev)),
+      // Empty lists are refused too — there'd be nothing left for a bead to be drawn as.
+      setParticleShapes: (shapes) => setSettings((prev) => (shapes.length > 0 ? { ...prev, particleShapes: shapes } : prev)),
+      setParticleSize: (size) => setSettings((prev) => (Number.isFinite(size) ? { ...prev, particleSize: clamp(size, MIN_PARTICLE_SIZE, MAX_PARTICLE_SIZE) } : prev)),
       setPattern: (pattern) => setSettings((prev) => ({ ...prev, pattern })),
+      setPatternVisible: (visible) => setSettings((prev) => ({ ...prev, patternVisible: visible })),
       setPolygonSides: (sides) => setSettings((prev) => (Number.isFinite(sides) ? { ...prev, polygonSides: clampInt(sides, MIN_POLYGON_SIDES, MAX_POLYGON_SIDES) } : prev)),
       setRotationSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, rotationSpeed: clamp(speed, MIN_ROTATION_SPEED, MAX_ROTATION_SPEED) } : prev)),
       setShakeEnabled: (enabled) => setSettings((prev) => ({ ...prev, shakeEnabled: enabled })),

@@ -39,6 +39,13 @@ type GestureFanItemProps = {
   dx: number
   dy: number
   onPress: () => void
+  // Optional long-press-and-hold trio, passed straight through to GlassToggleFab — see
+  // OnScreenControls' own randomizeGestureTargetHold for the one caller that wires these up (a plain
+  // press-and-hold directly on an already-open wedge randomizes it, the same long-press-to-randomize
+  // the trigger stack's own group buttons already have).
+  onLongPress?: () => void
+  onPressOut?: () => void
+  delayLongPress?: number
 }
 
 // One per GESTURE_TARGET_ORDER entry (see OnScreenControls), each a real component (not a shared style
@@ -64,14 +71,14 @@ type GestureFanItemProps = {
 // primary FAB — see fanItem's own style) would otherwise compete with that FAB's own gesture for it.
 // `active` still comes straight from activeTargets, so once either path calls onSelectGestureTarget,
 // whichever wedge is now the live target lights up on its own — no separate "hovered" state needed here.
-export function GestureFanItem({ icon, testID, active, open, dx, dy, onPress }: GestureFanItemProps) {
+export function GestureFanItem({ icon, testID, active, open, dx, dy, onPress, onLongPress, onPressOut, delayLongPress }: GestureFanItemProps) {
   const style = useAnimatedStyle(() => ({
     opacity: withTiming(open ? 1 : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }),
     transform: [{ translateX: withTiming(open ? dx : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }) }, { translateY: withTiming(open ? dy : 0, { duration: FAN_DURATION_MS, easing: Easing.out(Easing.quad) }) }]
   }))
   return (
     <Animated.View testID={`${testID}-fan-item`} style={[styles.fanItem, style]} pointerEvents={open ? 'auto' : 'none'}>
-      <GlassToggleFab icon={icon} testID={testID} active={active} onPress={onPress} />
+      <GlassToggleFab icon={icon} testID={testID} active={active} onPress={onPress} onLongPress={onLongPress} onPressOut={onPressOut} delayLongPress={delayLongPress} />
     </Animated.View>
   )
 }

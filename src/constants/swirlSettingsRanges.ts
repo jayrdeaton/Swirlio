@@ -1,3 +1,4 @@
+import { ParticleShape } from '@/constants/particleShapes'
 import { DashStyle } from '@/constants/strokeDash'
 import type { SwirlSettings } from '@/hooks/useSwirlSettings'
 
@@ -114,8 +115,72 @@ export const MAX_MIC_SENSITIVITY = 4
 export const MIN_FOLLOW_SPEED = 0.25
 export const MAX_FOLLOW_SPEED = 3
 
+// MIN is 0, not off-by-a-different-field — count itself is the on/off switch, the same "0 means
+// nothing to show" convention MIN_MIRROR_LINES already uses, rather than a separate boolean toggle
+// (see useParticleField.ts's own frame callback, which early-returns once the live count rounds to
+// 0). MAX is a render-cost budget, the same "confirmed stable on-device, not just simulator" caveat as
+// kaleidoscope.ts's own MAX_MIRROR_LINES — worst case is this value times up to 12 mirror copies times
+// however many distinct particleColors are in use, each its own Skia draw call (see
+// useParticleField.ts).
+export const MIN_PARTICLE_COUNT = 0
+export const MAX_PARTICLE_COUNT = 150
+// 0, not some nonzero "starter" amount — a new visual layer stays invisible on a fresh install (or an
+// existing user's next OTA update) until they actually turn the Quantity slider up, the same "no
+// action from them, no change to their look" guarantee the old particlesEnabled default used to make,
+// just expressed as the one field that now controls it.
+export const DEFAULT_PARTICLE_COUNT = 0
+// Radius in px, at the pattern's own live scale (not a fraction of window/radius the way cropRadius
+// etc. are) — beads read as a fixed physical size regardless of how far the epicentre has wandered,
+// the same way strokeWidth already does.
+export const MIN_PARTICLE_SIZE = 2
+export const MAX_PARTICLE_SIZE = 20
+export const DEFAULT_PARTICLE_SIZE = 6
+// A list, not a single value — each live bead resolves a random pick from whichever shapes are
+// currently enabled (see useParticleField.ts's own particleShapeIndex comment), the same "list,
+// resolved per-particle at render time" convention particleColors already established. Defaults to
+// just the one shape so a fresh install (or an existing user's next OTA update) looks exactly like the
+// single-shape feature this replaced, not a surprise mix of five.
+export const DEFAULT_PARTICLE_SHAPES: ParticleShape[] = ['circle']
+export const DEFAULT_PARTICLE_COLORS = ['#FFFFFF']
+// A flat px width, not a fraction of particleSize — once this is a user-facing slider there's no need
+// for the automatic per-size scaling an earlier, non-editable version of this feature used to compute;
+// the slider itself is now the direct answer to "how thick," the same plain-px convention strokeWidth
+// already uses for the pattern's own line. 0 is a real, reachable minimum (not just a floor clamped
+// away from) — see MIN_PARTICLE_COUNT's own comment for the same "0 is this feature's own off switch"
+// shape, just for the border specifically rather than the whole particle layer: a bead can have zero
+// colors it needs (paths already draws it as it drew before this feature existed) without giving up
+// beads themselves.
+export const MIN_PARTICLE_BORDER_WIDTH = 0
+export const MAX_PARTICLE_BORDER_WIDTH = 5
+// Thin by default — see Spiral.tsx's git history for why: a wide default border was tried first and
+// read as its own shape competing with the bead's own fill, not an outline of it.
+export const DEFAULT_PARTICLE_BORDER_WIDTH = 1
+// Black — a bead's own border is what a computed-per-bead getContrastColor(fillColor) used to produce
+// automatically before this became a user-facing list (see useParticleField.ts's own borderColorIndex
+// comment for why that approach was replaced): getContrastColor('#FFFFFF'), DEFAULT_PARTICLE_COLORS'
+// own single default fill, is deterministically black, never white, so that's the one color this
+// defaults to — not both. A two-color black+white list would let a live bead's own independent
+// borderColorIndex draw white against a white fill by chance, silently reintroducing the exact
+// invisible-border problem this whole feature exists to fix. Trusts the user's own picks after that
+// the same way every other color list in this app already does (foregroundColors/backgroundColors/
+// particleColors all have no auto-contrast guarantee of their own either — the computed border was the
+// one exception, not the app's general rule) — this is just the one starting color that keeps a fresh
+// install's own out-of-the-box look identical to what it already was.
+export const DEFAULT_PARTICLE_BORDER_COLORS = ['#000000']
+
 export const DEFAULT_BACKGROUND_COLORS = ['#000000']
 export const DEFAULT_FOREGROUND_COLORS = ['#FFFFFF']
+// How many entries a color list's own "hold the + to keep adding" grow action (see
+// useColorListFabs.tsx's own growColors, and index.tsx's own growForeground/growParticleColors
+// transport-row equivalents) will keep appending to foregroundColors/backgroundColors while held —
+// purely a backstop so a long hold can't grow the list without bound, not a limit the design itself
+// wants. Well above the 1-3 colors an ordinary reroll ever picks, so it still reads as a genuinely
+// wilder, hold-driven mode of its own. Shared here (not local to index.tsx, where it used to live)
+// since both index.tsx's own transport-row grow button and useColorListFabs' own drawer "+" now need
+// to agree on the exact same cap for the exact same list — particleColors/particleBorderColors use
+// useParticleField.ts's own MAX_PARTICLE_COLOR_BUCKETS instead (see that constant's own comment for
+// why beads need a smaller, render-side-matched cap that foreground/background don't).
+export const MAX_RAINBOW_SOUP_COLORS = 20
 // Line's own four fields (dashStyle/fixedSpacing/strokeWidth/tightness) — exported the same way the
 // two color lists above are, so the Line group's own Reset button (see ControlGroupTopSheetContent)
 // can set each one back to exactly this value from outside this file, instead of either duplicating
@@ -163,7 +228,14 @@ export const defaultSettings: SwirlSettings = {
   mirrorGap: DEFAULT_MIRROR_GAP,
   mirrorLines: DEFAULT_MIRROR_LINES,
   mirrorRotationSpeed: DEFAULT_MIRROR_ROTATION_SPEED,
+  particleBorderColors: DEFAULT_PARTICLE_BORDER_COLORS,
+  particleBorderWidth: DEFAULT_PARTICLE_BORDER_WIDTH,
+  particleColors: DEFAULT_PARTICLE_COLORS,
+  particleCount: DEFAULT_PARTICLE_COUNT,
+  particleShapes: DEFAULT_PARTICLE_SHAPES,
+  particleSize: DEFAULT_PARTICLE_SIZE,
   pattern: 'spiral',
+  patternVisible: true,
   polygonSides: 4,
   // 2, not the more obviously "normal-speed" 1 — matches zoomSpeed's own default below, and there's
   // no scale-derived reason to prefer either number now that both sliders drag freely (see FREE_STEP

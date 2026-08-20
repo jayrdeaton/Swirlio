@@ -25,7 +25,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 // than two sliders buried in a generic drawer. Tilt control stayed behind in 'settings' — it drives
 // whichever gesture target is active (pattern/mirror/gravity/speed), not just gravity, so it reads
 // as a global input-mode preference rather than something scoped to this one group.
-export type ControlGroup = 'colors' | 'gravity' | 'line' | 'mirror' | 'pattern' | 'settings'
+export type ControlGroup = 'colors' | 'gravity' | 'line' | 'mirror' | 'particles' | 'pattern' | 'settings'
 
 // Pre-measurement placeholders only (see contentSize below) — used for the very first layout before
 // each half's real content height is known, not a cap on how tall either can grow.

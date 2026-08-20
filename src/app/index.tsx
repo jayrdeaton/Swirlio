@@ -3,7 +3,7 @@ import { isDarkColor } from '@rific/auto-paper'
 import { useVibration } from '@rific/feedback-press'
 import { StatusBar } from 'expo-status-bar'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Platform, StyleSheet, View } from 'react-native'
+import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { cancelAnimation, runOnJS, useDerivedValue, useFrameCallback, useSharedValue, withSpring, withTiming } from 'react-native-reanimated'
 
@@ -15,11 +15,12 @@ import { clamp } from '@/constants/clamp'
 import { computeEffectiveSwirlValues } from '@/constants/effectiveSwirlValues'
 import { gravityParticleFrictionSpeed } from '@/constants/gravityWellMath'
 import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
+import { PARTICLE_SHAPE_ORDER } from '@/constants/particleShapes'
 import { PATTERN_ORDER } from '@/constants/patterns'
 import { randomHexColor } from '@/constants/randomColor'
 import { MAX_RADIUS_TO_REFERENCE_RATIO, RIPPLE_BASE_COUNT, rippleModulus, rippleSpacing } from '@/constants/rippleMath'
 import { DASH_STYLE_ORDER } from '@/constants/strokeDash'
-import { controlsAutoHideDelayMs } from '@/constants/swirlSettingsRanges'
+import { controlsAutoHideDelayMs, MAX_RAINBOW_SOUP_COLORS } from '@/constants/swirlSettingsRanges'
 import { ControlGroup, useControlGroups, useControlGroupSheetDrawer } from '@/hooks/controlGroups'
 import { SpeedRateWriters, useRegisterSpeedRateWriters } from '@/hooks/speedRateBridge'
 import { useRegisterSwirlRandomize } from '@/hooks/swirlRandomize'
@@ -30,6 +31,7 @@ import { GestureTarget, useEpicenter } from '@/hooks/useEpicenter'
 import { ExtraResetFields, useLookHistory } from '@/hooks/useLookHistory'
 import { useLoopingProgress } from '@/hooks/useLoopingProgress'
 import { useRelaySound, useShutterSound, useTypewriterSound } from '@/hooks/useMechanicalSounds'
+import { MAX_PARTICLE_COLOR_BUCKETS, useParticleField } from '@/hooks/useParticleField'
 import { useRerollUnits } from '@/hooks/useRerollUnits'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { useSwapColors } from '@/hooks/useSwapColors'
@@ -41,6 +43,8 @@ import {
   MAX_GRAVITY,
   MAX_HOLE_RADIUS,
   MAX_MIRROR_GAP,
+  MAX_PARTICLE_COUNT,
+  MAX_PARTICLE_SIZE,
   MAX_POLYGON_SIDES,
   MAX_STROKE_WIDTH,
   MAX_TIGHTNESS,
@@ -49,6 +53,8 @@ import {
   MIN_GRAVITY,
   MIN_HOLE_RADIUS,
   MIN_MIRROR_GAP,
+  MIN_PARTICLE_COUNT,
+  MIN_PARTICLE_SIZE,
   MIN_POLYGON_SIDES,
   MIN_STROKE_WIDTH,
   MIN_TIGHTNESS,
@@ -106,11 +112,12 @@ const SESSION_STATE_PERSIST_DEBOUNCE_MS = 400
 // (a full randomize), which the settings group's own Randomize/long-press shortcuts and the shake
 // gesture already cover (see randomize/randomizeGesture below).
 const TWEAK_BATCH_COUNT = 4
-// How many entries growForeground (mirror mode's own "rainbow soup" long-press, see OnScreenControls)
-// will keep appending to foregroundColors while held — purely a backstop so a long hold can't grow the
-// list without bound, not a limit the design itself wants. Well above the 1-3 colors the ordinary
-// reroll ever picks, so it still reads as a genuinely wilder, hold-driven mode of its own.
-const MAX_RAINBOW_SOUP_COLORS = 20
+// Local alias for readability at this file's own call sites below — see
+// useParticleField.ts's own MAX_PARTICLE_COLOR_BUCKETS comment for why beads need a smaller,
+// render-side-matched grow cap than foreground/background's own MAX_RAINBOW_SOUP_COLORS (imported
+// from swirlSettingsRanges.ts, shared with useColorListFabs.tsx's own drawer "+" grow action, which
+// needs to agree with this same transport-row one on the exact same cap per list).
+const MAX_PARTICLE_RAINBOW_SOUP_COLORS = MAX_PARTICLE_COLOR_BUCKETS
 // "Reset rotation" only means undoing manual/gesture drift once the pattern (or mirror) isn't actively
 // spinning — see resetRotation/resetMirrorRotation below. At that point, springing all the way back to
 // a literal 0 can mean a long, weird-looking unwind, since baseRotation accumulates without ever
@@ -222,6 +229,22 @@ const ROTATION_DEGREES_TO_HOLE_RADIUS_SCALE = (MAX_HOLE_RADIUS - MIN_HOLE_RADIUS
 // Dialing past 0 doesn't dead-end at the boundary either — see rotationGesture's own
 // mirrorLinesBelowZero comment for the "bonus gear" that keeps counting from there.
 const ROTATION_DEGREES_PER_MIRROR_LINE = 30
+// The particles target's own pinch job: particleSize, live 1:1-tracked the same continuous way
+// mirrorGap/tightness are — see PINCH_SCALE_TO_MIRROR_GAP_SCALE's own comment for the shape this
+// follows. Calibrated the same way too (a full, arm's-length pinch spread sweeps close to the whole
+// MIN_PARTICLE_SIZE..MAX_PARTICLE_SIZE range); retune by feel on a real device, same disclaimer as
+// every other gesture-calibration constant in this file.
+const PINCH_SCALE_TO_PARTICLE_SIZE_SCALE = (MAX_PARTICLE_SIZE - MIN_PARTICLE_SIZE) / 1.5
+// The particles target's own Focus job: particleCount, dialed like mirrorLines' own click-stop dial
+// rather than scrubbed continuously — a bead count is a whole number with no meaningful "in between,"
+// the same category as mirrorLines (see ROTATION_DEGREES_PER_MIRROR_LINE's own comment on that
+// distinction). A much coarser step than mirrorLines' own 30°/line: MAX_PARTICLE_COUNT is roughly 25x
+// MAX_MIRROR_LINES, so reusing that same step size would take an unreasonably long twist to reach the
+// top of the range — this steps 5 particles at a time instead of 1, so the same rough twist distance
+// covers a comparably-sized fraction of its own, much larger range. Retune by feel on a real device,
+// same disclaimer as every other gesture-calibration constant in this file.
+const ROTATION_DEGREES_PER_PARTICLE_COUNT_STEP = 6
+const PARTICLE_COUNT_STEP = 5
 // The outer-field drag's own release (see useEpicenter.ts's panGesture onEnd, and
 // applyPatternRotationRelease/applyMirrorRotationRelease below). Converts the release's own angular
 // velocity (degrees per second — a physical screen-space quantity useEpicenter.ts's panGesture computes
@@ -296,6 +319,7 @@ const GROUP_GESTURE_TARGET: Partial<Record<ControlGroup, GestureTarget>> = {
   gravity: 'gravity',
   line: 'pattern',
   mirror: 'mirror',
+  particles: 'particles',
   pattern: 'pattern',
 }
 
@@ -317,7 +341,12 @@ export default function SwirlScreen() {
     setMirrorGap,
     setMirrorLines,
     setMirrorRotationSpeed,
+    setParticleColors,
+    setParticleCount,
+    setParticleShapes,
+    setParticleSize,
     setPattern,
+    setPatternVisible,
     setPolygonSides,
     setRotationSpeed,
     setStrokeWidth,
@@ -607,10 +636,26 @@ export default function SwirlScreen() {
   // boost" shape audio-reactive mode itself already uses (see that function's own comment). Only the
   // actual rates get zeroed — crop/hole radius, mirror gap, and tightness are shape parameters, not
   // speeds, so pausing leaves them exactly where computeEffectiveSwirlValues already put them.
+  //
+  // patternVisible off gets its own, narrower override rather than reusing frozen's full one: there's
+  // no point spending a frame computing a rotation/zoom nobody can see (see Spiral.tsx's own
+  // patternVisible prop — hidden means the pattern's stroked Path doesn't even mount), but
+  // mirrorRotation and the two color-cycle speeds don't get the same treatment here, unlike frozen's
+  // own override above. mirrorRotation spins the *whole* kaleidoscope assembly (Spiral.tsx's own
+  // kaleidoscopeMatrix, shared by every KaleidoscopeCopy) — beads render inside that exact same Group,
+  // so stopping it while only the pattern's own linework is hidden would also freeze beads' own
+  // wedge-mirrored position, which have nothing to do with this toggle. The cycle speeds drive
+  // `background`, which also feeds the mirror's own alternating-color fill (Spiral.tsx's
+  // backgroundFill) — a separate, still-visible feature this toggle was never meant to touch either.
+  // rotationSpeed and zoomSpeed are the two genuinely exclusive to the pattern's own linework:
+  // rotationSpeed only ever reaches innerTransform (never particleTransform, which is deliberately
+  // rotation-free — see Spiral.tsx's own comment), and zoomSpeed's pulse only ever feeds pattern
+  // geometry, nothing beads read.
   const effectiveSwirlValues = useMemo(() => {
     const raw = computeEffectiveSwirlValues(settings, audioRotationReversed, treble, mid, loudness)
-    if (!frozen) return raw
-    return { ...raw, effectiveRotationSpeed: 0, effectiveMirrorRotationSpeed: 0, effectiveZoomSpeed: 0, effectiveForegroundCycleSpeed: 0, effectiveBackgroundCycleSpeed: 0 }
+    if (frozen) return { ...raw, effectiveRotationSpeed: 0, effectiveMirrorRotationSpeed: 0, effectiveZoomSpeed: 0, effectiveForegroundCycleSpeed: 0, effectiveBackgroundCycleSpeed: 0 }
+    if (!settings.patternVisible) return { ...raw, effectiveRotationSpeed: 0, effectiveZoomSpeed: 0 }
+    return raw
   }, [settings, audioRotationReversed, treble, mid, loudness, frozen])
   const { effectiveRotationSpeed, effectiveMirrorRotationSpeed, effectiveZoomSpeed, effectiveTightness, effectiveForegroundCycleSpeed, effectiveBackgroundCycleSpeed, effectiveCropRadius, effectiveHoleRadius, effectiveMirrorGap } = effectiveSwirlValues
 
@@ -868,6 +913,51 @@ export default function SwirlScreen() {
   // as bounceFriction now is (see gravityHandle's own comment) — only the ambient gravity-pull
   // argument stays permanently zeroed there.
   const followSpeed = useSharedValue(settings.followSpeed)
+
+  // Read live by useParticleField.ts's own frame callback, the same "settings synced into a
+  // SharedValue via an effect below, read fresh every frame" shape bounceFriction/gravity above
+  // already use — see useSwirlSettings.tsx's own particle* field comments for what each one means.
+  // particleCount doubles as the simulation's own on/off switch (0 means off — see
+  // swirlSettingsRanges.ts's own MIN_PARTICLE_COUNT comment), read directly by useParticleField.ts's
+  // frame callback; SpiralHost's own particlesActive prop further down derives the same on/off signal
+  // from settings.particleCount for the plain-JS "mount the bead components at all" decision. No
+  // dedicated particleGravity/particleFriction SharedValues here — useParticleField.ts reads the
+  // bounceFriction/gravity SharedValues declared above directly (see its own gravity/bounceFriction
+  // param comments), and no dedicated particleSides either — Spiral.tsx's own particleBucketPaths
+  // piggybacks on reactiveSides below instead (see its own sides prop comment).
+  const particleCount = useSharedValue(settings.particleCount)
+  const particleSize = useSharedValue(settings.particleSize)
+  // Only the count, not the actual enabled shapes — Spiral.tsx's own particleBucketPaths derivation
+  // only ever needs to know how many buckets are in play (see its own effectiveShapeCount), resolving
+  // an index to an actual ParticleShape only from the plain particleShapes prop passed straight
+  // through below — the exact same "count SharedValue, plain array prop" split particleColorCount/
+  // particleColors already use just below, for the same reason.
+  const particleShapeCount = useSharedValue(settings.particleShapes.length)
+  // Only the count, not the actual color strings — useParticleField.ts's own frame callback only ever
+  // needs to know how many buckets are in play (see its own effectiveBucketCount), never resolves an
+  // index to a hex string itself (that happens at render time, in KaleidoscopeCopy's own
+  // ParticleColorBucket, from the plain particleColors prop) — see useSwirlSettings.tsx's own
+  // particleColors field comment for why that split is what makes recoloring live beads instant.
+  const particleColorCount = useSharedValue(settings.particleColors.length)
+  // Same "count SharedValue, plain array prop" split as particleColorCount/particleColors just above,
+  // for each bead's own outline instead of its fill — see useSwirlSettings.tsx's own
+  // particleBorderColors comment for why this is a fully independent list/count from the fill one.
+  const particleBorderColorCount = useSharedValue(settings.particleBorderColors.length)
+  // Direct px width, read straight into Spiral.tsx's own particleBucketPaths derivation (see that
+  // file's own particleBorderWidth prop comment) — no computed per-size scaling here anymore now that
+  // this is a user-facing slider (see MIN_PARTICLE_BORDER_WIDTH's own comment in
+  // swirlSettingsRanges.ts), the same plain "SharedValue mirrors the setting" shape particleSize
+  // itself already uses.
+  const particleBorderWidth = useSharedValue(settings.particleBorderWidth)
+  // Captured at pinch-start, the same shape startMirrorGap/startTightness use — the particles
+  // target's own pinch-driven particleSize (see PINCH_SCALE_TO_PARTICLE_SIZE_SCALE's own comment).
+  const startParticleSize = useSharedValue(0)
+  // Mirror lines' own click-stop-dial shape (startMirrorLines/mirrorLinesLive) — particleCount steps
+  // discretely too, so onUpdate needs to know the gesture's own starting count and the last
+  // already-applied step, not just a continuous offset. See ROTATION_DEGREES_PER_PARTICLE_COUNT_STEP's
+  // own comment.
+  const startParticleCount = useSharedValue(0)
+  const particleCountLive = useSharedValue(0)
 
   // The gravity center's own draggable handle — created here (not inside useEpicenter) because the
   // *combined* gravityCenterX/Y below feeds back into useEpicenter as the pull target pattern/mirror
@@ -1160,6 +1250,26 @@ export default function SwirlScreen() {
   const effectiveGravityCenterY = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.y.value : withSpring(tiltY.value, TILT_EASE_SPRING)))
 
   const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, longPressGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, handleBounce, selection, settings.mirrorLines, bounceFriction, gravity, followSpeed, effectiveGravityCenterX, effectiveGravityCenterY, activeTargets, gravityHandle, isDraggingGravity, gravityManualControl, applyPatternRotationRelease, applyMirrorRotationRelease, applyZoomRelease, applyMirrorCycleRelease, baseRotation, baseRotationPaused, mirrorProgress, mirrorPaused, mirrorRotationSign, manualPulseOffset, basePulse, basePulsePaused, foregroundCycleRate, backgroundCycleRate, minCycleRate, maxCycleRate, tiltX, tiltY, tiltEnabledShared)
+
+  // useParticleField.ts's own separate useWindowDimensions() call — cheap, and matches how
+  // useEpicenter.ts already gets its own independent copy rather than threading width/height through
+  // as params. The hook derives its own screen-edge bounce boundary straight from these two numbers
+  // (see its own reflectOffAxis comment) — nothing to compute or pass in from here anymore.
+  const { width: particleWindowWidth, height: particleWindowHeight } = useWindowDimensions()
+  // Captured once per render, same as every other settings-derived target-membership check in this
+  // file (see targetsPatternRotation and friends further down) — used both here (gating
+  // useParticleField's own gestures) and again near the pinch/rotation gestures below.
+  const targetsParticles = activeTargets.has('particles')
+  const {
+    positionX: particlePositionX,
+    positionY: particlePositionY,
+    colorIndex: particleColorIndex,
+    shapeIndex: particleShapeIndex,
+    borderColorIndex: particleBorderColorIndex,
+    particleFrameTick,
+    particlePanGesture,
+    particleGatherGesture
+  } = useParticleField(particleCount, gravity, bounceFriction, effectiveGravityCenterX, effectiveGravityCenterY, particleSize, mirrorAnchorX, mirrorAnchorY, particleWindowWidth, particleWindowHeight, settings.mirrorLines, targetsParticles)
 
   // Drives GravityWell's particles (Spiral.tsx) — bounceFriction's own speed, full stop (see
   // gravityParticleFrictionSpeed's own comment and GRAVITY_PARTICLE_FRICTION_MIN/MAX_SPEED above).
@@ -1474,14 +1584,52 @@ export default function SwirlScreen() {
     followSpeed.value = settings.followSpeed
   }, [followSpeed, settings.followSpeed])
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
+    particleCount.value = settings.particleCount
+  }, [particleCount, settings.particleCount])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
+    particleSize.value = settings.particleSize
+  }, [particleSize, settings.particleSize])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
+    particleShapeCount.value = settings.particleShapes.length
+  }, [particleShapeCount, settings.particleShapes.length])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
+    particleColorCount.value = settings.particleColors.length
+  }, [particleColorCount, settings.particleColors.length])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
+    particleBorderColorCount.value = settings.particleBorderColors.length
+  }, [particleBorderColorCount, settings.particleBorderColors.length])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
+    particleBorderWidth.value = settings.particleBorderWidth
+  }, [particleBorderWidth, settings.particleBorderWidth])
+
   // Wrap in either direction rather than clamping — cycling through patterns is meant to feel like a
-  // loop (a music player's track skip), not something with a hard end.
+  // loop (a music player's track skip), not something with a hard end. Also forces patternVisible back
+  // on — see useSwirlSettings.tsx's own patternVisible comment: without this, cycling to a new pattern
+  // while it's hidden (the drawer's own 'Visible' toggle, see ControlGroupTopSheetContent) would look
+  // like nothing happened at all, the worst possible feedback for "I just changed the pattern." Passes
+  // patternVisible's own pre-change value to pushHistory (see useLookHistory.tsx's own ExtraResetFields)
+  // so a "back" after this undoes the forced reveal too, not just the pattern selection — otherwise
+  // stepping back from a cycle-while-hidden would leave the pattern stuck visible instead of restoring
+  // whichever hidden/visible state it was actually in before the tap.
   const nextPattern = useCallback(() => {
-    pushHistory()
+    pushHistory({ patternVisible: settings.patternVisible })
     const nextIndex = (PATTERN_ORDER.indexOf(settings.pattern) + 1) % PATTERN_ORDER.length
     setPattern(PATTERN_ORDER[nextIndex])
+    setPatternVisible(true)
     selection()
-  }, [pushHistory, selection, setPattern, settings.pattern])
+  }, [pushHistory, selection, setPattern, setPatternVisible, settings.pattern, settings.patternVisible])
 
   // Pattern mode's other transport button (see OnScreenControls) — same wrap-around shape as
   // nextPattern, just over DASH_STYLE_ORDER instead of PATTERN_ORDER. Lives here (gated on pattern
@@ -1546,6 +1694,66 @@ export default function SwirlScreen() {
     pushHistory()
     setForegroundColors([...settings.foregroundColors, randomHexColor()])
   }, [pushHistory, setForegroundColors, settings.foregroundColors])
+
+  // Particles mode's own transport pair (see OnScreenControls) — slotA now mirrors mirror mode's own
+  // randomize/grow color pair exactly (nextParticleShape/growParticleShapes is the same tap-replaces/
+  // hold-grows shape slotB's randomizeParticleColors/growParticleColors already establishes for
+  // particleColors), just against particleShapes instead. Used to reuse cycleSides outright for its own
+  // hold action instead of growing — changed because a hold that only did anything for whichever of
+  // star/polygon/flower happened to be the current shape (see useSwirlSettings.tsx's own particleShapes
+  // comment on piggybacking polygonSides) was a much less useful hold than "add another shape to the
+  // pool" is regardless of what's currently enabled, and the color slot right next to it already sets
+  // that exact expectation.
+  //
+  // Steps to the single next shape after whichever one is first in the currently-enabled list,
+  // collapsing the set down to just that one — the drawer's own shape-toggle row (see
+  // useParticleShapeIconFabs) is where a mixed, multi-shape set actually gets built; this transport
+  // button stays the same quick "flip through one shape at a time" shortcut it always was, just now
+  // expressed as "replace the whole list with a single pick" instead of mutating a single field, since
+  // there's no longer a single active shape to mutate. Wrap in either direction, same "cycling is a
+  // loop" feel nextPattern already has.
+  const nextParticleShape = useCallback(() => {
+    pushHistory()
+    const currentIndex = PARTICLE_SHAPE_ORDER.indexOf(settings.particleShapes[0])
+    const nextIndex = (currentIndex + 1) % PARTICLE_SHAPE_ORDER.length
+    setParticleShapes([PARTICLE_SHAPE_ORDER[nextIndex]])
+    selection()
+  }, [pushHistory, selection, setParticleShapes, settings.particleShapes])
+  // Adds one more shape to the currently-enabled set, picked from whichever of PARTICLE_SHAPE_ORDER
+  // isn't already in it — the same "grow the pool by one, not by a fresh unrelated pick" shape
+  // growForeground/growParticleColors already establish, just choosing among a small fixed set of
+  // shapes instead of the unbounded hex-color space those two draw from (which is also why this needs
+  // its own explicit "not already enabled" filter — randomHexColor() effectively never collides on its
+  // own, but PARTICLE_SHAPE_ORDER only has 5 entries total, so a plain random pick would frequently
+  // "grow" the pool by re-adding a shape already in it). The natural cap is PARTICLE_SHAPE_ORDER's own
+  // length, not an arbitrary constant like MAX_RAINBOW_SOUP_COLORS — once every shape is already
+  // enabled there's nothing left to add, so this becomes a no-op exactly like growForeground/
+  // growParticleColors already do at their own caps. No explicit selection() of its own — same
+  // reasoning as those two: only ever reached through hold-to-repeat wiring, which already pulses on
+  // every tick.
+  const growParticleShapes = useCallback(() => {
+    if (settings.particleShapes.length >= PARTICLE_SHAPE_ORDER.length) return
+    const remainingShapes = PARTICLE_SHAPE_ORDER.filter((shape) => !settings.particleShapes.includes(shape))
+    const nextShape = remainingShapes[Math.floor(Math.random() * remainingShapes.length)]
+    pushHistory()
+    setParticleShapes([...settings.particleShapes, nextShape])
+  }, [pushHistory, setParticleShapes, settings.particleShapes])
+
+  // Right (colors): tap picks one fresh random hue, replacing the whole particleColors list outright —
+  // same "rainbow soup" shape randomizeForeground/growForeground already establish for mirror mode's
+  // own pair, just against particleColors instead of foregroundColors.
+  const randomizeParticleColors = useCallback(() => {
+    pushHistory()
+    setParticleColors([randomHexColor()])
+    selection()
+  }, [pushHistory, selection, setParticleColors])
+  // No explicit selection() of its own — same reasoning as growForeground above: only ever reached
+  // through hold-to-repeat wiring, which already pulses on every tick.
+  const growParticleColors = useCallback(() => {
+    if (settings.particleColors.length >= MAX_PARTICLE_RAINBOW_SOUP_COLORS) return
+    pushHistory()
+    setParticleColors([...settings.particleColors, randomHexColor()])
+  }, [pushHistory, setParticleColors, settings.particleColors])
 
   // Left (background): both actions are a single function apiece that branch on backgroundColors' own
   // *current* shape, not a separate "is this the first press" flag — useHoldToRepeat already calls its
@@ -1700,12 +1908,16 @@ export default function SwirlScreen() {
   // colors-group randomize that happened to reroll either one would leave it un-restored on the next
   // goBack, the same staleness ExtraResetFields already exists to prevent for resetAllSettings (see
   // pushHistory's own comment in useLookHistory.tsx). Every other group's units are all plain Look
-  // fields, so they pass no extra at all, same as before cycle speed joined the colors group.
+  // fields, so they pass no extra at all, same as before cycle speed joined the colors group. 'pattern'
+  // additionally forces patternVisible back on afterward — same reasoning and same pre-change-value-to-
+  // pushHistory shape as nextPattern's own comment above: rerolling the pattern's shape/crop/hole while
+  // it's hidden would look like nothing happened at all.
   const randomizeGroup = useCallback(
     (group: ControlGroup) => {
-      pushHistoryAndReroll(rerollUnitsByGroup[group], group === 'colors' ? { backgroundCycleSpeed: settings.backgroundCycleSpeed, foregroundCycleSpeed: settings.foregroundCycleSpeed } : undefined)
+      pushHistoryAndReroll(rerollUnitsByGroup[group], group === 'colors' ? { backgroundCycleSpeed: settings.backgroundCycleSpeed, foregroundCycleSpeed: settings.foregroundCycleSpeed } : group === 'pattern' ? { patternVisible: settings.patternVisible } : undefined)
+      if (group === 'pattern') setPatternVisible(true)
     },
-    [pushHistoryAndReroll, rerollUnitsByGroup, settings.backgroundCycleSpeed, settings.foregroundCycleSpeed]
+    [pushHistoryAndReroll, rerollUnitsByGroup, setPatternVisible, settings.backgroundCycleSpeed, settings.foregroundCycleSpeed, settings.patternVisible]
   )
 
   useRegisterSwirlRandomize(randomizeGroup)
@@ -1721,8 +1933,10 @@ export default function SwirlScreen() {
   // ControlGroup of its own to begin with (its two radii are gesture-driven, not reroll units — see
   // useEpicenter.ts's own crop comment) — rerollUnitsCropHole is its own narrow slice (see
   // useRerollUnits.tsx) rather than the full 'pattern' group, which would also reroll the shape/sides
-  // underneath it. 'pattern' and 'gravity' have nothing special about them here, so they just fall
-  // through to the same per-group slice randomizeGroup itself already uses.
+  // underneath it. Both 'pattern' and 'crop' force patternVisible back on afterward, same reasoning as
+  // randomizeGroup's own 'pattern' branch above — this doesn't go through randomizeGroup itself, so it
+  // needs its own copy of that same forced-reveal. 'gravity' has nothing special about it here, so it
+  // just falls through to the same per-group slice randomizeGroup itself already uses.
   const randomizeGestureTarget = useCallback(
     (target: GestureTarget) => {
       if (target === 'mirror') {
@@ -1730,12 +1944,18 @@ export default function SwirlScreen() {
         return
       }
       if (target === 'crop') {
-        pushHistoryAndReroll(rerollUnitsCropHole)
+        pushHistoryAndReroll(rerollUnitsCropHole, { patternVisible: settings.patternVisible })
+        setPatternVisible(true)
+        return
+      }
+      if (target === 'pattern') {
+        pushHistoryAndReroll(rerollUnitsByGroup.pattern, { patternVisible: settings.patternVisible })
+        setPatternVisible(true)
         return
       }
       pushHistoryAndReroll(rerollUnitsByGroup[target])
     },
-    [pushHistoryAndReroll, rerollUnitsByGroup, rerollUnitsCropHole, settings.backgroundCycleSpeed, settings.foregroundCycleSpeed]
+    [pushHistoryAndReroll, rerollUnitsByGroup, rerollUnitsCropHole, setPatternVisible, settings.backgroundCycleSpeed, settings.foregroundCycleSpeed, settings.patternVisible]
   )
 
   // The top-right EdgeRevealZone's own long-press bonus (see its own onRandomizeEverything prop
@@ -1771,10 +1991,12 @@ export default function SwirlScreen() {
   const targetsMirrorRotation = activeTargets.has('mirror')
   const targetsGravityRotation = activeTargets.has('gravity')
   const targetsCropRotation = activeTargets.has('crop')
+  const targetsParticlesRotation = activeTargets.has('particles')
   const targetsPatternZoom = activeTargets.has('pattern')
   const targetsMirrorPinch = activeTargets.has('mirror')
   const targetsGravityPinch = activeTargets.has('gravity')
   const targetsCropPinch = activeTargets.has('crop')
+  const targetsParticlesPinch = activeTargets.has('particles')
 
   // Scoped to this same ref (not window) so the web wheel-pinch effect below only ever fires over
   // the canvas — never while the pointer is over the on-screen FAB controls or the settings sheets,
@@ -1788,6 +2010,7 @@ export default function SwirlScreen() {
       startTightness.value = tightness.value
       startGravity.value = gravity.value
       startCropRadius.value = cropRadius.value
+      startParticleSize.value = particleSize.value
       gravityStuckAtZero.value = Math.abs(gravity.value) <= GRAVITY_ZERO_STICKY_ZONE
       runOnJS(hideControls)()
     })
@@ -1846,6 +2069,12 @@ export default function SwirlScreen() {
       if (targetsCropPinch) {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         cropRadius.value = clamp(startCropRadius.value + (event.scale - 1) * PINCH_SCALE_TO_CROP_RADIUS_SCALE, MIN_CROP_RADIUS, MAX_CROP_RADIUS)
+      }
+      // The particles target's own zoom: particleSize, live 1:1-tracked the same direct way mirrorGap/
+      // cropRadius are above — see PINCH_SCALE_TO_PARTICLE_SIZE_SCALE's own comment.
+      if (targetsParticlesPinch) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        particleSize.value = clamp(startParticleSize.value + (event.scale - 1) * PINCH_SCALE_TO_PARTICLE_SIZE_SCALE, MIN_PARTICLE_SIZE, MAX_PARTICLE_SIZE)
       }
     })
     .onEnd((event) => {
@@ -1910,6 +2139,15 @@ export default function SwirlScreen() {
         cropRadius.value = nextCropRadius
         runOnJS(setCropRadius)(nextCropRadius)
       }
+      if (targetsParticlesPinch) {
+        // Recomputed from event.scale rather than trusting particleSize.value already landed here
+        // from the last onUpdate — same "onEnd's own event is authoritative" reasoning as
+        // cropRadius's own commit above.
+        const nextParticleSize = clamp(startParticleSize.value + (event.scale - 1) * PINCH_SCALE_TO_PARTICLE_SIZE_SCALE, MIN_PARTICLE_SIZE, MAX_PARTICLE_SIZE)
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        particleSize.value = nextParticleSize
+        runOnJS(setParticleSize)(nextParticleSize)
+      }
       // Fired again on release (not just on start) so the on-screen controls get a full,
       // uninterrupted hide window measured from the end of the pinch — same reasoning as the
       // epicenter's onDragChange in useEpicenter.ts.
@@ -1953,6 +2191,7 @@ export default function SwirlScreen() {
       if (targetsMirrorPinch) setMirrorGap(mirrorGap.value)
       if (targetsGravityPinch) setGravity(gravity.value)
       if (targetsCropPinch) setCropRadius(cropRadius.value)
+      if (targetsParticlesPinch) setParticleSize(particleSize.value)
       hideControls()
     }
 
@@ -1971,6 +2210,7 @@ export default function SwirlScreen() {
         startTightness.value = tightness.value
         startGravity.value = gravity.value
         startCropRadius.value = cropRadius.value
+        startParticleSize.value = particleSize.value
         gravityStuckAtZero.value = Math.abs(gravity.value) <= GRAVITY_ZERO_STICKY_ZONE
         scale = 1
         hideControls()
@@ -1995,6 +2235,9 @@ export default function SwirlScreen() {
       if (targetsCropPinch) {
         cropRadius.value = clamp(startCropRadius.value + (scale - 1) * PINCH_SCALE_TO_CROP_RADIUS_SCALE, MIN_CROP_RADIUS, MAX_CROP_RADIUS)
       }
+      if (targetsParticlesPinch) {
+        particleSize.value = clamp(startParticleSize.value + (scale - 1) * PINCH_SCALE_TO_PARTICLE_SIZE_SCALE, MIN_PARTICLE_SIZE, MAX_PARTICLE_SIZE)
+      }
       idleTimer = setTimeout(endGesture, WHEEL_PINCH_IDLE_MS)
     }
 
@@ -2008,23 +2251,27 @@ export default function SwirlScreen() {
     targetsPatternZoom,
     targetsGravityPinch,
     targetsCropPinch,
+    targetsParticlesPinch,
     hideControls,
     setMirrorGap,
     setTightness,
     setGravity,
     setCropRadius,
+    setParticleSize,
     selection,
     basePulse,
     manualPulseOffset,
     mirrorGap,
     gravity,
     cropRadius,
+    particleSize,
     reversed,
     startMirrorGap,
     startPulseOffset,
     startTightness,
     startGravity,
     startCropRadius,
+    startParticleSize,
     tightness,
     gravityStuckAtZero
   ])
@@ -2048,6 +2295,8 @@ export default function SwirlScreen() {
       mirrorLinesBelowZero.value = settings.mirrorAlternateColors
       startMirrorLinesBelowZero.value = settings.mirrorAlternateColors
       mirrorAlternateColorsLive.value = settings.mirrorAlternateColors
+      startParticleCount.value = settings.particleCount
+      particleCountLive.value = settings.particleCount
       runOnJS(hideControls)()
     })
     .onUpdate((event) => {
@@ -2112,6 +2361,19 @@ export default function SwirlScreen() {
           runOnJS(selection)()
         }
       }
+      // The particles target's own Focus job: particleCount, dialed the same click-stop way
+      // mirrorLines is above — a bead count is a whole number with no meaningful in-between (see
+      // ROTATION_DEGREES_PER_PARTICLE_COUNT_STEP's own comment) — just without mirrorLines' own
+      // "bonus gear past 0" concept, since particleCount has no sign of its own to flip: it clamps
+      // flat at MIN_PARTICLE_COUNT instead of rolling into anything past it.
+      if (targetsParticlesRotation) {
+        const nextParticleCount = clamp(startParticleCount.value + Math.round(degrees / ROTATION_DEGREES_PER_PARTICLE_COUNT_STEP) * PARTICLE_COUNT_STEP, MIN_PARTICLE_COUNT, MAX_PARTICLE_COUNT)
+        if (nextParticleCount !== particleCountLive.value) {
+          particleCountLive.value = nextParticleCount
+          runOnJS(setParticleCount)(nextParticleCount)
+          runOnJS(selection)()
+        }
+      }
     })
     .onEnd((event) => {
       if (targetsPatternRotation) {
@@ -2144,8 +2406,8 @@ export default function SwirlScreen() {
         holeRadius.value = nextHoleRadius
         runOnJS(setHoleRadius)(nextHoleRadius)
       }
-      // mirrorLines has nothing left to commit here — every step already went through setMirrorLines
-      // live, in onUpdate, the instant it crossed each threshold.
+      // mirrorLines/particleCount have nothing left to commit here — every step already went through
+      // setMirrorLines/setParticleCount live, in onUpdate, the instant it crossed each threshold.
       runOnJS(hideControls)()
     })
 
@@ -2198,7 +2460,14 @@ export default function SwirlScreen() {
   // shared chain would make a plain tap wait for the two-finger gestures to fail before the colour
   // swap lands.
   const twoFingerGesture = Gesture.Exclusive(twoFingerLongPressGesture, twoFingerTapGesture)
-  const composedGesture = Gesture.Simultaneous(panGesture, pinchGesture, rotationGesture, oneFingerGesture, twoFingerGesture)
+  // particlePanGesture/particleGatherGesture are siblings watching the same physical touch as every
+  // other one-finger recognizer here, not exclusive with any of them — see useParticleField.ts's own
+  // top comment for why this needs no new exclusivity relationships: useEpicenter's own panGesture/
+  // longPressGesture are already confirmed inert while 'particles' is the active target (every one of
+  // their own target-membership checks stays false), and a real drag/hold past tapGesture's own
+  // threshold already makes it fail on its own terms regardless of how many other Pan/LongPress
+  // recognizers are also watching.
+  const composedGesture = Gesture.Simultaneous(panGesture, pinchGesture, rotationGesture, oneFingerGesture, twoFingerGesture, particlePanGesture, particleGatherGesture)
 
   return (
     <View style={styles.screen}>
@@ -2216,6 +2485,7 @@ export default function SwirlScreen() {
         <View collapsable={false} ref={canvasRef}>
           <SpiralHost
             pattern={settings.pattern}
+            patternVisible={settings.patternVisible}
             foregroundColors={settings.foregroundColors}
             backgroundColors={settings.backgroundColors}
             foregroundCycleProgress={foregroundCycleProgress}
@@ -2246,6 +2516,22 @@ export default function SwirlScreen() {
             showGravityMarker={gravityMarkerVisible}
             strokeWidth={reactiveStrokeWidth}
             dashStyle={dashStyle}
+            particlesActive={settings.particleCount > 0}
+            particleCount={particleCount}
+            particleSize={particleSize}
+            particleShapeCount={particleShapeCount}
+            particleShapeIndex={particleShapeIndex}
+            particleShapes={settings.particleShapes}
+            particleColorCount={particleColorCount}
+            particlePositionX={particlePositionX}
+            particlePositionY={particlePositionY}
+            particleColorIndex={particleColorIndex}
+            particleFrameTick={particleFrameTick}
+            particleColors={settings.particleColors}
+            particleBorderColorCount={particleBorderColorCount}
+            particleBorderColorIndex={particleBorderColorIndex}
+            particleBorderColors={settings.particleBorderColors}
+            particleBorderWidth={particleBorderWidth}
           />
         </View>
       </GestureDetector>
@@ -2261,7 +2547,7 @@ export default function SwirlScreen() {
       <EdgeRevealZones active={!controlsVisible} onReveal={revealControls} triggerStackExpanded={settings.triggerStackExpanded} onPause={pause} onRecenterEverything={recenterEverything} onExpandTriggerStack={expandTriggerStack} onRandomizeEverything={randomizeEverything} />
       {/* Forced on (independent of controlsVisible) while the group sheet is open — see
       OnScreenControls' own Portal, which keeps the trigger stack reachable the whole time. */}
-      <OnScreenControls visible={controlsVisible || groupSheetVisible} activeTargets={activeTargets} backDisabled={backDisabled} frozen={frozen} onToggleFrozen={toggleFrozen} onRecenterEverything={recenterEverything} gestureFanOpen={gestureFanOpen} onGestureFanOpenChange={setGestureFanOpen} onSelectGestureTarget={selectGestureTarget} onRandomizeGestureTarget={randomizeGestureTarget} onRecenter={recenterGestureTarget} onReveal={revealControls} onGoBack={goBack} onResetAllSettings={resetAllSettings} onGoForward={goForward} onGoForwardBatch={goForwardBatch} onAlternateBackground={alternateBackground} onCycleBackgroundTwoTone={cycleBackgroundTwoTone} onRandomizeForeground={randomizeForeground} onGrowForeground={growForeground} onCycleShape={nextPattern} onCycleLineType={nextDashStyle} onCycleSides={cycleSides} onResetLineToSolid={resetLineToSolid} gravityRepelling={settings.gravity < 0} onReverseGravity={reverseGravity} onHideControls={hideControls} />
+      <OnScreenControls visible={controlsVisible || groupSheetVisible} activeTargets={activeTargets} backDisabled={backDisabled} frozen={frozen} onToggleFrozen={toggleFrozen} onRecenterEverything={recenterEverything} gestureFanOpen={gestureFanOpen} onGestureFanOpenChange={setGestureFanOpen} onSelectGestureTarget={selectGestureTarget} onRandomizeGestureTarget={randomizeGestureTarget} onRecenter={recenterGestureTarget} onReveal={revealControls} onGoBack={goBack} onResetAllSettings={resetAllSettings} onGoForward={goForward} onGoForwardBatch={goForwardBatch} onAlternateBackground={alternateBackground} onCycleBackgroundTwoTone={cycleBackgroundTwoTone} onRandomizeForeground={randomizeForeground} onGrowForeground={growForeground} onCycleShape={nextPattern} onCycleLineType={nextDashStyle} onCycleSides={cycleSides} onResetLineToSolid={resetLineToSolid} onCycleParticleShape={nextParticleShape} onGrowParticleShapes={growParticleShapes} onRandomizeParticleColors={randomizeParticleColors} onGrowParticleColors={growParticleColors} gravityRepelling={settings.gravity < 0} onReverseGravity={reverseGravity} onHideControls={hideControls} />
     </View>
   )
 }

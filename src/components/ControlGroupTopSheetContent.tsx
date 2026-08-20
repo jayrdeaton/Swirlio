@@ -6,11 +6,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { release } from '@/constants/release'
 import { TOP_SHEET_HEADER_CLEARANCE, TOP_SHEET_RIGHT_CLEARANCE } from '@/constants/sheetLayout'
+import { MAX_RAINBOW_SOUP_COLORS } from '@/constants/swirlSettingsRanges'
 import { useControlGroups } from '@/hooks/controlGroups'
+import { MAX_PARTICLE_COLOR_BUCKETS } from '@/hooks/useParticleField'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { useSwirlReset } from '@/hooks/swirlReset'
 import { useSwapColors } from '@/hooks/useSwapColors'
-import { DEFAULT_BACKGROUND_COLORS, DEFAULT_BOUNCE_FRICTION, DEFAULT_DASH_STYLE, DEFAULT_FIXED_SPACING, DEFAULT_FOREGROUND_COLORS, DEFAULT_GRAVITY, DEFAULT_MIRROR_ALTERNATE_COLORS, DEFAULT_MIRROR_GAP, DEFAULT_MIRROR_LINES, DEFAULT_MIRROR_ROTATION_SPEED, DEFAULT_STROKE_WIDTH, DEFAULT_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { DEFAULT_BACKGROUND_COLORS, DEFAULT_BOUNCE_FRICTION, DEFAULT_DASH_STYLE, DEFAULT_FIXED_SPACING, DEFAULT_FOREGROUND_COLORS, DEFAULT_GRAVITY, DEFAULT_MIRROR_ALTERNATE_COLORS, DEFAULT_MIRROR_GAP, DEFAULT_MIRROR_LINES, DEFAULT_MIRROR_ROTATION_SPEED, DEFAULT_PARTICLE_BORDER_COLORS, DEFAULT_PARTICLE_BORDER_WIDTH, DEFAULT_PARTICLE_COLORS, DEFAULT_PARTICLE_COUNT, DEFAULT_PARTICLE_SHAPES, DEFAULT_PARTICLE_SIZE, DEFAULT_STROKE_WIDTH, DEFAULT_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { ActionFab } from './ActionFab'
 import { FAB_ROW_GAP, FabRow } from './FabRow'
@@ -18,6 +20,7 @@ import { SettingToggleFab } from './SettingToggleFab'
 import { useAppearanceIconFabs } from './useAppearanceIconFabs'
 import { useColorListFabs } from './useColorListFabs'
 import { useDashStyleIconFabs } from './useDashStyleIconFabs'
+import { useParticleShapeIconFabs } from './useParticleShapeIconFabs'
 import { usePatternIconFabs } from './usePatternIconFabs'
 
 // Shake (Accelerometer), tilt (DeviceMotion), audio-reactive (mic capture), and haptics all no-op (or
@@ -34,7 +37,7 @@ const isWeb = Platform.OS === 'web'
 export function ControlGroupTopSheetContent() {
   const insets = useSafeAreaInsets()
   const { activeGroup } = useControlGroups()
-  const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setGravity, setGravityMarkerVisible, setHapticsEnabled, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setShakeEnabled, setShowLabels, setSoundEnabled, setStrokeWidth, setTiltEnabled, setTightness } = useSwirlSettings()
+  const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setGravity, setGravityMarkerVisible, setHapticsEnabled, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPatternVisible, setShakeEnabled, setShowLabels, setSoundEnabled, setStrokeWidth, setTiltEnabled, setTightness } = useSwirlSettings()
   const { swapColors } = useSwapColors()
   const { resetGravity, resetMirror, resetPattern } = useSwirlReset()
   const { randomizeGroup } = useSwirlRandomize()
@@ -58,8 +61,11 @@ export function ControlGroupTopSheetContent() {
   // unconditionally regardless of which group is active, same as any other hook.
   const patternFabs = usePatternIconFabs(settings.pattern, setPattern)
   const dashStyleFabs = useDashStyleIconFabs(settings.dashStyle, setDashStyle)
-  const foregroundColorFabs = useColorListFabs('Foreground', settings.foregroundColors, setForegroundColors)
-  const backgroundColorFabs = useColorListFabs('Background', settings.backgroundColors, setBackgroundColors)
+  const foregroundColorFabs = useColorListFabs('Foreground', settings.foregroundColors, setForegroundColors, MAX_RAINBOW_SOUP_COLORS)
+  const backgroundColorFabs = useColorListFabs('Background', settings.backgroundColors, setBackgroundColors, MAX_RAINBOW_SOUP_COLORS)
+  const particleShapeFabs = useParticleShapeIconFabs(settings.particleShapes, setParticleShapes)
+  const particleColorFabs = useColorListFabs('Particles', settings.particleColors, setParticleColors, MAX_PARTICLE_COLOR_BUCKETS)
+  const particleBorderColorFabs = useColorListFabs('Border', settings.particleBorderColors, setParticleBorderColors, MAX_PARTICLE_COLOR_BUCKETS)
   const appearanceFabs = useAppearanceIconFabs(themeSettings.appearance, (value) => setThemeSettings({ appearance: value }))
 
   return (
@@ -156,10 +162,10 @@ export function ControlGroupTopSheetContent() {
           <>
             <FabRow>
               {/* Leads the row — see Mirror's own comment above for why Randomize/Reset front every
-              group now. Rerolls pattern+sides, crop radius/shaped, and hole radius/shaped — the
-              'pattern' rerollUnitsByGroup slice the global dice FAB and shake gesture already pull
-              from (see index.tsx's randomizeGroup). Same icon as the global dice FAB
-              (OnScreenControls) for a consistent "this randomizes" affordance. */}
+              group now. Rerolls pattern+sides only, not crop/hole — those moved to their own
+              dedicated randomize via the crop gesture-target wedge (see useRerollUnits.tsx's own
+              rerollUnitsByGroup.pattern comment), so this stays scoped to what's left. Same icon as
+              the global dice FAB (OnScreenControls) for a consistent "this randomizes" affordance. */}
               <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('pattern')} />
               {/* Squares the pattern's rotation back to 0 AND snaps the epicentre back to center —
               see index.tsx's resetPattern. No effect on zoom, which has no orientation of its own to
@@ -170,6 +176,19 @@ export function ControlGroupTopSheetContent() {
               above) and the Colors group's Reset/Swap pair above — all three just say "Reset",
               disambiguated only by whichever sheet happens to be open. */}
               <ActionFab icon='backup-restore' label='Reset' onPress={resetPattern} />
+              {/* Hides the pattern's own linework entirely, independent of which pattern is selected —
+              lets beads be shown alone without switching pattern away (there's no "none" pattern
+              option of its own). True by default, so this is always a deliberate hide, never a
+              surprise blank canvas on first launch. Same 'eye' icon/'Visible' label as the gravity
+              group's own marker-visibility toggle (see the 'gravity' branch below) — one consistent
+              "this shows/hides a layer" affordance rather than a bespoke glyph. Leads the row, right
+              after Randomize/Reset and before Crop/Hole shape, since those two are pattern-specific
+              niceties that only matter once the pattern is actually visible to trace a boundary
+              around. index.tsx's own nextPattern forces this back on whenever the pattern is changed
+              via the pattern mode's own transport-row flanking button — see that handler's own
+              comment for why a hidden pattern otherwise reads as "nothing happened" the moment you
+              cycle to a new one. */}
+              <SettingToggleFab icon='eye' label='Visible' value={settings.patternVisible} onValueChange={setPatternVisible} />
               {/* Crop/Hole share this row with Randomize/Reset rather than getting a break of their
               own — see Mirror's own comment on Alternate colors for why: on their own they're just 2
               more icons in an otherwise-sparse row, not a cluster substantial enough to earn a whole
@@ -391,6 +410,57 @@ export function ControlGroupTopSheetContent() {
             deliberately, not a look to reroll. */}
             {!isWeb && <SettingToggleFab icon='axis-arrow' label='Tilt control' value={settings.tiltEnabled} onValueChange={setTiltEnabled} />}
           </FabRow>
+        )}
+
+        {group === 'particles' && (
+          <>
+            <FabRow>
+              {/* Leads the row — see Mirror's own comment above for why Randomize/Reset front every
+              group now. Rerolls count/size/shape/colors — the 'particles' rerollUnitsByGroup slice the
+              global dice FAB and shake gesture already pull from (see index.tsx's randomizeGroup);
+              gravity/friction have no particle-specific reroll of their own anymore (beads read the
+              Gravity group's own sliders directly — see useRerollUnits.tsx). Same icon as the global
+              dice FAB (OnScreenControls) for a consistent "this randomizes" affordance. */}
+              <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('particles')} />
+              {/* Puts every field this group owns back to its default — the same "every field this
+              group owns, back to default, in one tap" shape Mirror/Colors/Line's own Reset buttons
+              already use. particleCount's own default (0) already turns beads back off, the same way
+              setMirrorLines(DEFAULT_MIRROR_LINES) already turns mirroring back off for that group's own
+              Reset — no separate on/off field to reset alongside it. No Gravity/Friction/Sides to reset
+              here either — those belong to the Gravity/Pattern groups' own Reset buttons now (see
+              useSwirlSettings.tsx's own particleShapes comment). No ephemeral gesture-state half to
+              bridge through useSwirlReset here (unlike Mirror/Pattern/Gravity): particles have no
+              draggable point of their own to recentre. */}
+              <ActionFab
+                icon='backup-restore'
+                label='Reset'
+                onPress={() => {
+                  setParticleCount(DEFAULT_PARTICLE_COUNT)
+                  setParticleSize(DEFAULT_PARTICLE_SIZE)
+                  setParticleShapes(DEFAULT_PARTICLE_SHAPES)
+                  setParticleColors(DEFAULT_PARTICLE_COLORS)
+                  setParticleBorderColors(DEFAULT_PARTICLE_BORDER_COLORS)
+                  setParticleBorderWidth(DEFAULT_PARTICLE_BORDER_WIDTH)
+                }}
+              />
+            </FabRow>
+            {/* The shape picker gets its own row rather than trailing the actions/toggle above on
+            whatever line it happens to wrap to — see Mirror's own comment for why a row break, not a
+            plain gap, is what actually marks a cluster boundary consistently regardless of width. */}
+            <FabRow>{particleShapeFabs}</FabRow>
+            {/* particleColors' own swatch row, same shape as Colors' own foreground/background rows
+            above — a dedicated, independent color list, not a reuse of foregroundColors/
+            backgroundColors (see useSwirlSettings.tsx's own particleColors comment for why). */}
+            <FabRow>{particleColorFabs.fabs}</FabRow>
+            {particleColorFabs.dialog}
+            {/* particleBorderColors' own swatch row — same useColorListFabs mechanism as every other
+            color list here, just for each bead's own outline instead of its fill (see
+            useSwirlSettings.tsx's own particleBorderColors comment for why this replaced an earlier
+            computed-per-bead approach). Its own row, not merged into particleColorFabs' above: the two
+            lists are fully independent, and a shared row would misread as one combined swatch set. */}
+            <FabRow>{particleBorderColorFabs.fabs}</FabRow>
+            {particleBorderColorFabs.dialog}
+          </>
         )}
       </View>
     </View>

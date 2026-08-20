@@ -20,10 +20,19 @@ jest.mock('react-native-paper', () => {
 // FAB/Button/TouchableOpacity now come from @rific/feedback-press rather than react-native-paper/
 // react-native (see useColorListFabs.tsx/LabeledFab.tsx/ActionFab.tsx) — mocked the same shallow way
 // as the react-native-paper mock above, still without pulling in the real haptic-wiring chain.
+// useHoldToRepeat (spread in via ...actual, not mocked) is left as its real implementation — same
+// reasoning as onScreenControls.test.tsx's own identical spread: it's a pure, dependency-light hook
+// already covered by that package's own test suite, and this file's own "+ long-press grows the list"
+// tests below are testing useColorListFabs' *wiring* to it, not reinventing hook-level coverage. Its
+// own internal useVibration() call is a relative import inside that package, unaffected by this mock
+// only replacing the package's own top-level Button/FAB/TouchableOpacity exports — it hits the real
+// one, backed by jest-expo's own built-in expo-haptics mock.
 jest.mock('@rific/feedback-press', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
+  const actual = jest.requireActual('@rific/feedback-press')
   return {
+    ...actual,
     // Renders its label through a real RN Text (unlike the mocked Text above), so tests can assert
     // on the visible "Remove" text rather than only on the testID.
     Button: ({ onPress, testID, children }: any) => (
@@ -33,8 +42,9 @@ jest.mock('@rific/feedback-press', () => {
     ),
     // Real LabeledFab/ActionFab (not mocked — this test cares that they receive the right props, e.g.
     // backgroundColor set to the swatch's own hex) render down to this FAB, so it needs to forward the
-    // testID that's the actual thing under test here.
-    FAB: ({ onPress, disabled, testID, style }: any) => <RN.Pressable testID={testID} onPress={onPress} disabled={disabled} style={style} />,
+    // testID that's the actual thing under test here. onLongPress/onPressOut forwarded too, now that
+    // the + button's own growColorsHold (useColorListFabs.tsx) wires them up.
+    FAB: ({ onPress, onLongPress, onPressOut, disabled, testID, style }: any) => <RN.Pressable testID={testID} onPress={onPress} onLongPress={onLongPress} onPressOut={onPressOut} disabled={disabled} style={style} />,
     TouchableOpacity: ({ onPress, testID, style, children }: any) => (
       <RN.Pressable testID={testID} onPress={onPress} style={style}>
         {children}
@@ -96,8 +106,8 @@ function flattenStyle(style: unknown): Record<string, unknown> {
 // useColorListFabs returns a flat fabs array (for spreading into a shared FabRow) plus a separate
 // dialog node — this stands in for that FabRow, rendering both exactly as ControlGroupSheetContent
 // does, so the hook can be exercised the same way the deleted ColorListEditor component was.
-function Host({ label, colors, onChange }: { label: string; colors: string[]; onChange: (colors: string[]) => void }) {
-  const { fabs, dialog } = useColorListFabs(label, colors, onChange)
+function Host({ label, colors, onChange, maxColors = 20 }: { label: string; colors: string[]; onChange: (colors: string[]) => void; maxColors?: number }) {
+  const { fabs, dialog } = useColorListFabs(label, colors, onChange, maxColors)
   return (
     <>
       {fabs}
@@ -130,6 +140,46 @@ describe('useColorListFabs', () => {
     expect(screen.getByTestId('color-dot-1')).toBeTruthy()
     expect(screen.getByTestId('color-dot-2')).toBeTruthy()
     expect(screen.getByTestId('color-list-add-Background')).toBeTruthy()
+  })
+
+  // The + button has to lead the row, not trail it — see useColorListFabs.tsx's own comment: while +
+  // is held for its own hold-to-grow action, each newly-appended swatch has to land after wherever +
+  // already sits, never push + itself out from under the still-holding finger.
+  it('renders the add button before every colour dot, not after', async () => {
+    const screen = await render(<Host label='Background' colors={['#000000', '#f44336']} onChange={jest.fn()} />)
+
+    const ordered = screen.getAllByTestId(/^color-list-add-|^color-dot-/)
+    expect(ordered.map((node) => node.props.testID)).toEqual(['color-list-add-Background', 'color-dot-0', 'color-dot-1'])
+  })
+
+  it('long-pressing the add button appends one random colour immediately, on top of whatever picking one manually would do', async () => {
+    const onChange = jest.fn()
+    const screen = await render(<Host label='Foreground' colors={['#000000']} onChange={onChange} />)
+
+    await act(async () => {
+      fireEvent(screen.getByTestId('color-list-add-Foreground'), 'longPress')
+    })
+
+    expect(onChange).toHaveBeenCalledTimes(1)
+    const [appended] = onChange.mock.calls[0]
+    expect(appended).toHaveLength(2)
+    expect(appended[0]).toBe('#000000')
+    expect(appended[1]).toMatch(/^#[0-9A-Fa-f]{6}$/)
+  })
+
+  // Same "nothing left to add, so this must be a genuine no-op" cap every other hold-to-grow action in
+  // this app already has (see index.tsx's own growForeground/growParticleColors) — passed in as
+  // maxColors here rather than hardcoded, since foreground/background and particles/border each need a
+  // different cap (see ControlGroupTopSheetContent.tsx's own call sites).
+  it('stops growing once the list is already at maxColors', async () => {
+    const onChange = jest.fn()
+    const screen = await render(<Host label='Foreground' colors={['#000000', '#ffffff']} onChange={onChange} maxColors={2} />)
+
+    await act(async () => {
+      fireEvent(screen.getByTestId('color-list-add-Foreground'), 'longPress')
+    })
+
+    expect(onChange).not.toHaveBeenCalled()
   })
 
   it('appends a new colour at the end when picked from the add button, leaving existing slots untouched', async () => {

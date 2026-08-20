@@ -8,6 +8,7 @@ import { cancelAnimation } from 'react-native-reanimated'
 
 import SwirlScreen from '@/app/index'
 import { MAX_MIRROR_LINES, wedgeVector } from '@/constants/kaleidoscope'
+import { PARTICLE_SHAPE_ORDER, ParticleShape } from '@/constants/particleShapes'
 import { PatternType } from '@/constants/patterns'
 import { DashStyle } from '@/constants/strokeDash'
 import { useControlGroups, useControlGroupSheetDrawer } from '@/hooks/controlGroups'
@@ -134,6 +135,36 @@ jest.mock('@/components/Spiral', () => ({
   }
 }))
 
+// Real @/hooks/useParticleField registers its own useFrameCallback, which would shift this file's own
+// hardcoded frame-callback indices (see stepGravityParticleProgress and friends above) by one — mocked
+// out for the same reason those comments already explain. Its own Skia-touching sibling, Spiral.tsx
+// (which is what actually turns this hook's plain position numbers into Skia paths — see
+// useParticleField.ts's own top comment for why the split exists at all), is already fully mocked out
+// above, so this file never touches real Skia regardless. particlePanGesture/particleGatherGesture are
+// real Gesture.Pan()/Gesture.LongPress() builders (not bare stubs) so they compose into index.tsx's own
+// Gesture.Simultaneous(...) the same way every other real gesture in this file already does.
+jest.mock('@/hooks/useParticleField', () => ({
+  MAX_PARTICLE_COLOR_BUCKETS: 8,
+  baseShapePoints: () => [],
+  useParticleField: () => ({
+    positionX: { value: new Float32Array(0) },
+    positionY: { value: new Float32Array(0) },
+    colorIndex: { value: new Float32Array(0) },
+    particleFrameTick: { value: 0 },
+    // Deliberately NOT real Gesture.Pan()/Gesture.LongPress() instances — this repo's own RNGH mock
+    // (jest.setup.ts) registers every one of those into a shared, type-keyed registry that
+    // getLastGesture('Pan')/getLastGesture('LongPress') read the MOST RECENT entry from, so a second
+    // real Pan/LongPress created here (after useEpicenter's own real panGesture/longPressGesture)
+    // would silently steal every one of this file's own getLastGesture('Pan')/('LongPress') lookups
+    // out from under the real gestures those tests actually mean to drive. index.tsx only ever hands
+    // these straight to Gesture.Simultaneous(...), whose own mock ignores its arguments entirely (see
+    // jest.setup.ts's own Simultaneous: (..._gs) => ...), so a plain inert object is all either one
+    // needs to be here.
+    particlePanGesture: {},
+    particleGatherGesture: {}
+  })
+}))
+
 // Mocked (rather than rendered for real) for the same reason as Spiral: OnScreenControls builds its
 // own Pan/Tap gestures for its sliders, and the global gesture registry keys off render order, so a
 // real render here would shift or duplicate what getLastGesture/getGestures see elsewhere in this
@@ -255,7 +286,14 @@ const setMirrorAlternateColors = jest.fn()
 const setMirrorGap = jest.fn()
 const setMirrorLines = jest.fn()
 const setMirrorRotationSpeed = jest.fn()
+const setParticleBorderColors = jest.fn()
+const setParticleBorderWidth = jest.fn()
+const setParticleColors = jest.fn()
+const setParticleCount = jest.fn()
+const setParticleShapes = jest.fn()
+const setParticleSize = jest.fn()
 const setPattern = jest.fn()
+const setPatternVisible = jest.fn()
 const setPolygonSides = jest.fn()
 const setRotationSpeed = jest.fn()
 const setStrokeWidth = jest.fn()
@@ -329,7 +367,14 @@ const defaultMockSettings = {
   mirrorGap: 0,
   mirrorLines: 0,
   mirrorRotationSpeed: 0,
+  particleBorderColors: ['#000000'],
+  particleBorderWidth: 1,
+  particleColors: ['#ffffff'],
+  particleCount: 0,
+  particleShapes: ['circle'] as ParticleShape[],
+  particleSize: 6,
   pattern: 'spiral' as PatternType,
+  patternVisible: true,
   polygonSides: 4,
   rotationSpeed: 1,
   shakeEnabled: true,
@@ -368,7 +413,14 @@ function mockSettings(overrides: Partial<typeof defaultMockSettings> = {}) {
     setMirrorGap,
     setMirrorLines,
     setMirrorRotationSpeed,
+    setParticleBorderColors,
+    setParticleBorderWidth,
+    setParticleColors,
+    setParticleCount,
+    setParticleShapes,
+    setParticleSize,
     setPattern,
+    setPatternVisible,
     setPolygonSides,
     setRotationSpeed,
     setShakeEnabled: jest.fn(),
@@ -1501,18 +1553,79 @@ describe('SwirlScreen gestures', () => {
 
   it("doesn't reroll the side count for a pattern that doesn't have one", async () => {
     await renderScreen()
-    const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
-    const randomize = shakeCall[1] as () => void
 
+    // Scoped to the 'pattern' group's own reroll unit via onRandomizeGestureTarget, not the full
+    // shake-driven randomize() — a full randomize also fires the particles unit, which writes
+    // polygonSides independently whenever its own freshly-picked shapes happen to include a sided one
+    // (see useRerollUnits.tsx's own particleShapes comment), so asserting "not called" against the
+    // whole pool would be asserting about particles' own unrelated draw, not this unit's guard.
     // 0.1 lands PATTERN_ORDER's first entry, 'spiral', which has no side count at all.
     const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.1)
     await act(async () => {
-      randomize()
+      getLastControlsProps().onRandomizeGestureTarget('pattern')
     })
     randomSpy.mockRestore()
 
     expect(setPattern).toHaveBeenLastCalledWith('spiral')
     expect(setPolygonSides).not.toHaveBeenCalled()
+  })
+
+  // Same "would look like nothing happened" problem onCycleShape's own patternVisible fix already
+  // covers (see that test further down) — randomizing the pattern (or its crop/hole wedge) while it's
+  // hidden should reveal it too, not just changing pattern by stepping through it one at a time.
+  it("onRandomizeGestureTarget('pattern') also forces patternVisible back on, and onGoBack restores whatever it was before", async () => {
+    mockSettings({ patternVisible: false })
+    await renderScreen()
+
+    await act(async () => {
+      getLastControlsProps().onRandomizeGestureTarget('pattern')
+    })
+    expect(setPatternVisible).toHaveBeenCalledWith(true)
+
+    await act(async () => {
+      getLastControlsProps().onGoBack()
+    })
+    expect(setPatternVisible).toHaveBeenLastCalledWith(false)
+  })
+
+  it("onRandomizeGestureTarget('crop') also forces patternVisible back on, and onGoBack restores whatever it was before", async () => {
+    mockSettings({ patternVisible: false })
+    await renderScreen()
+
+    await act(async () => {
+      getLastControlsProps().onRandomizeGestureTarget('crop')
+    })
+    expect(setPatternVisible).toHaveBeenCalledWith(true)
+
+    await act(async () => {
+      getLastControlsProps().onGoBack()
+    })
+    expect(setPatternVisible).toHaveBeenLastCalledWith(false)
+  })
+
+  // Crop and hole moved to their own dedicated randomize (the crop wedge) rather than riding along
+  // with the pattern group's own — see useRerollUnits.tsx's own rerollUnitsByGroup.pattern comment.
+  it("onRandomizeGestureTarget('crop') rerolls exactly cropRadius/cropShaped/holeRadius/holeShaped, and 'pattern' no longer touches any of them", async () => {
+    await renderScreen()
+
+    await act(async () => {
+      getLastControlsProps().onRandomizeGestureTarget('crop')
+    })
+    expect(setCropRadius).toHaveBeenCalledTimes(1)
+    expect(setCropShaped).toHaveBeenCalledTimes(1)
+    expect(setHoleRadius).toHaveBeenCalledTimes(1)
+    expect(setHoleShaped).toHaveBeenCalledTimes(1)
+    expect(setPattern).not.toHaveBeenCalled()
+    expect(setPolygonSides).not.toHaveBeenCalled()
+
+    await act(async () => {
+      getLastControlsProps().onRandomizeGestureTarget('pattern')
+    })
+    expect(setCropRadius).toHaveBeenCalledTimes(1)
+    expect(setCropShaped).toHaveBeenCalledTimes(1)
+    expect(setHoleRadius).toHaveBeenCalledTimes(1)
+    expect(setHoleShaped).toHaveBeenCalledTimes(1)
+    expect(setPattern).toHaveBeenCalledTimes(1)
   })
 
   // Regression: randomize() used to also call recenter(), snapping the epicentre back to the middle
@@ -2023,6 +2136,40 @@ describe('SwirlScreen gestures', () => {
         stepBaseRotation(1000)
       })
       expect(getLastSpiralProps().rotation.value).toBeLessThan(before)
+    })
+
+    // patternVisible off shouldn't leave rotation/zoom quietly spinning behind a hidden pattern — see
+    // index.tsx's own effectiveSwirlValues comment for why this reuses frozen's exact "zero the rate"
+    // mechanism, just scoped to rotation/zoom instead of frozen's full five.
+    it('stops rotation and pulse (but not mirror rotation) while patternVisible is off', async () => {
+      mockSettings({ patternVisible: false, rotationSpeed: 2, zoomSpeed: 1, mirrorLines: 4, mirrorRotationSpeed: 2 })
+      await renderScreen()
+
+      const rotationBefore = getLastSpiralProps().rotation.value
+      const pulseBefore = getLastSpiralProps().pulse.value
+      const mirrorRotationBefore = getLastSpiralProps().mirrorRotation.value
+      await act(async () => {
+        stepBaseRotation(1000)
+        stepBasePulse(1000)
+        stepMirrorProgress(1000)
+      })
+      expect(getLastSpiralProps().rotation.value).toBe(rotationBefore)
+      expect(getLastSpiralProps().pulse.value).toBe(pulseBefore)
+      // Mirror rotation is deliberately NOT stopped by this toggle — it spins the whole kaleidoscope
+      // assembly beads render inside too (see effectiveSwirlValues' own comment), which has nothing to
+      // do with hiding just the pattern's own linework.
+      expect(getLastSpiralProps().mirrorRotation.value).not.toBe(mirrorRotationBefore)
+    })
+
+    it('resumes rotation and pulse once patternVisible is turned back on', async () => {
+      mockSettings({ patternVisible: true, rotationSpeed: 2, zoomSpeed: 1 })
+      await renderScreen()
+
+      const before = getLastSpiralProps().rotation.value
+      await act(async () => {
+        stepBaseRotation(1000)
+      })
+      expect(getLastSpiralProps().rotation.value).not.toBe(before)
     })
   })
 
@@ -4503,7 +4650,7 @@ describe('SwirlScreen gestures', () => {
     // useRerollUnits' own top comment — randomizing should change the look, not the feel; physics stays
     // reachable only through the gravity group's own dedicated Randomize button). Named here so the
     // "none of these fired" checks below stay exhaustive without repeating the list in every test.
-    const lookSetters = [setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setPattern, setPolygonSides, setStrokeWidth, setTightness]
+    const lookSetters = [setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPolygonSides, setStrokeWidth, setTightness]
 
     // Same audio-reactive pool reduction as randomize (see rerollUnits' own comment in index.tsx) —
     // forward/back share the exact same table, so a batch tweak while mic mode is on should never
@@ -4539,20 +4686,23 @@ describe('SwirlScreen gestures', () => {
       await renderScreen()
 
       // rerollUnits' own order is [colors, pattern+sides, dashStyle, mirrorLines, mirrorGap,
-      // mirrorAlternateColors, tightness, strokeWidth, cropRadius, cropShaped, holeRadius, holeShaped]
-      // — bounceFriction/gravity aren't in this pool at all (see useRerollUnits' own top comment:
-      // randomizing should change the look, not the feel). With Math.random pinned to 0.3,
-      // pickRandomDistinct's Math.floor(0.3 * 12) = 3 lands on mirrorLines, the cleanest single-setter
-      // unit to assert against (unlike colors/pattern, which move two setters together as one unit).
-      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.3)
+      // mirrorAlternateColors, tightness, strokeWidth, cropRadius, cropShaped, holeRadius, holeShaped,
+      // particleColors, particleShape+sides, particleCount, particleSize, particleBorderColors,
+      // particleBorderWidth] — bounceFriction/gravity aren't in this pool at all (see useRerollUnits'
+      // own top comment: randomizing should change the look, not the feel; beads read
+      // bounceFriction/gravity directly now too, so this exclusion covers them as well). With
+      // Math.random pinned to 0.25, pickRandomDistinct's Math.floor(0.25 * 18) = 4 lands on mirrorGap,
+      // the cleanest single-setter unit to assert against (unlike colors/pattern, which move two
+      // setters together as one unit).
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.25)
       await act(async () => {
         getLastControlsProps().onGoForward()
       })
       randomSpy.mockRestore()
 
-      expect(setMirrorLines).toHaveBeenCalledTimes(1)
+      expect(setMirrorGap).toHaveBeenCalledTimes(1)
       for (const setter of lookSetters) {
-        if (setter === setMirrorLines) continue
+        if (setter === setMirrorGap) continue
         expect(setter).not.toHaveBeenCalled()
       }
     })
@@ -4560,16 +4710,18 @@ describe('SwirlScreen gestures', () => {
     it('a long-press (onGoForwardBatch) rerolls exactly TWEAK_BATCH_COUNT (4) distinct look units in one batch', async () => {
       await renderScreen()
 
-      // Same fixed 0.3 draw as the single-tweak test above — pickRandomDistinct's successive
-      // Math.floor(0.3 * poolSize) draws against the shrinking (now 12-wide) pool land on mirrorLines,
-      // mirrorGap, mirrorAlternateColors, then dashStyle, in that order.
-      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.3)
+      // Same fixed 0.25 draw as the single-tweak test above, against the same 18-wide pool —
+      // pickRandomDistinct's successive Math.floor(0.25 * poolSize) draws against the shrinking pool
+      // land on mirrorGap (18 wide), mirrorAlternateColors (17 wide, since removing mirrorGap shifts
+      // everything after it down by one), tightness (16 wide), then mirrorLines (15 wide), in that
+      // order.
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.25)
       await act(async () => {
         getLastControlsProps().onGoForwardBatch()
       })
       randomSpy.mockRestore()
 
-      const touched = [setMirrorLines, setMirrorGap, setMirrorAlternateColors, setDashStyle]
+      const touched = [setMirrorGap, setMirrorAlternateColors, setTightness, setMirrorLines]
       for (const setter of touched) {
         expect(setter).toHaveBeenCalledTimes(1)
       }
@@ -4721,6 +4873,21 @@ describe('SwirlScreen gestures', () => {
       expect(getLastControlsProps().backDisabled).toBe(true)
     })
 
+    it('onCycleShape (nextPattern) also forces patternVisible back on, and onGoBack restores whatever it was before', async () => {
+      mockSettings({ pattern: 'spiral', patternVisible: false })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onCycleShape()
+      })
+      expect(setPatternVisible).toHaveBeenCalledWith(true)
+
+      await act(async () => {
+        getLastControlsProps().onGoBack()
+      })
+      expect(setPatternVisible).toHaveBeenLastCalledWith(false)
+    })
+
     it('onCycleLineType (nextDashStyle) pushes history before advancing, so onGoBack restores the original dashStyle', async () => {
       mockSettings({ dashStyle: 'solid' })
       await renderScreen()
@@ -4822,6 +4989,41 @@ describe('SwirlScreen gestures', () => {
         getLastControlsProps().onGrowForeground()
       })
       expect(setForegroundColors).not.toHaveBeenCalled()
+      expect(getLastControlsProps().backDisabled).toBe(true)
+    })
+
+    it('onGrowParticleShapes pushes history before adding a new, not-already-enabled shape to the pool', async () => {
+      mockSettings({ particleShapes: ['circle', 'heart'] })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onGrowParticleShapes()
+      })
+      expect(getLastControlsProps().backDisabled).toBe(false)
+      expect(setParticleShapes).toHaveBeenCalled()
+      const [calledShapes] = setParticleShapes.mock.calls[setParticleShapes.mock.calls.length - 1]
+      expect(calledShapes).toHaveLength(3)
+      expect(calledShapes.slice(0, 2)).toEqual(['circle', 'heart'])
+      expect(PARTICLE_SHAPE_ORDER).toContain(calledShapes[2])
+      expect(calledShapes.slice(0, 2)).not.toContain(calledShapes[2])
+
+      await act(async () => {
+        getLastControlsProps().onGoBack()
+      })
+      expect(setParticleShapes).toHaveBeenLastCalledWith(['circle', 'heart'])
+    })
+
+    // Same "nothing left to add, so this must be a genuine no-op" reasoning as onGrowForeground's own
+    // cap test above — here the cap is however many distinct shapes PARTICLE_SHAPE_ORDER actually has,
+    // not an arbitrary constant, since there's nothing left to pick once every one of them is enabled.
+    it('onGrowParticleShapes is a no-op once every shape is already enabled', async () => {
+      mockSettings({ particleShapes: [...PARTICLE_SHAPE_ORDER] })
+      await renderScreen()
+
+      await act(async () => {
+        getLastControlsProps().onGrowParticleShapes()
+      })
+      expect(setParticleShapes).not.toHaveBeenCalled()
       expect(getLastControlsProps().backDisabled).toBe(true)
     })
 

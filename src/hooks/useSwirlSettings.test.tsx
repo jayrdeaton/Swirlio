@@ -4,6 +4,7 @@ import React, { useEffect } from 'react'
 import { Text } from 'react-native'
 
 import { MAX_MIRROR_LINES } from '@/constants/kaleidoscope'
+import { ParticleShape } from '@/constants/particleShapes'
 import { PATTERN_ORDER } from '@/constants/patterns'
 import { DashStyle } from '@/constants/strokeDash'
 import { controlsAutoHideDelayMs } from '@/constants/swirlSettingsRanges'
@@ -33,6 +34,13 @@ type TestApi = {
   setMirrorGap: (gap: number) => void
   setMirrorLines: (lines: number) => void
   setMirrorRotationSpeed: (speed: number) => void
+  setParticleBorderColors: (colors: string[]) => void
+  setParticleBorderWidth: (width: number) => void
+  setParticleColors: (colors: string[]) => void
+  setParticleCount: (count: number) => void
+  setParticleShapes: (shapes: ParticleShape[]) => void
+  setParticleSize: (size: number) => void
+  setPatternVisible: (visible: boolean) => void
   setPolygonSides: (sides: number) => void
   setRotationSpeed: (speed: number) => void
   setShakeEnabled: (enabled: boolean) => void
@@ -52,11 +60,11 @@ function requireApi(value: TestApi | null): TestApi {
 }
 
 function Probe({ onUpdate }: { onUpdate: (api: TestApi) => void }) {
-  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings } = useSwirlSettings()
+  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings } = useSwirlSettings()
 
   useEffect(() => {
-    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings })
-  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings, settings])
+    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings })
+  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings, settings])
 
   return <Text testID='stroke'>{String(settings.strokeWidth)}</Text>
 }
@@ -386,6 +394,22 @@ describe('useSwirlSettings', () => {
 
     expect(getApi().settings.cropShaped).toBe(false)
     expect(getApi().settings.holeShaped).toBe(false)
+  })
+
+  it('defaults patternVisible to on, lets it be changed, and hydrates a persisted value', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.patternVisible).toBe(true)
+
+    await act(async () => {
+      getApi().setPatternVisible(false)
+    })
+    await waitFor(() => expect(getApi().settings.patternVisible).toBe(false))
+
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ patternVisible: false }))
+    const { getApi: getHydratedApi } = await renderProbe()
+    expect(getHydratedApi().settings.patternVisible).toBe(false)
   })
 
   it('defaults fixedSpacing to off, and lets it be changed', async () => {
@@ -1069,5 +1093,174 @@ describe('useSwirlSettings', () => {
 
     await waitFor(() => expect(getApi().settings.strokeWidth).toBe(18.5))
     expect(getApi().settings.gestureTarget).toBe('gravity')
+  })
+
+  it('defaults particleCount to 0, the same off signal mirrorLines uses, and lets it be changed', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.particleCount).toBe(0)
+
+    await act(async () => {
+      getApi().setParticleCount(40)
+    })
+
+    await waitFor(() => expect(getApi().settings.particleCount).toBe(40))
+  })
+
+  it('hydrates a persisted particleCount value', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ particleCount: 40 }))
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.particleCount).toBe(40)
+  })
+
+  it('defaults particleSize, particleShapes, and particleColors, and lets each be changed', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.particleSize).toBe(6)
+    expect(getApi().settings.particleShapes).toEqual(['circle'])
+    expect(getApi().settings.particleColors).toEqual(['#FFFFFF'])
+
+    await act(async () => {
+      getApi().setParticleCount(80)
+      getApi().setParticleSize(12)
+      getApi().setParticleShapes(['star'])
+      getApi().setParticleColors(['#111111', '#222222'])
+    })
+
+    await waitFor(() => {
+      expect(getApi().settings.particleCount).toBe(80)
+      expect(getApi().settings.particleSize).toBe(12)
+      expect(getApi().settings.particleShapes).toEqual(['star'])
+      expect(getApi().settings.particleColors).toEqual(['#111111', '#222222'])
+    })
+  })
+
+  it('defaults particleBorderColors to just black and particleBorderWidth to 1, and lets each be changed', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.particleBorderColors).toEqual(['#000000'])
+    expect(getApi().settings.particleBorderWidth).toBe(1)
+
+    await act(async () => {
+      getApi().setParticleBorderColors(['#123456'])
+      getApi().setParticleBorderWidth(3)
+    })
+
+    await waitFor(() => {
+      expect(getApi().settings.particleBorderColors).toEqual(['#123456'])
+      expect(getApi().settings.particleBorderWidth).toBe(3)
+    })
+  })
+
+  it('clamps particleBorderWidth setter and hydration values to its valid range, and refuses an empty particleBorderColors list', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ particleBorderWidth: 9999 }))
+    const { getApi: getHydratedApi } = await renderProbe()
+    expect(getHydratedApi().settings.particleBorderWidth).toBe(5)
+
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setParticleBorderWidth(-999)
+    })
+    await waitFor(() => expect(getApi().settings.particleBorderWidth).toBe(0))
+
+    await act(async () => {
+      getApi().setParticleBorderColors([])
+    })
+    // An empty list is refused outright, same as setParticleColors' own guard — there'd be nothing
+    // left for a border to be drawn as. Still the black default, since nothing else changed it.
+    expect(getApi().settings.particleBorderColors).toEqual(['#000000'])
+  })
+
+  it('clamps particleCount and particleSize setter and hydration values to their valid ranges', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ particleCount: 9999, particleSize: 9999 }))
+    const { getApi: getHydratedApi } = await renderProbe()
+    expect(getHydratedApi().settings.particleCount).toBe(150)
+    expect(getHydratedApi().settings.particleSize).toBe(20)
+
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setParticleCount(-999)
+      getApi().setParticleSize(-999)
+    })
+    await waitFor(() => {
+      expect(getApi().settings.particleCount).toBe(0)
+      expect(getApi().settings.particleSize).toBe(2)
+    })
+  })
+
+  it('refuses to set an empty particleColors list, since there would be nothing to draw', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setParticleColors([])
+    })
+
+    expect(getApi().settings.particleColors).toEqual(['#FFFFFF'])
+  })
+
+  it('falls back to the default particleColors when a persisted list has nothing valid in it', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ particleColors: ['not-a-colour', 42, null] }))
+
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.particleColors).toEqual(['#FFFFFF'])
+  })
+
+  it('round-trips every known particle shape through hydration without reverting to the default', async () => {
+    for (const shape of ['circle', 'heart', 'star', 'polygon', 'flower'] as const) {
+      // Persisted as the legacy singular field — sanity-checks swirlSettingsMigration's own
+      // legacyParticleShape fallback still lifts an old single value into the new list shape.
+      ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ particleShape: shape }))
+
+      const { getApi } = await renderProbe()
+
+      expect(getApi().settings.particleShapes).toEqual([shape])
+    }
+  })
+
+  it('falls back to the default particleShapes for an unrecognized value', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ particleShape: 'not-a-real-shape' }))
+
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.particleShapes).toEqual(['circle'])
+  })
+
+  // Same look/tuning carve-out reasoning as every other field resetSettings touches — particles are a
+  // new visual layer, not device-capability/interface/interaction-feel state, so Reset all resets
+  // every one of these four fields to its default, unlike gestureTarget/shakeEnabled/etc. above.
+  // particleCount's own default (0) is what turns beads back off — see swirlSettingsRanges.ts's own
+  // MIN_PARTICLE_COUNT comment — the same way DEFAULT_MIRROR_LINES already turns mirroring back off.
+  it('resetSettings restores every particle field to its default', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+    const { getApi } = await renderProbe()
+
+    await act(async () => {
+      getApi().setParticleCount(80)
+      getApi().setParticleSize(12)
+      getApi().setParticleShapes(['flower'])
+      getApi().setParticleColors(['#111111'])
+    })
+    await waitFor(() => expect(getApi().settings.particleCount).toBe(80))
+
+    await act(async () => {
+      getApi().resetSettings()
+    })
+
+    await waitFor(() => {
+      expect(getApi().settings.particleCount).toBe(0)
+      expect(getApi().settings.particleSize).toBe(6)
+      expect(getApi().settings.particleShapes).toEqual(['circle'])
+      expect(getApi().settings.particleColors).toEqual(['#FFFFFF'])
+    })
   })
 })

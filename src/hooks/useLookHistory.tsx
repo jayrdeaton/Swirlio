@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useCallback, useEffect, useState } from 'react'
 
+import { PARTICLE_SHAPE_ORDER, ParticleShape } from '@/constants/particleShapes'
 import { PATTERN_ORDER } from '@/constants/patterns'
 import { DASH_STYLE_ORDER } from '@/constants/strokeDash'
 
@@ -26,26 +27,46 @@ const MAX_LOOK_HISTORY = 100
 // Randomize button — every existing reroll unit's own fields were already covered here, so these two
 // have to be too, or a "back" after a randomize that happened to touch gravity's strength would leave
 // it un-undone.
-type Look = Pick<SwirlSettings, 'backgroundColors' | 'bounceFriction' | 'cropRadius' | 'cropShaped' | 'dashStyle' | 'foregroundColors' | 'gravity' | 'holeRadius' | 'holeShaped' | 'mirrorAlternateColors' | 'mirrorGap' | 'mirrorLines' | 'pattern' | 'polygonSides' | 'strokeWidth' | 'tightness'>
+// particleColors/particleCount/particleShapes/particleSize joined the same way — useRerollUnits.tsx's
+// own particles group can touch every one of them, so a "back" after a particles randomize/tweak needs
+// all of them restorable here too. particleCount doubles as the whole feature's own on/off switch (0
+// means off, the same convention mirrorLines already uses — see swirlSettingsRanges.ts's own
+// MIN_PARTICLE_COUNT comment), so restoring it alone already restores on/off state; there's no separate
+// boolean field to carry here. Beads no longer have their own particleGravity/particleFriction/
+// particleSides fields at all — they read straight off gravity/bounceFriction/polygonSides below, which
+// this Look already restores for the pattern/mirror side of things. particleBorderColors/
+// particleBorderWidth joined once border color/width became their own reroll units too (see
+// useRerollUnits.tsx's own particles group) — same reasoning as particleColors/particleSize just
+// above, just for the outline instead of the fill.
+type Look = Pick<SwirlSettings, 'backgroundColors' | 'bounceFriction' | 'cropRadius' | 'cropShaped' | 'dashStyle' | 'foregroundColors' | 'gravity' | 'holeRadius' | 'holeShaped' | 'mirrorAlternateColors' | 'mirrorGap' | 'mirrorLines' | 'particleBorderColors' | 'particleBorderWidth' | 'particleColors' | 'particleCount' | 'particleShapes' | 'particleSize' | 'pattern' | 'polygonSides' | 'strokeWidth' | 'tightness'>
 
-// resetAllSettings (see index.tsx) is the one undoable action broad enough that Look's own 16 fields
+// resetAllSettings (see index.tsx) is the one undoable action broad enough that Look's own 22 fields
 // aren't enough to restore what it touches: it delegates to resetSettings, which resets nearly every
-// SwirlSettings field, including several — the speed sliders, fixedSpacing, micSensitivity — that Look
-// deliberately leaves out (see Look's own comment: a plain hot key or randomize/tweak's own undo entry
-// should never surprise-revert a speed slider a manual drag just set). followSpeed and
+// SwirlSettings field, including several — the speed sliders, fixedSpacing, micSensitivity,
+// patternVisible — that Look deliberately leaves out (see Look's own comment: a plain hot key or
+// randomize/tweak's own undo entry should never surprise-revert a speed slider a manual drag just
+// set; patternVisible specifically is never touched by any reroll unit at all — see
+// useRerollUnits.tsx — only by its own drawer toggle and nextPattern's own auto-reveal, neither of
+// which goes through pushHistory's plain Look). followSpeed and
 // triggerStackExpanded aren't among them despite being reset-able look/tuning-shaped fields elsewhere in
 // SwirlSettings: resetSettings itself carries both over rather than resetting them (interaction feel and
 // a chrome preference, not the art — see resetSettings' own comment in useSwirlSettings.tsx), so there's
 // nothing here for an undo entry to restore. Rather than widen Look itself for everyone (which would
 // reintroduce exactly that surprise-revert risk for every other push), only resetAllSettings' own entry
 // additionally carries these — see captureExtraResetFields/pushHistory below for how.
-export type ExtraResetFields = Pick<SwirlSettings, 'backgroundCycleSpeed' | 'fixedSpacing' | 'foregroundCycleSpeed' | 'micSensitivity' | 'mirrorRotationSpeed' | 'rotationSpeed' | 'zoomSpeed'>
+export type ExtraResetFields = Pick<SwirlSettings, 'backgroundCycleSpeed' | 'fixedSpacing' | 'foregroundCycleSpeed' | 'micSensitivity' | 'mirrorRotationSpeed' | 'patternVisible' | 'rotationSpeed' | 'zoomSpeed'>
 type LookHistoryEntry = Look & Partial<ExtraResetFields>
 
 const LOOK_HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
 
 function isValidLookColorList(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === 'string' && LOOK_HEX_COLOR_PATTERN.test(item))
+}
+
+// Same shape as isValidLookColorList above, checked against PARTICLE_SHAPE_ORDER instead of a hex
+// pattern.
+function isValidLookShapeList(value: unknown): value is ParticleShape[] {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === 'string' && PARTICLE_SHAPE_ORDER.includes(item as ParticleShape))
 }
 
 // A lighter validator than useSwirlSettings.tsx's own mergePersistedSettings: that one merges whatever
@@ -77,6 +98,12 @@ function isValidLookHistoryEntry(value: unknown): value is LookHistoryEntry {
     typeof candidate.mirrorAlternateColors === 'boolean' &&
     typeof candidate.mirrorGap === 'number' &&
     typeof candidate.mirrorLines === 'number' &&
+    isValidLookColorList(candidate.particleBorderColors) &&
+    typeof candidate.particleBorderWidth === 'number' &&
+    isValidLookColorList(candidate.particleColors) &&
+    typeof candidate.particleCount === 'number' &&
+    isValidLookShapeList(candidate.particleShapes) &&
+    typeof candidate.particleSize === 'number' &&
     typeof candidate.pattern === 'string' &&
     PATTERN_ORDER.includes(candidate.pattern) &&
     typeof candidate.polygonSides === 'number' &&
@@ -87,6 +114,7 @@ function isValidLookHistoryEntry(value: unknown): value is LookHistoryEntry {
     (candidate.foregroundCycleSpeed === undefined || typeof candidate.foregroundCycleSpeed === 'number') &&
     (candidate.micSensitivity === undefined || typeof candidate.micSensitivity === 'number') &&
     (candidate.mirrorRotationSpeed === undefined || typeof candidate.mirrorRotationSpeed === 'number') &&
+    (candidate.patternVisible === undefined || typeof candidate.patternVisible === 'boolean') &&
     (candidate.rotationSpeed === undefined || typeof candidate.rotationSpeed === 'number') &&
     (candidate.zoomSpeed === undefined || typeof candidate.zoomSpeed === 'number')
   )
@@ -120,7 +148,7 @@ function sanitizeLookHistory(rawValue: string): LookHistoryEntry[] {
 // every field captureLook/restoreLook/captureExtraResetFields touch already lives on that one context,
 // so there's nothing for index.tsx to thread through by hand.
 export function useLookHistory() {
-  const { settings, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
+  const { settings, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPatternVisible, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
 
   const captureLook = useCallback(
     (): Look => ({
@@ -136,6 +164,12 @@ export function useLookHistory() {
       mirrorAlternateColors: settings.mirrorAlternateColors,
       mirrorGap: settings.mirrorGap,
       mirrorLines: settings.mirrorLines,
+      particleBorderColors: settings.particleBorderColors,
+      particleBorderWidth: settings.particleBorderWidth,
+      particleColors: settings.particleColors,
+      particleCount: settings.particleCount,
+      particleShapes: settings.particleShapes,
+      particleSize: settings.particleSize,
       pattern: settings.pattern,
       polygonSides: settings.polygonSides,
       strokeWidth: settings.strokeWidth,
@@ -153,6 +187,7 @@ export function useLookHistory() {
       foregroundCycleSpeed: settings.foregroundCycleSpeed,
       micSensitivity: settings.micSensitivity,
       mirrorRotationSpeed: settings.mirrorRotationSpeed,
+      patternVisible: settings.patternVisible,
       rotationSpeed: settings.rotationSpeed,
       zoomSpeed: settings.zoomSpeed
     }),
@@ -173,23 +208,31 @@ export function useLookHistory() {
       setMirrorAlternateColors(look.mirrorAlternateColors)
       setMirrorGap(look.mirrorGap)
       setMirrorLines(look.mirrorLines)
+      setParticleBorderColors(look.particleBorderColors)
+      setParticleBorderWidth(look.particleBorderWidth)
+      setParticleColors(look.particleColors)
+      setParticleCount(look.particleCount)
+      setParticleShapes(look.particleShapes)
+      setParticleSize(look.particleSize)
       setPattern(look.pattern)
       setPolygonSides(look.polygonSides)
       setStrokeWidth(look.strokeWidth)
       setTightness(look.tightness)
-      // Only resetAllSettings' own entries carry these (see ExtraResetFields' own comment) — every
-      // other push (randomize, tweakLook, every single-field hot key) only ever captured the base
-      // Look above, so these read undefined there and are correctly left untouched, not reset to some
-      // default.
+      // Only pushes that actually carried one of these along (resetAllSettings' own entries carry
+      // every ExtraResetFields, nextPattern's own carries just patternVisible — see that handler's own
+      // comment) set anything here; every other push (randomize, tweakLook, every other single-field
+      // hot key) only ever captured the base Look above, so these read undefined there and are
+      // correctly left untouched, not reset to some default.
       if (look.backgroundCycleSpeed !== undefined) setBackgroundCycleSpeed(look.backgroundCycleSpeed)
       if (look.fixedSpacing !== undefined) setFixedSpacing(look.fixedSpacing)
       if (look.foregroundCycleSpeed !== undefined) setForegroundCycleSpeed(look.foregroundCycleSpeed)
       if (look.micSensitivity !== undefined) setMicSensitivity(look.micSensitivity)
       if (look.mirrorRotationSpeed !== undefined) setMirrorRotationSpeed(look.mirrorRotationSpeed)
+      if (look.patternVisible !== undefined) setPatternVisible(look.patternVisible)
       if (look.rotationSpeed !== undefined) setRotationSpeed(look.rotationSpeed)
       if (look.zoomSpeed !== undefined) setZoomSpeed(look.zoomSpeed)
     },
-    [setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPattern, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed]
+    [setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setForegroundColors, setForegroundCycleSpeed, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPatternVisible, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed]
   )
 
   const [lookHistory, setLookHistory] = useState<LookHistoryEntry[]>([])

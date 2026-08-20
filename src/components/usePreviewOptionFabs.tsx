@@ -22,3 +22,29 @@ export type PreviewOption<T extends string> = {
 export function usePreviewOptionFabs<T extends string>(options: PreviewOption<T>[], value: T, onChange: (value: T) => void): React.ReactNode[] {
   return options.map((option) => <LabeledFab key={option.value} icon={option.renderIcon} label={option.label} active={option.value === value} onPress={() => onChange(option.value)} />)
 }
+
+// Same shape as usePreviewOptionFabs above, but multi-select: each option's own FAB toggles its own
+// membership in a list instead of replacing one single active value — for pickers where more than one
+// choice can be live at once (see useParticleShapeIconFabs — particles resolve a random pick from
+// whichever shapes are enabled, unlike the single-select pattern/dash-style pickers this hook's own
+// cousin serves). Never toggles the last remaining enabled option off — same "there must always be at
+// least one to draw" guard useColorListFabs' own removeEditing already enforces for colors, just
+// expressed as a toggle instead of a remove, and enforced here (not left to the caller's own onChange)
+// so every consumer gets it for free. A toggle-list can never itself produce a repeated entry the way
+// useColorListFabs' own positional swatches deliberately can (see that hook's own comment on why
+// duplicates are meaningful there) — each option here is its own fixed slot, on or off, not a
+// freely-addable one.
+export function usePreviewOptionToggleFabs<T extends string>(options: PreviewOption<T>[], enabledValues: T[], onChange: (values: T[]) => void): React.ReactNode[] {
+  return options.map((option) => {
+    const isEnabled = enabledValues.includes(option.value)
+    const toggle = () => {
+      if (isEnabled) {
+        if (enabledValues.length <= 1) return
+        onChange(enabledValues.filter((value) => value !== option.value))
+      } else {
+        onChange([...enabledValues, option.value])
+      }
+    }
+    return <LabeledFab key={option.value} icon={option.renderIcon} label={option.label} active={isEnabled} onPress={toggle} />
+  })
+}

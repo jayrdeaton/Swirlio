@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { contrastColor, DISABLED_ON_CANVAS_SCRIM_COLOR, disabledOnCanvasFabTheme, TOGGLE_OFF_BLUR_TINT_OPACITY, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
 import { RANDOMIZE_HOLD_REPEAT_MS } from '@/constants/holdToRepeat'
+import { PARTICLE_SHAPE_ORDER } from '@/constants/particleShapes'
 import { ControlGroup, useControlGroups, useControlGroupSheetDrawer, useOpenControlGroup } from '@/hooks/controlGroups'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { GESTURE_TARGET_ORDER, GestureTarget } from '@/hooks/useEpicenter'
@@ -21,6 +22,7 @@ import { FAN_DURATION_MS, fanItemOffset, GestureFanItem } from './GestureFanItem
 import { GlassToggleFab } from './GlassToggleFab'
 import { BORDER_RADIUS_MULTIPLIER_SMALL, FAB_HEIGHT_MEDIUM, FAB_HEIGHT_SMALL } from './LabeledFab'
 import { IconOrRenderFn, MdIcon, resolveIcon } from './MdIcon'
+import { ParticleIcon } from './ParticleIcon'
 import { PatternIcon } from './PatternIcon'
 
 const FAB_EDGE_MARGIN = 16
@@ -97,6 +99,10 @@ const GROUP_TRIGGERS: { group: ControlGroup; icon: IconOrRenderFn; testID?: stri
   // actually helps on-device before rolling it out to every other icon in the app.
   { group: 'line', icon: ({ size, color }) => <MdIcon name='format-line-weight' color={color} size={size} />, testID: 'fab-format-line-weight' },
   { group: 'pattern', icon: ({ size, color }) => <PatternIcon pattern='spiral' color={color} size={size} />, testID: 'fab-pattern' },
+  // Sits ahead of mirror now — always previews 'circle' (the default particle shape), same "fixed
+  // reference glyph regardless of the live setting" convention 'pattern' above already uses (hardcoded
+  // pattern='spiral').
+  { group: 'particles', icon: ({ size, color }) => <ParticleIcon shape='circle' color={color} size={size} />, testID: 'fab-particles' },
   { group: 'mirror', icon: 'mirror', testID: 'fab-mirror' }
 ]
 
@@ -114,7 +120,11 @@ const GESTURE_TARGET_ICONS: Record<GestureTarget, IconOrRenderFn> = {
   gravity: 'magnet',
   // Same glyph as the Hole slider itself (see ControlGroupBottomSheetContent) — two concentric
   // circles reads as "crop and hole" together, the two radii this target actually drives.
-  crop: 'circle-double'
+  crop: 'circle-double',
+  // Same fixed 'circle' preview as the group-trigger's own copy above — this is about what a drag/
+  // twist moves, not which shape is currently selected (see cycleShapeIcon's own live-preview pattern
+  // further down for the one that does track the live value).
+  particles: ({ size, color }) => <ParticleIcon shape='circle' color={color} size={size} />
 }
 
 type OnScreenControlsProps = {
@@ -199,6 +209,14 @@ type OnScreenControlsProps = {
   onCycleLineType: () => void
   onCycleSides: () => void
   onResetLineToSolid: () => void
+  // Particles mode's own pair — both slots now share the exact tap-replaces/hold-grows shape mirror
+  // mode's own randomize/grow color pair above already establishes (onRandomizeParticleColors/
+  // onGrowParticleColors), just one pointed at particleShapes and the other at particleColors — see
+  // index.tsx's own nextParticleShape/growParticleShapes/randomizeParticleColors/growParticleColors.
+  onCycleParticleShape: () => void
+  onGrowParticleShapes: () => void
+  onRandomizeParticleColors: () => void
+  onGrowParticleColors: () => void
   // Gravity mode's own slotA on web only — everywhere else slotA is the tilt-control toggle instead
   // (see the activeTargets.has('gravity') branch further down), since tilt has no on-canvas gesture
   // equivalent of its own to fall back on there. Web has no DeviceMotion (see
@@ -237,7 +255,7 @@ type OnScreenControlsProps = {
 // controls' own hit areas capture anything. Faded via opacity rather than conditionally rendered so
 // hiding/revealing transitions smoothly instead of popping instantly — see EdgeRevealZones for how it
 // comes back once fully hidden and no longer touchable.
-export function OnScreenControls({ visible, activeTargets, backDisabled, frozen, onToggleFrozen, onRecenterEverything, gestureFanOpen, onGestureFanOpenChange, onSelectGestureTarget, onRandomizeGestureTarget, onReveal, onRecenter, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, onAlternateBackground, onCycleBackgroundTwoTone, onRandomizeForeground, onGrowForeground, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, gravityRepelling, onReverseGravity, onHideControls }: OnScreenControlsProps) {
+export function OnScreenControls({ visible, activeTargets, backDisabled, frozen, onToggleFrozen, onRecenterEverything, gestureFanOpen, onGestureFanOpenChange, onSelectGestureTarget, onRandomizeGestureTarget, onReveal, onRecenter, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, onAlternateBackground, onCycleBackgroundTwoTone, onRandomizeForeground, onGrowForeground, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, onCycleParticleShape, onGrowParticleShapes, onRandomizeParticleColors, onGrowParticleColors, gravityRepelling, onReverseGravity, onHideControls }: OnScreenControlsProps) {
   // Recomputed every render (not a module-level constant) purely so tests can flip Platform.OS and
   // actually exercise both of gravity mode's slotA branches below — see useAudioReactive.test.ts for
   // the same Platform.OS-mutation pattern. Cheap enough that per-render cost was never a concern.
@@ -271,6 +289,10 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // growForeground safe to call on a timer without growing the list forever.
   const cycleBackgroundTwoToneHold = useHoldToRepeat(onCycleBackgroundTwoTone, HOLD_REPEAT_MS)
   const growForegroundHold = useHoldToRepeat(onGrowForeground, HOLD_REPEAT_MS)
+  // Particles mode's own long-press-and-hold pair — same "keep going while held" shape as
+  // growForegroundHold above, just against the particle-specific actions.
+  const growParticleShapesHold = useHoldToRepeat(onGrowParticleShapes, HOLD_REPEAT_MS)
+  const growParticleColorsHold = useHoldToRepeat(onGrowParticleColors, HOLD_REPEAT_MS)
   // Every group trigger's own randomize bonus (including the cog/chevron's 'settings' shortcut) keeps
   // rerolling for as long as the hold continues, the same "keep going while held" upgrade the above
   // four already give their own single-shot actions — except one hook call backs all six FABs at once
@@ -284,6 +306,15 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // Cycle-shape/Forward step does (see that constant's own comment for why it's shared centrally
   // instead of duplicated the way this file's other timing constants are).
   const randomizeGroupHold = useHoldToRepeatByKey(randomizeGroup, RANDOMIZE_HOLD_REPEAT_MS)
+
+  // The gesture-target fan's own equivalent of randomizeGroupHold just above — a plain press-and-hold
+  // directly on an already-open wedge, not the drag-and-dwell path handlePhaseChanged further down
+  // already covers (that one requires dragging the primary FAB itself out onto a wedge and holding
+  // still there, which turned out not to be how anyone actually reaches for "long-press this to
+  // randomize it" — this is the same in-place gesture the trigger stack's own buttons already use).
+  // Both ultimately call the same onRandomizeGestureTarget, so a wedge picked either way rerolls
+  // identically.
+  const randomizeGestureTargetHold = useHoldToRepeatByKey(onRandomizeGestureTarget, RANDOMIZE_HOLD_REPEAT_MS)
 
   // Whether the trigger stack's own group triggers (cog + GROUP_TRIGGERS) are showing, independent of
   // anySheetVisible/visible above — a per-stack declutter toggle (see the collapse FAB anchored at the
@@ -319,6 +350,15 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     }
     return CycleShapeIcon
   }, [settings.pattern])
+  // Particles mode's own Cycle shape icon — same live-preview reasoning as cycleShapeIcon above, just
+  // tracking settings.particleShapes instead of settings.pattern. nextParticleShape collapses the
+  // enabled list down to a single shape and cycles it, so the first (only) entry is the preview.
+  const cycleParticleShapeIcon = useMemo(() => {
+    function CycleParticleShapeIcon({ size, color }: { size: number; color: string }) {
+      return <ParticleIcon shape={settings.particleShapes[0]} color={color} size={size} />
+    }
+    return CycleParticleShapeIcon
+  }, [settings.particleShapes])
 
   // isVisible (not isOpen): stays true for the full outro animation, not just until something asks
   // to close — otherwise this stack would vanish the instant a sheet starts closing, well before it's
@@ -848,6 +888,25 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     // write the exact same persisted cropShaped/holeShaped settings.
     slotA = <GlassToggleFab icon='shape-outline' testID='fab-crop-shaped' active={settings.cropShaped} onPress={() => setCropShaped(!settings.cropShaped)} />
     slotB = <GlassToggleFab icon='contain' testID='fab-hole-shaped' active={settings.holeShaped} onPress={() => setHoleShaped(!settings.holeShaped)} />
+  } else if (activeTargets.has('particles')) {
+    // Both slots now share the exact tap-replaces/hold-grows shape mirror mode's own randomize/grow
+    // color pair already established for foregroundColors — slotA points that same pair at
+    // particleShapes instead, slotB (just below) at particleColors — see index.tsx's own
+    // nextParticleShape/growParticleShapes/randomizeParticleColors/growParticleColors.
+    slotA = (
+      <FAB
+        testID='fab-cycle-particle-shape'
+        icon={cycleParticleShapeIcon}
+        size='small'
+        color={solidFabColor}
+        style={[solidFabStyle, solidFabSizeSmall]}
+        onPress={onCycleParticleShape}
+        onLongPress={growParticleShapesHold.onLongPress}
+        delayLongPress={TRANSPORT_LONG_PRESS_MS}
+        onPressOut={growParticleShapesHold.onPressOut}
+      />
+    )
+    slotB = <FAB testID='fab-randomize-particle-colors' icon={resolveIcon('palette')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onRandomizeParticleColors} onLongPress={growParticleColorsHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={growParticleColorsHold.onPressOut} />
   }
 
   return (
@@ -948,6 +1007,9 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
                     onSelectGestureTarget(target)
                     onGestureFanOpenChange(false)
                   }}
+                  onLongPress={randomizeGestureTargetHold.onLongPress(target)}
+                  onPressOut={randomizeGestureTargetHold.onPressOut(target)}
+                  delayLongPress={TRANSPORT_LONG_PRESS_MS}
                 />
               )
             })}

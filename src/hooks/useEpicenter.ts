@@ -27,8 +27,12 @@ import { BounceBoundary, DragClamp, DragPointPhysics, reflectOffAxis, SNAP_DISTA
 // one consistent shape — there used to be a multi-select "combine" mode that populated it with more
 // than one entry at once, which is why the membership-check shape stuck around even though selecting a
 // target always replaces the whole set with exactly one now (see index.tsx's selectGestureTarget).
-export type GestureTarget = 'pattern' | 'mirror' | 'gravity' | 'crop'
-export const GESTURE_TARGET_ORDER: GestureTarget[] = ['pattern', 'crop', 'mirror', 'gravity']
+export type GestureTarget = 'pattern' | 'mirror' | 'gravity' | 'crop' | 'particles'
+// 'particles' has no draggable point of its own at all (see index.tsx's own
+// useParticleField/particlePanGesture) — every targetsPattern/targetsMirror/targetsGravity check in
+// this file below already stays false for it automatically, since each is its own explicit
+// `.has('specific-value')` membership check, not an exhaustive switch.
+export const GESTURE_TARGET_ORDER: GestureTarget[] = ['pattern', 'crop', 'particles', 'mirror', 'gravity']
 
 // How hard tilt pulls on whichever of pattern/mirror is its active target — a fixed constant, not a
 // user-facing setting: gravity already has its own slider for "how strong is a pull," and reusing that

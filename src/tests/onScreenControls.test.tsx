@@ -177,6 +177,10 @@ const defaultProps = {
   onCycleLineType: jest.fn(),
   onCycleSides: jest.fn(),
   onResetLineToSolid: jest.fn(),
+  onCycleParticleShape: jest.fn(),
+  onGrowParticleShapes: jest.fn(),
+  onRandomizeParticleColors: jest.fn(),
+  onGrowParticleColors: jest.fn(),
   gravityRepelling: false,
   onReverseGravity: jest.fn(),
   onHideControls: jest.fn()
@@ -1119,6 +1123,46 @@ describe('OnScreenControls', () => {
       expect(fanItemOpacity(screen, 'mirror')).toBe(0)
     })
 
+    // A second, independent way to reach the exact same randomize — a plain press-and-hold directly on
+    // an already-open wedge, not the drag-and-dwell path above (which requires dragging the primary FAB
+    // itself out onto a wedge and holding still there without releasing). Mirrors the trigger stack's
+    // own long-press-to-randomize (see randomizeGroupHold's own test above) applied to the fan instead.
+    it('also randomizes a target via a plain long-press directly on its already-open wedge, independent of the drag-and-dwell path', async () => {
+      const onRandomizeGestureTarget = jest.fn()
+      const onSelectGestureTarget = jest.fn()
+      const screen = await renderControls({ gestureFanOpen: true, onRandomizeGestureTarget, onSelectGestureTarget })
+
+      await act(async () => {
+        fireEvent(screen.getByTestId('fab-target-gravity'), 'longPress')
+      })
+
+      expect(onRandomizeGestureTarget).toHaveBeenCalledTimes(1)
+      expect(onRandomizeGestureTarget).toHaveBeenCalledWith('gravity')
+      // The long press is a bonus alongside the ordinary tap-to-select, not a replacement for it.
+      expect(onSelectGestureTarget).not.toHaveBeenCalled()
+    })
+
+    // The same keyed-hold shape randomizeGroupHold already uses for the trigger stack (see its own
+    // test above) — one hook instance backs every wedge, so a hold on one target has to keep rerolling
+    // just that target, not whichever was held last.
+    it('keeps a fan wedge long-press keyed to the wedge actually held, the same way the trigger stack already is', async () => {
+      const onRandomizeGestureTarget = jest.fn()
+      const screen = await renderControls({ gestureFanOpen: true, onRandomizeGestureTarget })
+
+      const gravityFab = screen.getByTestId('fab-target-gravity')
+      const mirrorFab = screen.getByTestId('fab-target-mirror')
+
+      await act(async () => {
+        fireEvent(gravityFab, 'longPress')
+      })
+      await act(async () => {
+        fireEvent(mirrorFab, 'longPress')
+      })
+
+      expect(onRandomizeGestureTarget).toHaveBeenNthCalledWith(1, 'gravity')
+      expect(onRandomizeGestureTarget).toHaveBeenNthCalledWith(2, 'mirror')
+    })
+
     // Adrift between wedges — not close enough to any one of them, and not back at the center either
     // (see fanItemOffset's own FAN_RADIUS/FAN_ANGLE_SPAN_DEG for why straight up, well past every
     // wedge's own radius, always lands here) — holding still means nothing in this zone, unlike either
@@ -1412,13 +1456,13 @@ describe('OnScreenControls', () => {
     const screen = await renderControls()
 
     expect(screen.getByTestId('fab-pattern').props.style.backgroundColor).toBe('#6750a4')
-    for (const testId of ['fab-cog', 'fab-mirror', 'fab-palette', 'fab-format-line-weight', 'fab-atom']) {
+    for (const testId of ['fab-cog', 'fab-mirror', 'fab-palette', 'fab-format-line-weight', 'fab-atom', 'fab-particles']) {
       expect(screen.getByTestId(testId).props.style.backgroundColor).toBe('transparent')
     }
-    // 5 dimmed sheet triggers (now including gravity) plus the always-present siblings-collapse
-    // toggle, which also reads as "off" (transparent, blur backdrop) by default — see the
-    // collapse-toggle tests below.
-    expect(within(screen.getByTestId('trigger-stack')).getAllByTestId('blur-view')).toHaveLength(6)
+    // 6 dimmed sheet triggers (now including gravity and particles) plus the always-present
+    // siblings-collapse toggle, which also reads as "off" (transparent, blur backdrop) by default —
+    // see the collapse-toggle tests below.
+    expect(within(screen.getByTestId('trigger-stack')).getAllByTestId('blur-view')).toHaveLength(7)
   })
 
   it('shows the cog FAB solid when settings is the open group', async () => {
@@ -1427,10 +1471,10 @@ describe('OnScreenControls', () => {
     const screen = await renderControls()
 
     expect(screen.getByTestId('fab-cog').props.style.backgroundColor).toBe('#6750a4')
-    for (const testId of ['fab-mirror', 'fab-palette', 'fab-pattern', 'fab-format-line-weight', 'fab-atom']) {
+    for (const testId of ['fab-mirror', 'fab-palette', 'fab-pattern', 'fab-format-line-weight', 'fab-atom', 'fab-particles']) {
       expect(screen.getByTestId(testId).props.style.backgroundColor).toBe('transparent')
     }
-    expect(within(screen.getByTestId('trigger-stack')).getAllByTestId('blur-view')).toHaveLength(6)
+    expect(within(screen.getByTestId('trigger-stack')).getAllByTestId('blur-view')).toHaveLength(7)
   })
 
   it('dims every trigger when no sheet is open at all — solid is reserved for the open one', async () => {
@@ -1438,11 +1482,12 @@ describe('OnScreenControls', () => {
     mockActiveGroup = 'pattern'
     const screen = await renderControls()
 
-    for (const testId of ['fab-cog', 'fab-mirror', 'fab-palette', 'fab-pattern', 'fab-format-line-weight', 'fab-atom']) {
+    for (const testId of ['fab-cog', 'fab-mirror', 'fab-palette', 'fab-pattern', 'fab-format-line-weight', 'fab-atom', 'fab-particles']) {
       expect(screen.getByTestId(testId).props.style.backgroundColor).toBe('transparent')
     }
-    // 6 dimmed sheet triggers (now including gravity) plus the always-present siblings-collapse toggle.
-    expect(within(screen.getByTestId('trigger-stack')).getAllByTestId('blur-view')).toHaveLength(7)
+    // 7 dimmed sheet triggers (now including gravity and particles) plus the always-present
+    // siblings-collapse toggle.
+    expect(within(screen.getByTestId('trigger-stack')).getAllByTestId('blur-view')).toHaveLength(8)
   })
 
   // The group sheet's own top half is top-anchored (its panel background spans full width, right

@@ -9,7 +9,7 @@ import { BOTTOM_SHEET_FOOTER_CLEARANCE } from '@/constants/sheetLayout'
 import { controlsAutoHideDelayMs, MAX_CONTROLS_AUTO_HIDE_SPEED, MIN_CONTROLS_AUTO_HIDE_SPEED } from '@/constants/swirlSettingsRanges'
 import { useControlGroups } from '@/hooks/controlGroups'
 import { useSpeedRateBridge } from '@/hooks/speedRateBridge'
-import { MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_PARTICLE_BORDER_WIDTH, MAX_PARTICLE_COUNT, MAX_PARTICLE_SIZE, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_PARTICLE_BORDER_WIDTH, MIN_PARTICLE_COUNT, MIN_PARTICLE_SIZE, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { SettingSlider } from './SettingSlider'
 
@@ -69,7 +69,7 @@ const SIDES_SLIDER_LABELS: Partial<Record<PatternType, string>> = {
 export function ControlGroupBottomSheetContent() {
   const insets = useSafeAreaInsets()
   const { activeGroup } = useControlGroups()
-  const { settings, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setFollowSpeed, setForegroundCycleSpeed, setGravity, setHoleRadius, setMicSensitivity, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
+  const { settings, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setFollowSpeed, setForegroundCycleSpeed, setGravity, setHoleRadius, setMicSensitivity, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderWidth, setParticleCount, setParticleSize, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
   // A low-latency fast path alongside the onChange/setXSpeed calls above — see speedRateBridge.tsx's
   // own comment for why these exist and why they're not a replacement for the settings setters.
   const { writeRotationRate, writeMirrorRotationRate, writeZoomRate, writeForegroundCycleRate, writeBackgroundCycleRate, writeGravityParticleRate } = useSpeedRateBridge()
@@ -188,6 +188,28 @@ export function ControlGroupBottomSheetContent() {
             snapToZero) the way the other two's minimum edge doesn't, so it reads as the odd one out,
             anchored at the end instead of grouped in front with them. */}
             <SettingSlider label='Gravity' icon='magnet' value={settings.gravity} displayValue={settings.gravity.toFixed(1)} minimumValue={MIN_GRAVITY} maximumValue={MAX_GRAVITY} step={FREE_STEP} snapToZero onChange={setGravity} />
+          </>
+        )}
+
+        {group === 'particles' && (
+          <>
+            {/* A wide range (see MIN/MAX_PARTICLE_COUNT) — free-drag, not a discrete tick-per-step
+            dial the way the small-range Mirror lines/Sides sliders are (see their own step comments):
+            stepping through 145 individual stops would feel sluggish rather than a smooth slide.
+            setParticleCount's own clampInt still rounds every drag to a whole bead count regardless.
+            No Gravity/Friction/Sides sliders here — beads read gravity/bounceFriction straight off the
+            Gravity group's own sliders and their side count off the Pattern group's own Sides/Points/
+            Petals slider (see useSwirlSettings.tsx's own particleShape comment for why those stopped
+            being dedicated particle fields), so there's nothing left for this group's own sheet to
+            duplicate. */}
+            <SettingSlider label='Quantity' icon='dots-grid' value={settings.particleCount} displayValue={String(settings.particleCount)} minimumValue={MIN_PARTICLE_COUNT} maximumValue={MAX_PARTICLE_COUNT} step={FREE_STEP} onChange={setParticleCount} />
+            <SettingSlider label='Size' icon='resize' value={settings.particleSize} displayValue={settings.particleSize.toFixed(1)} minimumValue={MIN_PARTICLE_SIZE} maximumValue={MAX_PARTICLE_SIZE} step={FREE_STEP} onChange={setParticleSize} />
+            {/* 0 (its own minimum) is a real, reachable "no border at all" — see
+            MIN_PARTICLE_BORDER_WIDTH's own comment in swirlSettingsRanges.ts — not a fixed floor the
+            way MIN_PARTICLE_SIZE above is for the bead's own fill, so no snapToZero here: 0 already
+            sits at this slider's own natural edge, not a bipolar middle value the way Gravity's own
+            snapToZero'd 0 does. */}
+            <SettingSlider label='Border' icon='circle-outline' value={settings.particleBorderWidth} displayValue={settings.particleBorderWidth.toFixed(1)} minimumValue={MIN_PARTICLE_BORDER_WIDTH} maximumValue={MAX_PARTICLE_BORDER_WIDTH} step={FREE_STEP} onChange={setParticleBorderWidth} />
           </>
         )}
 

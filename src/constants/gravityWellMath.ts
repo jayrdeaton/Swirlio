@@ -43,7 +43,7 @@ export function gravityParticleFrictionSpeed(bounceFriction: number, maxBounceFr
 // `index * GOLDEN_ANGLE_RAD` spreads any number of them evenly around the well with no two ever
 // landing on the same ray, and does it without Math.random() (avoided throughout this codebase's
 // worklets/tests — deterministic in, deterministic out).
-const GOLDEN_ANGLE_RAD = Math.PI * (3 - Math.sqrt(5))
+export const GOLDEN_ANGLE_RAD = Math.PI * (3 - Math.sqrt(5))
 
 export function gravityParticleAngleRad(index: number): number {
   'worklet'

@@ -1,4 +1,4 @@
-import { Canvas, FillType, Group, Rect, Skia, SkPath } from '@shopify/react-native-skia'
+import { Canvas, FillType, Group, Rect, Skia, SkPath, SkPoint } from '@shopify/react-native-skia'
 import React from 'react'
 import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { SharedValue, useDerivedValue } from 'react-native-reanimated'
@@ -7,12 +7,14 @@ import { clamp } from '@/constants/clamp'
 import { buildFlowerPoints } from '@/constants/flowerMath'
 import { gravityHoleRadius } from '@/constants/gravityWellMath'
 import { buildHeartPoints } from '@/constants/heartMath'
-import { copyCountForMirrorLines, rotationMatrix, translateRotateMatrix, wedgeAngleDegrees } from '@/constants/kaleidoscope'
+import { copyCountForMirrorLines, farthestCornerDistance, rotationMatrix, translateRotateMatrix, wedgeAngleDegrees } from '@/constants/kaleidoscope'
 import { hasPolygonSides, PatternType } from '@/constants/patterns'
+import { ParticleShape } from '@/constants/particleShapes'
 import { buildPolygonPoints } from '@/constants/polygonMath'
 import { buildStarPoints } from '@/constants/starMath'
 import { DashStyle } from '@/constants/strokeDash'
 import { useCyclingColor } from '@/hooks/useCyclingColor'
+import { baseShapePoints, MAX_PARTICLE_COLOR_BUCKETS } from '@/hooks/useParticleField'
 import { MAX_CROP_RADIUS, MAX_GRAVITY, MIN_CROP_RADIUS } from '@/hooks/useSwirlSettings'
 
 import { GRAVITY_HOLE_MAX_RADIUS_PX, GRAVITY_HOLE_MIN_RADIUS_PX, GravityWell } from './GravityWell'
@@ -83,6 +85,14 @@ export type PatternGeometry = {
 
 export type SpiralProps = {
   pattern: PatternType
+  // Whether the pattern's own linework draws at all — see useSwirlSettings.tsx's own patternVisible
+  // comment. Plain, not a SharedValue: only ever changes from a deliberate toggle press or a pattern
+  // change (see index.tsx's own nextPattern), both of which already re-render this component, the same
+  // "nothing here needs UI-thread reactivity" reasoning showGravityMarker just below already uses.
+  // Gates renderCopies' own pattern <Path> below, not the beads — beads stay independent of this
+  // entirely (see particleTransform's own comment for why beads already don't share the pattern's own
+  // rendering path), and not the crop/hole clip either, which particles never used to begin with.
+  patternVisible: boolean
   foregroundColors: string[]
   backgroundColors: string[]
   foregroundCycleProgress: SharedValue<number>
@@ -173,6 +183,48 @@ export type SpiralProps = {
   showGravityMarker: boolean
   strokeWidth: SharedValue<number>
   dashStyle: SharedValue<DashStyle>
+  // Plain physics numbers from useParticleField.ts (called in index.tsx, not here — see that hook's
+  // own top comment for why: it owns live gestures that need composing into index.tsx's own
+  // composedGesture, and deliberately has no Skia dependency of its own). This component is where
+  // those numbers actually turn into particleBucketPaths below — the one place in the render tree
+  // already proven safe to import Skia directly (see SpiralHost.web.tsx's own lazy-loading, which
+  // protects this whole file on web).
+  //
+  // Derived from particleCount > 0 in index.tsx, not a separate settings field — count itself is the
+  // whole feature's on/off switch (see swirlSettingsRanges.ts's own MIN_PARTICLE_COUNT comment). Named
+  // particlesActive, not particlesEnabled, since there's no boolean setting of that name anymore to
+  // confuse it with.
+  particlesActive: boolean
+  particleCount: SharedValue<number>
+  particleSize: SharedValue<number>
+  // How many shapes are currently enabled — the live SharedValue mirror of particleShapes.length, the
+  // same "count SharedValue alongside the plain array prop" split particleColorCount/particleColors
+  // already use just below (see that pair's own comment for why both exist). particleShapeIndex is
+  // each live bead's own fixed shape-bucket (see useParticleField.ts's own comment on it); particleShapes
+  // is the plain, currently-enabled list those buckets resolve against, index for index the same way
+  // particleColorIndex resolves against particleColors.
+  particleShapeCount: SharedValue<number>
+  particleShapeIndex: SharedValue<Float32Array>
+  particleShapes: ParticleShape[]
+  particleColorCount: SharedValue<number>
+  particlePositionX: SharedValue<Float32Array>
+  particlePositionY: SharedValue<Float32Array>
+  particleColorIndex: SharedValue<Float32Array>
+  particleFrameTick: SharedValue<number>
+  particleColors: string[]
+  // Same pairing shape as particleColorCount/particleColorIndex/particleColors just above, for each
+  // bead's own outline instead of its fill — see useSwirlSettings.tsx's own particleBorderColors
+  // comment for why this is a fully independent list/bucket-index pair rather than derived from the
+  // fill trio. particleBorderColorIndex comes from useParticleField.ts's own borderColorIndex, the
+  // exact same "assigned once at spawn, resolved live at render time" split colorIndex already uses.
+  particleBorderColorCount: SharedValue<number>
+  particleBorderColorIndex: SharedValue<Float32Array>
+  particleBorderColors: string[]
+  // Flat px width, direct from settings (see useSwirlSettings.tsx's own particleBorderWidth comment) —
+  // no per-size scaling computed here anymore now that this is a user-facing slider. 0 (its own
+  // minimum) means no border at all — see particleBucketPaths' own buildBorders comment for where that
+  // skips the whole border-geometry pass.
+  particleBorderWidth: SharedValue<number>
 }
 
 // Memoized: every prop here is either a primitive/array that's only ever recreated when it actually
@@ -186,7 +238,7 @@ export type SpiralProps = {
 // elements, one per mirror copy — see PatternGeometry's own comment for why that no longer scales
 // with pool size too) on every committed step, purely because SwirlScreen's own `settings` object
 // (and therefore its render) changed for an unrelated field.
-export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, backgroundColors, foregroundCycleProgress, backgroundCycleProgress, rotation, mirrorRotation, tightness, pulse, sides, reversed, cropRadius, cropShaped, holeRadius, holeShaped, fixedSpacing, mirrorLines, mirrorAlternateColors, mirrorGap, epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityCenterX, gravityCenterY, gravity, gravityParticleProgress, showGravityMarker, strokeWidth, dashStyle }: SpiralProps) {
+export const Spiral = React.memo(function Spiral({ pattern, patternVisible, foregroundColors, backgroundColors, foregroundCycleProgress, backgroundCycleProgress, rotation, mirrorRotation, tightness, pulse, sides, reversed, cropRadius, cropShaped, holeRadius, holeShaped, fixedSpacing, mirrorLines, mirrorAlternateColors, mirrorGap, epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityCenterX, gravityCenterY, gravity, gravityParticleProgress, showGravityMarker, strokeWidth, dashStyle, particlesActive, particleCount, particleSize, particleShapeCount, particleShapeIndex, particleShapes, particleColorCount, particlePositionX, particlePositionY, particleColorIndex, particleFrameTick, particleColors, particleBorderColorCount, particleBorderColorIndex, particleBorderColors, particleBorderWidth }: SpiralProps) {
   const { width, height } = useWindowDimensions()
   const centerX = width / 2
   const centerY = height / 2
@@ -241,9 +293,7 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
   // than a full every-frame path rebuild does, so this rounds much more aggressively than a value
   // driving something actually drawn at that exact position would.
   const radius = useDerivedValue(() => {
-    const x = originX.value
-    const y = originY.value
-    const raw = Math.max(Math.hypot(x, y), Math.hypot(width - x, y), Math.hypot(x, height - y), Math.hypot(width - x, height - y))
+    const raw = farthestCornerDistance(originX.value, originY.value, width, height)
     return Math.round(raw / RADIUS_QUANTUM_PX) * RADIUS_QUANTUM_PX
   })
 
@@ -338,6 +388,111 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
   // affine matrix expresses directly, with no shorthand-ordering ambiguity to fight.
   const innerTransform = useDerivedValue(() => translateRotateMatrix(originX.value, originY.value, rotation.value))
 
+  // Beads' own placement transform — translates to the literal window center (centerX/centerY, plain
+  // numbers, not the SharedValue originX/Y the pattern's own innerTransform above tracks), and never
+  // rotates. Beads still tumble under their own gravity/friction physics and still mirror/wedge-clip
+  // through every copy (see KaleidoscopeCopy's own particleTransform Group, a sibling of the pattern's
+  // innerTransform Group rather than nested inside it), but their whole coordinate space is otherwise
+  // fully independent of the pattern's own epicentre — dragging the pattern must never visibly drag the
+  // bead field along with it (see useParticleField.ts's own top comment, which this mirrors on the
+  // render side). No rotation.value either, on top of that independence — see this comment's own earlier
+  // history for the "spinning drum" look that motivated dropping rotation specifically; a fixed center
+  // point goes one step further, dropping position too. Reuses translateRotateMatrix rather than a new
+  // helper — angleDeg 0 makes its rotation term the identity, so the result is exactly a translation
+  // matrix with no separate function needed. Wrapped in useDerivedValue purely so this stays a
+  // SharedValue<AffineMatrix> like every other KaleidoscopeCopy prop, even though the value itself never
+  // actually changes frame to frame.
+  const particleTransform = useDerivedValue(() => translateRotateMatrix(centerX, centerY, 0))
+
+  // One merged Skia Path per color bucket — fill AND border alike, see buildBorders below — rebuilt
+  // fresh every frame the particle simulation actually runs. See useParticleField.ts's own top comment
+  // for why that hook stops at plain physics numbers (particlePositionX/Y/particleColorIndex) and this
+  // component, not that hook, is what turns them into real Skia geometry: this is the one place in the
+  // render tree already proven safe to import Skia directly on web (see SpiralHost.web.tsx's own
+  // lazy-loading). Depends on particleFrameTick, not particlePositionX/Y themselves — those are
+  // mutated in place every frame by the simulation (never reassigned), which on its own would never
+  // notify this useDerivedValue to re-run; the tick is a genuine reassignment that exists purely to
+  // force this to re-read the mutated arrays each frame, the same "compute once, share across every
+  // copy" convention every other pattern's own geometry (see PatternGeometry's own comment) already
+  // follows — a single shared base shape point list per frame (baseShapePoints), translated per
+  // particle, rather than each of up to 12 KaleidoscopeCopy instances rebuilding its own copy of this
+  // same work.
+  const particleBucketPaths = useDerivedValue(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions -- read purely to establish
+    // the dependency described above; the tick's own value is never otherwise needed.
+    particleFrameTick.value
+
+    const count = Math.min(Math.round(particleCount.value), particlePositionX.value.length)
+    const size = particleSize.value
+    // Piggybacks on the pattern's own sides prop (already in scope above — see cropClip's own use of
+    // it) rather than a dedicated particleSides field — see useSwirlSettings.tsx's own particleShapes
+    // comment for why beads share this exact live value with whatever pattern is currently active.
+    const sidesValue = sides.value
+
+    // One base point list — and one correctly-sized scratch buffer to translate it into, per particle,
+    // without allocating fresh — per ENABLED shape, not one shared global list the way this used to
+    // work back when particleShape was a single value. shapeBucket below resolves each particle's own
+    // fixed shapeIndex against effectiveShapeCount the exact same way colorBucket already resolves
+    // colorIndex against effectiveBucketCount — see particleShapeIndex's own comment in
+    // useParticleField.ts. A per-shape scratch array (not one shared across every shape) matters here
+    // specifically: reusing a single buffer sized for the largest enabled shape would leave stale
+    // leftover points past a smaller shape's own length when passed whole to addPoly, which only ever
+    // reads exactly the array it's handed, not some separately-tracked "how many of these are real"
+    // count.
+    const effectiveShapeCount = Math.max(1, Math.min(Math.round(particleShapeCount.value), particleShapes.length))
+    const shapePointsByBucket: SkPoint[][] = []
+    const scratchByBucket: SkPoint[][] = []
+    for (let s = 0; s < effectiveShapeCount; s++) {
+      const shapeName = particleShapes[s]
+      const points = shapeName === 'circle' ? [] : baseShapePoints(shapeName, sidesValue, size)
+      shapePointsByBucket.push(points)
+      scratchByBucket.push(points.length > 0 ? new Array(points.length) : [])
+    }
+
+    const effectiveBucketCount = Math.max(1, Math.min(Math.round(particleColorCount.value), MAX_PARTICLE_COLOR_BUCKETS))
+    const fillBuilders = Array.from({ length: MAX_PARTICLE_COLOR_BUCKETS }, () => Skia.PathBuilder.Make())
+
+    // Skipped entirely at width 0 (see useSwirlSettings.tsx's own particleBorderWidth comment for why
+    // that's this feature's own off switch) — "nothing to draw, nothing to pay for", the same
+    // reasoning particlesActive/particleBucketPaths' own null case already uses elsewhere: no point
+    // building a second full set of merged border paths (bucketed independently from fill — see
+    // useParticleField.ts's own borderColorIndex comment for why it can't just reuse the fill bucket)
+    // when KaleidoscopeCopy is about to draw them at zero width anyway.
+    const buildBorders = particleBorderWidth.value > 0
+    const effectiveBorderBucketCount = buildBorders ? Math.max(1, Math.min(Math.round(particleBorderColorCount.value), MAX_PARTICLE_COLOR_BUCKETS)) : 0
+    const borderBuilders = buildBorders ? Array.from({ length: MAX_PARTICLE_COLOR_BUCKETS }, () => Skia.PathBuilder.Make()) : []
+
+    const px = particlePositionX.value
+    const py = particlePositionY.value
+    const ci = particleColorIndex.value
+    const si = particleShapeIndex.value
+    const bi = particleBorderColorIndex.value
+
+    for (let i = 0; i < count; i++) {
+      const colorBucket = ci[i] % effectiveBucketCount
+      const shapeBucket = si[i] % effectiveShapeCount
+      const points = shapePointsByBucket[shapeBucket]
+      if (points.length > 0) {
+        const scratch = scratchByBucket[shapeBucket]
+        for (let j = 0; j < points.length; j++) {
+          scratch[j] = { x: points[j].x + px[i], y: points[j].y + py[i] }
+        }
+        fillBuilders[colorBucket].addPoly(scratch, true)
+        // Same positioned points, added to a second, independently-bucketed builder — a border traces
+        // the exact same outline as its own bead's fill, just possibly landing in a different merged
+        // Path because its own color bucket is unrelated to the fill's (see borderColorIndex's own
+        // comment). addPoly copies these points into the path immediately, so reusing/mutating scratch
+        // for fill and border here, before moving on to the next particle, is safe.
+        if (buildBorders) borderBuilders[bi[i] % effectiveBorderBucketCount].addPoly(scratch, true)
+      } else {
+        fillBuilders[colorBucket].addCircle(px[i], py[i], size)
+        if (buildBorders) borderBuilders[bi[i] % effectiveBorderBucketCount].addCircle(px[i], py[i], size)
+      }
+    }
+
+    return { fill: fillBuilders.map((builder) => builder.detach()), border: borderBuilders.map((builder) => builder.detach()) }
+  })
+
   // 0 mirror lines is the one case with no wedges to speak of (see wedgeAngleDegrees/copyCountForMirrorLines)
   // — a single, unmirrored copy, kept out of the wedge-transform machinery entirely rather than letting
   // it degrade to a rotate(0-degree-wedge) that happens to be a no-op. With no mirroring there's
@@ -364,7 +519,7 @@ export const Spiral = React.memo(function Spiral({ pattern, foregroundColors, ba
           // wedgeContentTransform. That parity is also exactly the checkerboard alternation: adjacent
           // wedges always differ in parity, so colouring by it is already a valid 2-colouring.
           const isAlternate = alternatingActive && copyIndex % 2 === 1
-          return <KaleidoscopeCopy key={copyIndex} copyIndex={copyIndex} wedgeAngleDeg={wedgeAngleDeg} mirrorGap={mirrorGap} active={active} mirrorOriginX={mirrorOriginX} mirrorOriginY={mirrorOriginY} innerTransform={innerTransform} strokeColor={isAlternate ? background : foreground} backgroundFill={alternatingActive ? (isAlternate ? foreground : background) : null} cropClip={cropClip} geometry={geometry} />
+          return <KaleidoscopeCopy key={copyIndex} copyIndex={copyIndex} wedgeAngleDeg={wedgeAngleDeg} mirrorGap={mirrorGap} active={active} mirrorOriginX={mirrorOriginX} mirrorOriginY={mirrorOriginY} innerTransform={innerTransform} particleTransform={particleTransform} strokeColor={isAlternate ? background : foreground} backgroundFill={alternatingActive ? (isAlternate ? foreground : background) : null} cropClip={cropClip} geometry={geometry} patternVisible={patternVisible} particleBucketPaths={particlesActive ? particleBucketPaths : null} particleBorderWidth={particleBorderWidth} particleColors={particleColors} particleBorderColors={particleBorderColors} />
         })}
       </Group>
     )

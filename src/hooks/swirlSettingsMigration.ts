@@ -1,8 +1,9 @@
 import { clamp as clampRange } from '@/constants/clamp'
 import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
+import { PARTICLE_SHAPE_ORDER, ParticleShape } from '@/constants/particleShapes'
 import { PATTERN_ORDER } from '@/constants/patterns'
 import { DASH_STYLE_ORDER } from '@/constants/strokeDash'
-import { defaultSettings, MAX_BOUNCE_FRICTION, MAX_CONTROLS_AUTO_HIDE_SPEED, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CONTROLS_AUTO_HIDE_SPEED, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED } from '@/constants/swirlSettingsRanges'
+import { defaultSettings, MAX_BOUNCE_FRICTION, MAX_CONTROLS_AUTO_HIDE_SPEED, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_FOLLOW_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIC_SENSITIVITY, MAX_MIRROR_GAP, MAX_MIRROR_ROTATION_SPEED, MAX_PARTICLE_BORDER_WIDTH, MAX_PARTICLE_COUNT, MAX_PARTICLE_SIZE, MAX_POLYGON_SIDES, MAX_ROTATION_SPEED, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MAX_ZOOM_SPEED, MIN_BOUNCE_FRICTION, MIN_CONTROLS_AUTO_HIDE_SPEED, MIN_CROP_RADIUS, MIN_CYCLE_SPEED, MIN_FOLLOW_SPEED, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIC_SENSITIVITY, MIN_MIRROR_GAP, MIN_MIRROR_ROTATION_SPEED, MIN_PARTICLE_BORDER_WIDTH, MIN_PARTICLE_COUNT, MIN_PARTICLE_SIZE, MIN_POLYGON_SIDES, MIN_ROTATION_SPEED, MIN_STROKE_WIDTH, MIN_TIGHTNESS, MIN_ZOOM_SPEED } from '@/constants/swirlSettingsRanges'
 
 import { GESTURE_TARGET_ORDER } from './useEpicenter'
 import type { SwirlSettings } from './useSwirlSettings'
@@ -31,6 +32,19 @@ function sanitizeColorList(value: unknown, fallback: string[]): string[] {
   return valid.length > 0 ? valid : fallback
 }
 
+// Same shape as sanitizeColorList above, checked against PARTICLE_SHAPE_ORDER instead of a hex pattern
+// — a retired shape (or garbage) is simply dropped rather than falling the whole list back to default,
+// same as any other per-item validation in this file. Deduped (a plain toggle-list UI, unlike
+// particleColors' own positional swatches, can never itself produce a repeated entry — see
+// usePreviewOptionToggleFabs's own comment — so a duplicate here could only come from a hand-edited or
+// otherwise corrupted storage blob, not a real interaction worth preserving).
+function sanitizeShapeList(value: unknown, fallback: ParticleShape[]): ParticleShape[] {
+  if (!Array.isArray(value)) return fallback
+  const valid = value.filter((item): item is ParticleShape => typeof item === 'string' && PARTICLE_SHAPE_ORDER.includes(item as ParticleShape))
+  const deduped = [...new Set(valid)]
+  return deduped.length > 0 ? deduped : fallback
+}
+
 export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
   try {
     const parsed: unknown = JSON.parse(rawValue)
@@ -57,6 +71,9 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       mirrorClipped?: unknown
       mirrorLeftRight?: unknown
       mirrorTopBottom?: unknown
+      // particleShapes' own old name, from when a bead field only ever had one shape active at a time
+      // instead of a list to randomly pick from — see legacyParticleShape's own comment below.
+      particleShape?: unknown
       solidColor?: unknown
     }
 
@@ -75,6 +92,10 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
     // maps back to the same fixed radius that boolean's "on" state used to render as, only relevant
     // for anyone who happened to have that version open.
     const legacyCropRadiusFromFadeEnabled = typeof persisted.fadeEnabled === 'boolean' ? (persisted.fadeEnabled ? 0.15 : 1) : null
+    // particleShapes replaces the old single particleShape field — a returning user's own one choice
+    // becomes a one-item list, which looks and behaves identically (a single shape enabled) until they
+    // actually turn a second one on.
+    const legacyParticleShape = typeof persisted.particleShape === 'string' && PARTICLE_SHAPE_ORDER.includes(persisted.particleShape as ParticleShape) ? [persisted.particleShape as ParticleShape] : null
 
     return {
       ...defaultSettings,
@@ -99,6 +120,7 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       // If a retirement should ALSO change some other setting, that needs its own dedicated code —
       // a plain fallback here has no way to know what a since-removed pattern used to imply.
       ...(typeof persisted.pattern === 'string' && PATTERN_ORDER.includes(persisted.pattern) ? { pattern: persisted.pattern } : null),
+      ...(typeof persisted.patternVisible === 'boolean' ? { patternVisible: persisted.patternVisible } : null),
       // Same general-fallback approach as pattern above: checked against DASH_STYLE_ORDER, not an
       // enumerated list, so a retired style falls through to the default instead of needing its own
       // migration. legacyDashStyle only kicks in when the new field isn't present at all.
@@ -114,6 +136,12 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.mirrorGap === 'number' ? { mirrorGap: clamp(persisted.mirrorGap, MIN_MIRROR_GAP, MAX_MIRROR_GAP) } : null),
       ...(typeof persisted.mirrorLines === 'number' ? { mirrorLines: clampInt(persisted.mirrorLines, MIN_MIRROR_LINES, MAX_MIRROR_LINES) } : legacyMirrorLines != null ? { mirrorLines: legacyMirrorLines } : null),
       ...(typeof persisted.mirrorRotationSpeed === 'number' ? { mirrorRotationSpeed: clamp(persisted.mirrorRotationSpeed, MIN_MIRROR_ROTATION_SPEED, MAX_MIRROR_ROTATION_SPEED) } : null),
+      ...(persisted.particleBorderColors !== undefined ? { particleBorderColors: sanitizeColorList(persisted.particleBorderColors, defaultSettings.particleBorderColors) } : null),
+      ...(typeof persisted.particleBorderWidth === 'number' ? { particleBorderWidth: clamp(persisted.particleBorderWidth, MIN_PARTICLE_BORDER_WIDTH, MAX_PARTICLE_BORDER_WIDTH) } : null),
+      ...(persisted.particleColors !== undefined ? { particleColors: sanitizeColorList(persisted.particleColors, defaultSettings.particleColors) } : null),
+      ...(typeof persisted.particleCount === 'number' ? { particleCount: clampInt(persisted.particleCount, MIN_PARTICLE_COUNT, MAX_PARTICLE_COUNT) } : null),
+      ...(persisted.particleShapes !== undefined ? { particleShapes: sanitizeShapeList(persisted.particleShapes, defaultSettings.particleShapes) } : legacyParticleShape ? { particleShapes: legacyParticleShape } : null),
+      ...(typeof persisted.particleSize === 'number' ? { particleSize: clamp(persisted.particleSize, MIN_PARTICLE_SIZE, MAX_PARTICLE_SIZE) } : null),
       ...(typeof persisted.polygonSides === 'number' ? { polygonSides: clampInt(persisted.polygonSides, MIN_POLYGON_SIDES, MAX_POLYGON_SIDES) } : null),
       // The old boolean `reversed` field is gone — direction now lives in rotationSpeed/zoomSpeed's
       // own sign (see their declarations above) — so a persisted true/false here just falls through
