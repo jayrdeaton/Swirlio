@@ -26,6 +26,13 @@ const RANDOMIZE_MAX_PARTICLE_BORDER_COLORS = 3
 // PARTICLE_SHAPE_ORDER) rather than letting a reroll enable every single one at once, which read as
 // too busy/undifferentiated a mix to actually register as "these particular shapes" on screen.
 const RANDOMIZE_MAX_PARTICLE_SHAPES = 3
+// The particleCount reroll's own floor — deliberately 1, not MIN_PARTICLE_COUNT (0). 0 is that
+// setting's own dedicated off switch (see swirlSettingsRanges.ts's own MIN_PARTICLE_COUNT comment),
+// a distinct, deliberate action (an explicit toggle/slider drag to 0), not a look a "give me a new
+// bead arrangement" reroll should ever land on by chance — someone randomizing beads is, by
+// definition, already engaging with the feature, so a reroll silently switching it back off reads as
+// a bug, not a surprise.
+const MIN_RANDOMIZE_PARTICLE_COUNT = 1
 
 // Broad: everything that's purely "what does this look like" gets rerolled — colors, pattern,
 // sides/points/petals, dash style, mirror count, its wedge gap, and its alternating-colors toggle,
@@ -201,8 +208,9 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
       // Skewed toward its own low-side default (see DEFAULT_PARTICLE_COUNT in swirlSettingsRanges.ts),
       // the same shape bounceFriction's own one-sided [0,5] range already uses — a reroll should
       // usually land on a modest, comfortable bead count, occasionally reaching all the way to
-      // MAX_PARTICLE_COUNT.
-      { group: 'particles', audioDriven: false, reroll: () => setParticleCount(Math.round(skewedInRange(MIN_PARTICLE_COUNT, MAX_PARTICLE_COUNT, true))) },
+      // MAX_PARTICLE_COUNT. Floors at MIN_RANDOMIZE_PARTICLE_COUNT (1), not MIN_PARTICLE_COUNT (0) —
+      // see that constant's own comment for why a reroll should never turn the whole layer off.
+      { group: 'particles', audioDriven: false, reroll: () => setParticleCount(Math.max(MIN_RANDOMIZE_PARTICLE_COUNT, Math.round(skewedInRange(MIN_PARTICLE_COUNT, MAX_PARTICLE_COUNT, true)))) },
       { group: 'particles', audioDriven: false, reroll: () => setParticleSize(skewedInRange(MIN_PARTICLE_SIZE, MAX_PARTICLE_SIZE, true)) },
       // Same "how many, which random hexes" shape as the particleColors unit above, just against
       // particleBorderColors instead — a fully independent list (see useSwirlSettings.tsx's own

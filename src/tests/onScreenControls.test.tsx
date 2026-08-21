@@ -1085,6 +1085,56 @@ describe('OnScreenControls', () => {
       expect(fanItemOpacity(screen, 'mirror')).toBe(0)
     })
 
+    // onRecenter itself is state-aware (index.tsx's own recenterGestureTarget) — the same call, fired
+    // again on every further TRANSPORT_LONG_PRESS_MS, is what lets a single continued hold walk through
+    // its whole recentre/stop/reorient cascade without ever releasing. This only checks that the calls
+    // themselves keep coming and then stop on release — the cascade's own stage logic is covered in
+    // index.tsx's own tests (swirlScreen.gesture.test.tsx).
+    it('keeps calling onRecenter every further TRANSPORT_LONG_PRESS_MS while the hold continues, and stops once released', async () => {
+      const onRecenter = jest.fn()
+      await renderControls({ onRecenter })
+
+      await fanBegin()
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(400)
+      })
+      expect(onRecenter).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(400)
+      })
+      expect(onRecenter).toHaveBeenCalledTimes(2)
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(400)
+      })
+      expect(onRecenter).toHaveBeenCalledTimes(3)
+
+      await fanFinalize()
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000)
+      })
+      expect(onRecenter).toHaveBeenCalledTimes(3)
+    })
+
+    // MAX_RECENTER_REPEATS is OnScreenControls' own private constant (8), duplicated here as a literal
+    // like TRANSPORT_LONG_PRESS_MS already is throughout this file — a hard backstop so a touch that's
+    // never released (the case that actually surfaced this — see MAX_RECENTER_REPEATS' own comment)
+    // can't leave the repeat timer scheduling itself forever.
+    it('stops repeating once MAX_RECENTER_REPEATS is reached, even if the touch is still held', async () => {
+      const onRecenter = jest.fn()
+      await renderControls({ onRecenter })
+
+      await fanBegin()
+      await act(async () => {
+        // The first fire, plus up to 8 further repeats = 9 total — comfortably more time than that
+        // (15 ticks) confirms it actually stops rather than merely not having gotten there yet.
+        await jest.advanceTimersByTimeAsync(400 * 15)
+      })
+
+      expect(onRecenter).toHaveBeenCalledTimes(9)
+    })
+
     it('does not recentre if released before the hold reaches TRANSPORT_LONG_PRESS_MS', async () => {
       const onRecenter = jest.fn()
       await renderControls({ onRecenter })

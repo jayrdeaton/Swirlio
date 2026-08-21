@@ -220,10 +220,16 @@ jest.mock('react-native-gesture-handler', () => {
       g.__handlers.end = cb
       return g
     }
-    // Every RNGH builder method is a chainable no-op — only the handlers are worth recording.
-    const chainable = ['activeOffsetX', 'activeOffsetY', 'averageTouches', 'enabled', 'failOffsetX', 'failOffsetY', 'maxDelay', 'maxDistance', 'maxDuration', 'maxPointers', 'minDistance', 'minDuration', 'minPointers', 'numberOfPointers', 'numberOfTaps', 'requireExternalGestureToFail', 'runOnJS']
+    // Every RNGH builder method is a chainable no-op, but its argument is still recorded onto
+    // __config — assertions on a gesture's own configured behavior (e.g. particleGatherGesture's
+    // shouldCancelWhenOutside/maxDistance in useParticleField.ts) need this, not just __handlers.
+    g.__config = {}
+    const chainable = ['activeOffsetX', 'activeOffsetY', 'averageTouches', 'enabled', 'failOffsetX', 'failOffsetY', 'maxDelay', 'maxDistance', 'maxDuration', 'maxPointers', 'minDistance', 'minDuration', 'minPointers', 'numberOfPointers', 'numberOfTaps', 'requireExternalGestureToFail', 'runOnJS', 'shouldCancelWhenOutside']
     chainable.forEach((method) => {
-      g[method] = () => g
+      g[method] = (arg: any) => {
+        g.__config[method] = arg
+        return g
+      }
     })
     if (!registry[type]) registry[type] = []
     registry[type].push(g)

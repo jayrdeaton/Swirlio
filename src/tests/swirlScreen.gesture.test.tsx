@@ -642,12 +642,13 @@ describe('SwirlScreen gestures', () => {
     })
 
     const props = getLastSpiralProps()
-    // Dragged way past the top-right corner in both axes — lands exactly on the real screen edge in
-    // each (epicenterX/Y is a fraction of window width/height from center, so ±0.5 is the literal
-    // edge), not at some reduced circular distance from center. See patternClamp's own comment in
-    // useEpicenter.ts: the only boundary is the physical screen rectangle now.
-    expect(props.epicenterX.value).toBeCloseTo(0.5, 5)
-    expect(props.epicenterY.value).toBeCloseTo(-0.5, 5)
+    // Dragged way past the top-right corner in both axes — lands on the real screen edge's own
+    // rounded corner (see CORNER_RADIUS_FRACTION's own comment in useDragPointPhysics.ts), not at the
+    // old smaller *circular* MAX_OFFSET distance from center, and not at the literal (±0.5, ±0.5)
+    // vertex either, now that the corner itself is an arc rather than a hard point. See patternClamp's
+    // own comment in useEpicenter.ts: the boundary is the physical screen rectangle, corners rounded.
+    expect(props.epicenterX.value).toBeCloseTo(0.4193162, 5)
+    expect(props.epicenterY.value).toBeCloseTo(-0.488169, 5)
   })
 
   it('pulls the epicenter to a one-finger long press, ready to drag from there', async () => {
@@ -1490,6 +1491,25 @@ describe('SwirlScreen gestures', () => {
       expect(typeof cropShaped).toBe('boolean')
       expect(typeof holeShaped).toBe('boolean')
     }
+  })
+
+  // Regression guard: particleCount's own reroll is skewed toward MIN_PARTICLE_COUNT (0, see
+  // useRerollUnits.tsx's own MIN_RANDOMIZE_PARTICLE_COUNT comment) — Math.random pinned to 0 lands
+  // skewedInRange at its lowest possible draw, which used to round straight down to 0 particles,
+  // silently switching the whole layer back off from a reroll that was supposed to just give it a new
+  // look. Floors at 1 instead now.
+  it('never rerolls particleCount down to 0, even at the lowest possible draw', async () => {
+    await renderScreen()
+    const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
+    const randomize = shakeCall[1] as () => void
+
+    const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0)
+    await act(async () => {
+      randomize()
+    })
+    randomSpy.mockRestore()
+
+    expect(setParticleCount).toHaveBeenLastCalledWith(1)
   })
 
   // Explicitly NOT touched by randomize — deliberate tuning (speed), gesture-feel physics, fixed
@@ -2792,7 +2812,10 @@ describe('SwirlScreen gestures', () => {
     // useDragPointPhysics.ts's own defaultClamp) that fell well short of the real corners on a diagonal
     // drag, even though the pattern epicentre's own boundary already reached them (see "clamps the
     // epicenter to the actual screen edges" above). defaultClamp now clamps each axis independently to
-    // the same real screen edge patternClamp uses, so a diagonal drag reaches the actual corner here too.
+    // the same real screen edge patternClamp uses (corners rounded on both — see
+    // CORNER_RADIUS_FRACTION's own comment in useDragPointPhysics.ts), so a diagonal drag reaches the
+    // actual corner's own arc here too, the same normalized-space distance from center as
+    // clampToRoundedRect's own corner math resolves to for any axis-aligned-square boundary.
     it("in 'mirror' mode, dragging reaches the real screen corner, not a reduced circular distance from center", async () => {
       const { width, height } = Dimensions.get('window')
       mockSettings({ mirrorLines: 4 })
@@ -2808,8 +2831,8 @@ describe('SwirlScreen gestures', () => {
       })
 
       const props = getLastSpiralProps()
-      expect(props.mirrorAnchorX.value).toBeCloseTo(0.5, 5)
-      expect(props.mirrorAnchorY.value).toBeCloseTo(-0.5, 5)
+      expect(props.mirrorAnchorX.value).toBeCloseTo(0.4531371, 5)
+      expect(props.mirrorAnchorY.value).toBeCloseTo(-0.4531371, 5)
     })
 
     // Same per-target split useEpicenter.ts already applies to drag/pinch/rotate gates which point(s)
@@ -2903,7 +2926,9 @@ describe('SwirlScreen gestures', () => {
     })
 
     // Same fix as the mirror anchor's own corner test above — gravityHandle shares the exact same
-    // defaultClamp, so it reaches the real screen corner too, not the old smaller circular radius.
+    // defaultClamp, so it reaches the real screen corner's own arc too, not the old smaller circular
+    // radius (and, same as the mirror test, not the literal hard vertex either — see
+    // CORNER_RADIUS_FRACTION's own comment in useDragPointPhysics.ts).
     it("in 'gravity' mode, dragging reaches the real screen corner, same as pattern and mirror", async () => {
       const { width, height } = Dimensions.get('window')
       await renderScreen()
@@ -2916,8 +2941,8 @@ describe('SwirlScreen gestures', () => {
       })
 
       const props = getLastSpiralProps()
-      expect(props.gravityCenterX.value).toBeCloseTo(0.5, 5)
-      expect(props.gravityCenterY.value).toBeCloseTo(-0.5, 5)
+      expect(props.gravityCenterX.value).toBeCloseTo(0.4531371, 5)
+      expect(props.gravityCenterY.value).toBeCloseTo(-0.4531371, 5)
     })
 
     // A gentle (zero-velocity) release away from center has nothing to throw it further, so it just
@@ -3791,6 +3816,61 @@ describe('SwirlScreen gestures', () => {
 
         expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
         expect(getLastSpiralProps().epicenterX.value).toBe(epicenterBefore)
+      })
+
+      // Once position is already centered, a further onRecenter moves on to easing rotation speed down
+      // to 0 instead — see recenterGestureTarget's own comment in index.tsx. "Not abrupt" is the whole
+      // point of this stage (the user's own ask), so the one thing worth locking in here is that
+      // setRotationSpeed/setMirrorRotationSpeed is NOT what a slow release/stopAndSnapGesture already
+      // does (an instant, synchronous commit) — this file's own withTiming mock never invokes its
+      // callback (see jest.setup.ts), so an eased commit reads as "not called yet," a genuinely
+      // different, observable outcome from an abrupt one.
+      it('eases rotation speed toward 0 instead of committing it abruptly, once position is already centered', async () => {
+        mockSettings({ rotationSpeed: 2 })
+        await renderScreen()
+        expect(getLastSpiralProps().epicenterX.value).toBe(0)
+
+        await act(async () => {
+          getLastControlsProps().onRecenter()
+        })
+
+        expect(setRotationSpeed).not.toHaveBeenCalled()
+      })
+
+      it('eases mirrorRotationSpeed down to 0 the ordinary, already-eased way (setMirrorRotationSpeed(0)) once the mirror anchor is already centered', async () => {
+        mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 2 })
+        await renderScreen()
+        await selectGestureTarget('mirror')
+        expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
+
+        await act(async () => {
+          getLastControlsProps().onRecenter()
+        })
+
+        // Unlike pattern's own hand-rolled ease (see the test above), mirror's own rotation rate
+        // already eases automatically once mirrorRotationSpeed lands at 0 (useLoopingProgress's own
+        // frozen branch — see PAUSE_EASE_DURATION_MS's own comment), so the commit itself is
+        // synchronous here — there's no separate deferred-persist trick needed for mirror the way
+        // pattern's baseRotationRate needs one.
+        expect(setMirrorRotationSpeed).toHaveBeenCalledWith(0)
+      })
+
+      // Gravity has no rotation of its own to cascade through — a long press always just recentres the
+      // well, exactly as it always did, regardless of how many times it's pressed in a row.
+      it('keeps recentring the gravity well on every press, with no further stage to cascade into', async () => {
+        mockSettings({ gravity: 2 })
+        await renderScreen()
+        await selectGestureTarget('gravity')
+
+        await act(async () => {
+          getLastControlsProps().onRecenter()
+        })
+        await act(async () => {
+          getLastControlsProps().onRecenter()
+        })
+
+        expect(setRotationSpeed).not.toHaveBeenCalled()
+        expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
       })
     })
 

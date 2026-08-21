@@ -53,6 +53,15 @@ const FAN_CAPTURE_RADIUS_PX = 42
 // blur for Cycle shape, especially with only 3–8 possible values — MIN/MAX_POLYGON_SIDES in
 // useSwirlSettings.tsx — to land on) so each step is actually watchable landing on its own value.
 const HOLD_REPEAT_MS = 400
+// Hard backstop on armRecenterRepeat's own re-arming (see its own comment) — recenterGestureTarget's
+// cascade is at most 3 real stages (recentre, ease rotation to a stop, reorient), each of which is
+// idempotent once settled, so continuing to fire well past that is never wrong, just pointless. Without
+// a cap, a touch that's never released (a real finger stuck under something, or — the case that
+// actually surfaced this — any test that simulates pressing the primary FAB down without ever
+// simulating a release) leaves armRecenterRepeat scheduling itself forever, which under real timers
+// never lets the process exit cleanly. 8 reps (3.2s of continuous holding) is generous headroom past 3
+// stages without being so high a genuinely-abandoned hold keeps ticking for long.
+const MAX_RECENTER_REPEATS = 8
 const FADE_DURATION_MS = 250
 // How far the collapsible siblings (see siblingsFadeStyle below) nudge upward while fading out — a
 // modest cue toward "tucking away behind the toggle" above them, not a literal distance to the
@@ -430,6 +439,51 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // still from the very start." A single ref is enough: only one zone is ever dwell-eligible at a time,
   // and handlePhaseChanged below always clears whatever was pending before starting a new one.
   const fanDwellTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // A continued hold on the primary FAB, past the first dwell fire below — separate from
+  // fanDwellTimeout, not a second use of the same ref: that first fire always closes the fan
+  // (onGestureFanOpenChange(false)), which the belt-and-suspenders effect further down reacts to by
+  // clearing fanDwellTimeout — if a re-armed repeat lived in that same ref, this effect would race it
+  // and clear the very next repeat the instant the fan finishes closing, killing the cascade after
+  // exactly one extra tick. A genuinely separate ref sidesteps that race entirely; see armRecenterRepeat
+  // below for what actually schedules onto it, and its own comment for why repeating the exact same
+  // onRecenter call is what walks a held-through touch across recenterGestureTarget's own
+  // recentre/stop/reorient cascade (see index.tsx's own comment) without this file needing to know
+  // anything about which stage is next.
+  const recenterRepeatTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // How many times armRecenterRepeat has fired for the touch currently in progress — reset alongside
+  // dwellFiredRef in handleFanBegin (a fresh touch always gets a fresh MAX_RECENTER_REPEATS budget),
+  // checked against MAX_RECENTER_REPEATS below before ever re-arming.
+  const recenterRepeatCountRef = useRef(0)
+  const clearRecenterRepeat = useCallback(() => {
+    if (!recenterRepeatTimeout.current) return
+    clearTimeout(recenterRepeatTimeout.current)
+    recenterRepeatTimeout.current = null
+  }, [])
+  // Keeps calling onRecenter every further TRANSPORT_LONG_PRESS_MS for as long as the same touch stays
+  // on the primary FAB without releasing or drifting off it — onRecenter itself (index.tsx's
+  // recenterGestureTarget) is state-aware, so each successive call just does whichever of
+  // recentre/stop/reorient isn't already settled, the same progression a release-then-press-again would
+  // walk through one tick at a time. Deliberately doesn't touch onGestureFanOpenChange at all (the first
+  // dwell fire below already closed it) or dwellFiredRef (already true from that same first fire) —
+  // this is purely "keep advancing the cascade," nothing about the fan's own open/closed state. Stops
+  // re-arming once MAX_RECENTER_REPEATS is reached — see that constant's own comment. unref() (guarded
+  // — jsdom's own setTimeout returns a plain number with no such method, only real Node timers have
+  // it) tells the process this timer alone shouldn't keep it alive: harmless for real usage (the timer
+  // still fires exactly on schedule either way, and every real touch clears it well before
+  // MAX_RECENTER_REPEATS is ever reached regardless), but it's what stops a test that presses the
+  // primary FAB down and never simulates a release (there are many, none of which have anything to do
+  // with this cascade) from leaving Jest waiting out its own full duration before the process can exit.
+  const armRecenterRepeat = useCallback(() => {
+    if (recenterRepeatCountRef.current >= MAX_RECENTER_REPEATS) return
+    recenterRepeatCountRef.current += 1
+    recenterRepeatTimeout.current = setTimeout(() => {
+      notification()
+      onRecenter()
+      armRecenterRepeat()
+    }, TRANSPORT_LONG_PRESS_MS)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Node's Timeout has unref(); jsdom's plain number doesn't, hence the guard rather than the real type
+    ;(recenterRepeatTimeout.current as any)?.unref?.()
+  }, [notification, onRecenter])
   // Whether the fan was already open the moment this touch landed — a plain tap has to tell "opening
   // it" from "closing it back up" apart at release time (see handleFanFinalize below), the exact same
   // toggle the old onPress={() => onGestureFanOpenChange(!gestureFanOpen)} used to give it, just decided
@@ -466,6 +520,11 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   const handleFanZoneChanged = useCallback(
     (zone: number) => {
       clearFanDwell()
+      // Drifting off the primary FAB entirely (onto a wedge, or into the dead zone) always ends any
+      // recenter cascade still in progress — armRecenterRepeat only ever means "the same touch is still
+      // sitting on the primary FAB," which is no longer true the instant the zone changes to anything
+      // else.
+      clearRecenterRepeat()
       if (zone >= 0) {
         const target = GESTURE_TARGET_ORDER[zone]
         selection()
@@ -487,10 +546,11 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
           notification()
           onRecenter()
           onGestureFanOpenChange(false)
+          armRecenterRepeat()
         }, TRANSPORT_LONG_PRESS_MS)
       }
     },
-    [applyTarget, clearFanDwell, notification, onGestureFanOpenChange, onRandomizeGestureTarget, onRecenter, selection]
+    [applyTarget, armRecenterRepeat, clearFanDwell, clearRecenterRepeat, notification, onGestureFanOpenChange, onRandomizeGestureTarget, onRecenter, selection]
   )
 
   // Touch-down on the primary FAB — opens the fan immediately (rather than waiting for a completed tap)
@@ -506,6 +566,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     appliedTargetRef.current = current
     wasAlreadyOpenRef.current = gestureFanOpen
     dwellFiredRef.current = false
+    recenterRepeatCountRef.current = 0
     selection()
     onReveal()
     onGestureFanOpenChange(true)
@@ -520,13 +581,17 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // whether this touch opened the fan or found it already open.
   const handleFanFinalize = useCallback(() => {
     clearFanDwell()
+    // Ends any recenter cascade still in progress — the same "this touch is over" boundary
+    // clearFanDwell already exists for, just for the separate repeat timer armRecenterRepeat uses (see
+    // its own comment for why it can't share fanDwellTimeout/clearFanDwell directly).
+    clearRecenterRepeat()
     if (dwellFiredRef.current) return
     if (fanZone.value >= 0) {
       onGestureFanOpenChange(false)
       return
     }
     onGestureFanOpenChange(!wasAlreadyOpenRef.current)
-  }, [clearFanDwell, fanZone, onGestureFanOpenChange])
+  }, [clearFanDwell, clearRecenterRepeat, fanZone, onGestureFanOpenChange])
 
   // Belt-and-suspenders for the fan closing through some other path entirely (closeFanFirst, pressing a
   // group trigger mid-drag) — gestureFanOpen going false is the one signal guaranteed to cover every one

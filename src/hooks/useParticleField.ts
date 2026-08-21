@@ -394,11 +394,19 @@ export function useParticleField(
   // few pixels — which snaps gatherActive back to false and drops the spring pull entirely while the
   // finger is still down, reading as "gathers fine, then I lose control the moment I move." A single
   // shared touch can't physically travel further than the screen's own diagonal, so any value comfortably
-  // past that (MASK_EXTENT-style headroom, see kaleidoscope.ts) makes this cancellation path
-  // unreachable in practice, leaving only a genuine finger-lift to end the gesture.
+  // past that (MASK_EXTENT-style headroom, see kaleidoscope.ts) makes maxDistance's own cancellation path
+  // unreachable in practice — but LongPressGesture's constructor separately defaults
+  // shouldCancelWhenOutside to true, a second, independent cancellation path (native checks
+  // shouldCancelWhenOutside && !containsPointInView, ORed with the maxDistance check above, not gated by
+  // it) that maxDistance does nothing to close: dragging the gathered cluster past the edge of whatever
+  // view this gesture is attached to — exactly what throwing toward an edge tends to do — cancels the
+  // long press through this other path just as dead as an unbounded maxDistance would have. Explicitly
+  // turned off for the same reason maxDistance is generous: once gathered, the throw needs to survive
+  // the finger going anywhere, including off the edge of the screen.
   const particleGatherGesture = Gesture.LongPress()
     .minDuration(GATHER_LONG_PRESS_MS)
     .maxDistance(100000)
+    .shouldCancelWhenOutside(false)
     .onStart((event) => {
       if (!targetsParticles) return
       updateTouchTarget(event.x, event.y)

@@ -74,9 +74,49 @@ const BOUNCE_HAPTIC_MIN_INTERVAL = 0.06
 // own comment for the fuller version of this reasoning).
 export type DragClamp = (nextX: number, nextY: number, currentX: number, currentY: number) => { x: number; y: number }
 
+// How far a boundary's own corner gets rounded off, as a fraction of that boundary's full width/height
+// — shared by defaultClamp/defaultBounceBoundary below (applied against SCREEN_EDGE_OFFSET's own
+// normalized extent) and patternClamp/patternBounceBoundary's own corner radius in useEpicenter.ts
+// (applied in real screen pixels instead), so every draggable point's boundary rounds by the same
+// visual proportion regardless of which space it's actually computed in. A hard 90° corner let a
+// pushing (negative-gravity) well pin a point exactly in the corner: two perpendicular walls each only
+// ever reflect the velocity component running straight into them, so a push aimed squarely at the
+// vertex has no wall willing to redirect any of it sideways. Rounding the corner gives that push an
+// actual curved surface to glance off, same as any other point along the boundary.
+export const CORNER_RADIUS_FRACTION = 0.16
+
+// Clamps (x, y) into a rectangle whose four corners are cut to a quarter-circle of the given radius,
+// rather than a hard vertex — the position half of the rounded-corner boundary described above.
+// Everywhere except the four corner cells this is just an ordinary per-axis clamp (and stays exactly
+// that when radius is 0, which is what makes this a strict generalization of the old plain-rectangle
+// clamp rather than a separate behavior). Folds into the first quadrant (abs + sign) so a point
+// approaching a corner from any angle — including from well outside the rect entirely, not just a
+// point already inside it — lands on the arc in the direction it actually came from, rather than every
+// out-of-bounds corner point collapsing onto the same 45°.
+export function clampToRoundedRect(x: number, y: number, minX: number, maxX: number, minY: number, maxY: number, radius: number): { x: number; y: number } {
+  'worklet'
+  const rectCenterX = (minX + maxX) / 2
+  const rectCenterY = (minY + maxY) / 2
+  const coreHalfWidth = (maxX - minX) / 2 - radius
+  const coreHalfHeight = (maxY - minY) / 2 - radius
+  const signX = x < rectCenterX ? -1 : 1
+  const signY = y < rectCenterY ? -1 : 1
+  const absX = Math.abs(x - rectCenterX)
+  const absY = Math.abs(y - rectCenterY)
+  if (absX <= coreHalfWidth || absY <= coreHalfHeight) {
+    return { x: clamp(x, minX, maxX), y: clamp(y, minY, maxY) }
+  }
+  const dx = absX - coreHalfWidth
+  const dy = absY - coreHalfHeight
+  const dist = Math.hypot(dx, dy)
+  if (dist <= radius) return { x, y }
+  const scale = radius / dist
+  return { x: rectCenterX + signX * (coreHalfWidth + dx * scale), y: rectCenterY + signY * (coreHalfHeight + dy * scale) }
+}
+
 export const defaultClamp: DragClamp = (nextX, nextY) => {
   'worklet'
-  return { x: clamp(nextX, -SCREEN_EDGE_OFFSET, SCREEN_EDGE_OFFSET), y: clamp(nextY, -SCREEN_EDGE_OFFSET, SCREEN_EDGE_OFFSET) }
+  return clampToRoundedRect(nextX, nextY, -SCREEN_EDGE_OFFSET, SCREEN_EDGE_OFFSET, -SCREEN_EDGE_OFFSET, SCREEN_EDGE_OFFSET, SCREEN_EDGE_OFFSET * 2 * CORNER_RADIUS_FRACTION)
 }
 
 // What the release-velocity bounce (see bounceFrame below) reflects off is pluggable for exactly the
@@ -88,13 +128,14 @@ export const defaultClamp: DragClamp = (nextX, nextY) => {
 // velocity component crossed — a real "bounced off a wall" bounce, not an inelastic stop.
 export type BounceBoundary = (nextX: number, nextY: number, velocityX: number, velocityY: number) => { x: number; y: number; velocityX: number; velocityY: number; bounced: boolean }
 
-// The one piece of "bounce off a wall" math every boundary in this app actually needs, factored out
-// so patternBounceBoundary (pixel space, wedge-corrected, reflecting off [0, width]/[0, height]) and
-// defaultBounceBoundary directly below (normalized space, reflecting off ±SCREEN_EDGE_OFFSET) apply
-// the exact same reflection to a single axis rather than each hand-rolling their own copy — the two
-// used to diverge (a different extent, and defaultClamp's own live-drag half used a circular rescale
-// instead of this same per-axis clamp), which is what let a mirror/gravity drag get radially capped
-// well short of the real corners a diagonal pattern drag could already reach.
+// The one piece of "bounce off a straight wall" math every boundary in this app actually needs,
+// factored out so patternBounceBoundary (pixel space, wedge-corrected) and defaultBounceBoundary
+// directly below (normalized space, reflecting off ±SCREEN_EDGE_OFFSET) apply the exact same
+// reflection to a single axis rather than each hand-rolling their own copy — the two used to diverge (a
+// different extent, and defaultClamp's own live-drag half used a circular rescale instead of this same
+// per-axis clamp), which is what let a mirror/gravity drag get radially capped well short of the real
+// corners a diagonal pattern drag could already reach. Both now route the four corner cells through
+// reflectOffRoundedRect instead, which falls back to exactly this per-axis math everywhere else.
 export function reflectOffAxis(value: number, velocity: number, min: number, max: number): { value: number; velocity: number; bounced: boolean } {
   'worklet'
   if (value > max) return { value: max - (value - max), velocity: -velocity, bounced: true }
@@ -102,11 +143,48 @@ export function reflectOffAxis(value: number, velocity: number, min: number, max
   return { value, velocity, bounced: false }
 }
 
+// The curved-corner counterpart to reflectOffAxis above — used by defaultBounceBoundary below and
+// patternBounceBoundary in useEpicenter.ts the same way clampToRoundedRect generalizes plain clamp for
+// the live-drag half of the same boundary. Outside the four corner cells this reduces to exactly
+// reflectOffAxis per axis (and, same as clampToRoundedRect, degenerates to the old hard-corner
+// rectangle at radius 0). Inside a corner cell, once the point is actually past the arc, this reflects
+// the velocity about the arc's own outward normal at that point instead of an axis — the one piece of
+// "bounced off a *curved* wall" math a corner needs that a straight edge doesn't.
+export function reflectOffRoundedRect(x: number, y: number, vx: number, vy: number, minX: number, maxX: number, minY: number, maxY: number, radius: number): { x: number; y: number; velocityX: number; velocityY: number; bounced: boolean } {
+  'worklet'
+  const rectCenterX = (minX + maxX) / 2
+  const rectCenterY = (minY + maxY) / 2
+  const coreHalfWidth = (maxX - minX) / 2 - radius
+  const coreHalfHeight = (maxY - minY) / 2 - radius
+  const signX = x < rectCenterX ? -1 : 1
+  const signY = y < rectCenterY ? -1 : 1
+  const absX = Math.abs(x - rectCenterX)
+  const absY = Math.abs(y - rectCenterY)
+  if (absX <= coreHalfWidth || absY <= coreHalfHeight) {
+    const rx = reflectOffAxis(x, vx, minX, maxX)
+    const ry = reflectOffAxis(y, vy, minY, maxY)
+    return { x: rx.value, y: ry.value, velocityX: rx.velocity, velocityY: ry.velocity, bounced: rx.bounced || ry.bounced }
+  }
+  const dx = absX - coreHalfWidth
+  const dy = absY - coreHalfHeight
+  const dist = Math.hypot(dx, dy)
+  if (dist <= radius) return { x, y, velocityX: vx, velocityY: vy, bounced: false }
+  const nx = (signX * dx) / dist
+  const ny = (signY * dy) / dist
+  const velocityDotNormal = vx * nx + vy * ny
+  const scale = radius / dist
+  return {
+    x: rectCenterX + signX * (coreHalfWidth + dx * scale),
+    y: rectCenterY + signY * (coreHalfHeight + dy * scale),
+    velocityX: vx - 2 * velocityDotNormal * nx,
+    velocityY: vy - 2 * velocityDotNormal * ny,
+    bounced: true
+  }
+}
+
 export const defaultBounceBoundary: BounceBoundary = (nextX, nextY, velocityX, velocityY) => {
   'worklet'
-  const rx = reflectOffAxis(nextX, velocityX, -SCREEN_EDGE_OFFSET, SCREEN_EDGE_OFFSET)
-  const ry = reflectOffAxis(nextY, velocityY, -SCREEN_EDGE_OFFSET, SCREEN_EDGE_OFFSET)
-  return { x: rx.value, y: ry.value, velocityX: rx.velocity, velocityY: ry.velocity, bounced: rx.bounced || ry.bounced }
+  return reflectOffRoundedRect(nextX, nextY, velocityX, velocityY, -SCREEN_EDGE_OFFSET, SCREEN_EDGE_OFFSET, -SCREEN_EDGE_OFFSET, SCREEN_EDGE_OFFSET, SCREEN_EDGE_OFFSET * 2 * CORNER_RADIUS_FRACTION)
 }
 
 // Whether a point is genuinely at rest with respect to every pull currently acting on it (gravity's
@@ -190,7 +268,11 @@ export type DragPointPhysics = {
 // existing mechanism (index.tsx's effectiveGravityCenterX/Y substitutes tilt's position outright rather
 // than pulling toward it) — only the pattern epicentre and mirror anchor (useEpicenter.ts) get a real,
 // reactive tiltStrength, nonzero exactly while each is the active gesture target.
-export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity: SharedValue<number>, followSpeed: SharedValue<number>, onBounce?: () => void, clamp: DragClamp = defaultClamp, bounceBoundary: BounceBoundary = defaultBounceBoundary, gravityCenterX?: SharedValue<number>, gravityCenterY?: SharedValue<number>, tiltStrength?: SharedValue<number>, tiltCenterX?: SharedValue<number>, tiltCenterY?: SharedValue<number>): DragPointPhysics {
+// Whether this point's own ambient gravity/tilt/bounce simulation is allowed to run at all right now
+// — see the `active` param below. undefined (every caller before this param existed, and the gravity
+// handle's own call today) means always-on; it has no visibility/wedge-count concept of its own to be
+// inactive by.
+export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity: SharedValue<number>, followSpeed: SharedValue<number>, onBounce?: () => void, clamp: DragClamp = defaultClamp, bounceBoundary: BounceBoundary = defaultBounceBoundary, gravityCenterX?: SharedValue<number>, gravityCenterY?: SharedValue<number>, tiltStrength?: SharedValue<number>, tiltCenterX?: SharedValue<number>, tiltCenterY?: SharedValue<number>, active?: SharedValue<boolean>): DragPointPhysics {
   const x = useSharedValue(0)
   const y = useSharedValue(0)
   // The bounce's own live velocity, independent of the gesture's (which only exists mid-drag) —
@@ -231,6 +313,10 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
   const resolvedTiltStrength = tiltStrength ?? fallbackTiltStrength
   const resolvedTiltCenterX = tiltCenterX ?? fallbackTiltCenterX
   const resolvedTiltCenterY = tiltCenterY ?? fallbackTiltCenterY
+  // Same optional/fallback shape as gravityCenterX/Y and tiltStrength above, defaulting to "always
+  // active" for callers with nothing of their own to gate it.
+  const fallbackActive = useSharedValue(true)
+  const resolvedActive = active ?? fallbackActive
 
   // Set in glideTo, cleared at the top of startBounce/recenter — guards the ambient-activation reaction
   // below from fighting a live finger-drag: glideTo re-targets a spring at the live touch position
@@ -239,7 +325,7 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
   const isDragging = useSharedValue(false)
 
   useFrameCallback((frameInfo) => {
-    if (!bounceActive.value) return
+    if (!bounceActive.value || !resolvedActive.value) return
     const deltaMs = frameInfo.timeSincePreviousFrame
     if (deltaMs === null) return
     const deltaSeconds = deltaMs / 1000
@@ -294,9 +380,31 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
   // Skipped entirely mid-drag (isDragging) — glideTo already stops bounceActive dead for the same
   // reason, and a live pan gesture's glideTo calls own x/y outright for that whole window; this must
   // not fight that by flipping bounceActive back on underneath it.
+  //
+  // Also gated on `active` — see its own param comment. A point nobody can see (the pattern epicentre
+  // while patternVisible is off) or that has nothing to pivot (the mirror anchor at 0 mirror lines)
+  // has no business burning a per-frame gravity/tilt simulation, and definitely no business firing
+  // onBounce's haptic for a bounce nothing on screen shows: this both stops the ambient reaction from
+  // ever arming bounceActive while inactive, and force-stops an already-running bounce (or one started
+  // more directly, via startBounce) the instant `active` itself flips false — `active` is read inside
+  // this same reaction's dependency object specifically so that transition is caught right away, not
+  // only the next time gravity/tilt themselves happen to change.
   useAnimatedReaction(
-    () => ({ gcx: resolvedGravityCenterX.value, gcy: resolvedGravityCenterY.value, g: gravity.value, tcx: resolvedTiltCenterX.value, tcy: resolvedTiltCenterY.value, ts: resolvedTiltStrength.value }),
-    ({ gcx, gcy, g, tcx, tcy, ts }) => {
+    () => ({
+      gcx: resolvedGravityCenterX.value,
+      gcy: resolvedGravityCenterY.value,
+      g: gravity.value,
+      tcx: resolvedTiltCenterX.value,
+      tcy: resolvedTiltCenterY.value,
+      ts: resolvedTiltStrength.value,
+      active: resolvedActive.value
+    }),
+    ({ gcx, gcy, g, tcx, tcy, ts, active }) => {
+      if (!active) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see glideTo's comment below
+        bounceActive.value = false
+        return
+      }
       if (isDragging.value) return
       if (isNearEquilibrium(x.value, y.value, g, gcx, gcy, ts, tcx, tcy)) return
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see glideTo's comment below

@@ -6,7 +6,7 @@ import { runOnJS, SharedValue, useDerivedValue, useSharedValue } from 'react-nat
 import { clamp } from '@/constants/clamp'
 import { copyCountForMirrorLines, inverseWedgeVector, wedgeAngleDegrees, wedgeIndexAtPoint, wedgeVector } from '@/constants/kaleidoscope'
 
-import { BounceBoundary, DragClamp, DragPointPhysics, reflectOffAxis, SNAP_DISTANCE, SNAP_VELOCITY, useDragPointPhysics } from './useDragPointPhysics'
+import { BounceBoundary, clampToRoundedRect, CORNER_RADIUS_FRACTION, DragClamp, DragPointPhysics, reflectOffRoundedRect, SNAP_DISTANCE, SNAP_VELOCITY, useDragPointPhysics } from './useDragPointPhysics'
 
 // Which draggable point the one-finger pan (and the two-finger twist — see index.tsx's
 // rotationGesture) currently applies to — and, separately, which one tilt itself currently pulls on (see
@@ -111,6 +111,10 @@ export function useEpicenter(
   // other touch-down already gets elsewhere in the app.
   onGrab: () => void,
   mirrorLines: number,
+  // Whether the pattern's own linework is actually drawing right now (settings.patternVisible,
+  // index.tsx) — gates the epicentre's own ambient gravity/tilt bounce the same way mirrorHasWedge
+  // below already gates the mirror anchor's: see patternVisibleShared's own comment further down.
+  patternVisible: boolean,
   bounceFriction: SharedValue<number>,
   gravity: SharedValue<number>,
   // How quickly glideTo/recenter catch up to their target — see useDragPointPhysics.ts's own
@@ -219,6 +223,12 @@ export function useEpicenter(
   const { height, width } = useWindowDimensions()
   const centerX = width / 2
   const centerY = height / 2
+  // The pattern epicentre's own corner radius for patternClamp/patternBounceBoundary below, in real
+  // screen pixels rather than defaultClamp/defaultBounceBoundary's normalized fraction (see
+  // CORNER_RADIUS_FRACTION's own comment in useDragPointPhysics.ts) — computed off the smaller of the
+  // two dimensions so the rounding reads as a true circular arc regardless of the device's aspect
+  // ratio, rather than stretching into an ellipse on a narrow phone screen.
+  const patternCornerRadiusPx = Math.min(width, height) * CORNER_RADIUS_FRACTION
   // Fixed for the render (wedges don't rotate — see kaleidoscope.ts), so this can be computed straight
   // from the current setting rather than read live inside a worklet, the same way the old mirror
   // booleans were captured directly in the gesture closures below.
@@ -313,6 +323,25 @@ export function useEpicenter(
   const patternTiltStrength = useDerivedValue<number>(() => (targetsPatternShared.value && tiltEnabled.value ? TILT_PULL_STRENGTH : 0))
   const mirrorTiltStrength = useDerivedValue<number>(() => (targetsMirrorShared.value && tiltEnabled.value ? TILT_PULL_STRENGTH : 0))
 
+  // Gates pattern/mirror's own ambient gravity/tilt bounce (see useDragPointPhysics.ts's own `active`
+  // param) — mirrored into SharedValues for the same worklet-visibility reason targetsPatternShared/
+  // targetsMirrorShared above already are. Unlike those two (which gate the live *drag*, i.e. which
+  // point a touch currently moves), these gate whether the point's own idle physics is allowed to run
+  // and fire onBounce's haptic at all: an epicentre nobody can see (patternVisible off) or a mirror
+  // anchor with no wedge to pivot (mirrorHasWedge false) has nothing on screen to show for either, so
+  // there's no point spending a per-frame simulation — let alone a haptic — on either one while that's
+  // true. This is what stopped a strongly negative (repelling) gravity from bouncing an invisible
+  // epicentre off the edges forever, buzzing haptics with nothing to show for it and no way to turn it
+  // off short of zeroing gravity itself.
+  const patternVisibleShared = useSharedValue(patternVisible)
+  useEffect(() => {
+    patternVisibleShared.value = patternVisible
+  }, [patternVisible, patternVisibleShared])
+  const mirrorHasWedgeShared = useSharedValue(mirrorHasWedge)
+  useEffect(() => {
+    mirrorHasWedgeShared.value = mirrorHasWedge
+  }, [mirrorHasWedge, mirrorHasWedgeShared])
+
   // Both pattern and mirror always get the *live* gravity center fed straight in, regardless of
   // which targets are currently active — gravity is a persistent, ambient object, not something that
   // only pulls while it also happens to be selected. This is what lets a released pattern/mirror fall
@@ -332,7 +361,7 @@ export function useEpicenter(
   // pattern's — the opposite of this file's older order — so test helpers that pick "the pattern's own
   // callback" by registration index need to look at index 1, not 0 (see
   // swirlScreen.gesture.test.tsx's own patternFrameCallback).
-  const mirror = useDragPointPhysics(bounceFriction, gravity, followSpeed, onBounce, undefined, undefined, gravityCenterX, gravityCenterY, mirrorTiltStrength, tiltX, tiltY)
+  const mirror = useDragPointPhysics(bounceFriction, gravity, followSpeed, onBounce, undefined, undefined, gravityCenterX, gravityCenterY, mirrorTiltStrength, tiltX, tiltY, mirrorHasWedgeShared)
 
   // Which wedge the current drag actually grabbed, decided once at touch-down (see onStart) — every
   // update and the release velocity both correct through this same copy's own inverse transform (see
@@ -351,16 +380,17 @@ export function useEpicenter(
     return { x: centerX + mirror.x.value * width, y: centerY + mirror.y.value * height }
   }
 
-  // The pattern epicentre's own clamp: the only boundary is the real screen rectangle, evaluated
-  // against wherever the drag would actually *appear* for whichever wedge was grabbed — not some
-  // abstract distance from center, and not a limit on which wedge or direction the drag can move
+  // The pattern epicentre's own clamp: the only boundary is the real screen rectangle (corners rounded
+  // by patternCornerRadiusPx — see CORNER_RADIUS_FRACTION's own comment in useDragPointPhysics.ts),
+  // evaluated against wherever the drag would actually *appear* for whichever wedge was grabbed — not
+  // some abstract distance from center, and not a limit on which wedge or direction the drag can move
   // toward. nextX/Y is a candidate position in wedge-0 (primary) space; forward-transforming it back
   // through dragCopyIndex's own placement (wedgeVector — the same transform wedgeContentTransform
   // draws that copy with, just as a plain vector) gives the literal screen point this candidate would
-  // actually land on for the copy being dragged. Clamping *that* to [0, width] x [0, height] and
-  // correcting it back through inverseWedgeVector is what makes "the boundary" mean exactly what it
-  // looks like: the physical edge of the screen, wherever you're actually looking. currentX/Y (the
-  // DragClamp signature's easing hook) go unused here — there's nothing to ease toward once the
+  // actually land on for the copy being dragged. Clamping *that* to the rounded [0, width] x [0, height]
+  // rect and correcting it back through inverseWedgeVector is what makes "the boundary" mean exactly
+  // what it looks like: the physical edge of the screen, wherever you're actually looking. currentX/Y
+  // (the DragClamp signature's easing hook) go unused here — there's nothing to ease toward once the
   // boundary is a real, visible wall; landing exactly on it is the point.
   const patternClamp: DragClamp = (nextX, nextY) => {
     'worklet'
@@ -370,12 +400,11 @@ export function useEpicenter(
     const visible = wedgeVector(originX - mirrorOriginX, originY - mirrorOriginY, dragCopyIndex.value, wedgeAngleDeg)
     const visibleX = mirrorOriginX + visible.dx
     const visibleY = mirrorOriginY + visible.dy
-    const clampedVisibleX = clamp(visibleX, 0, width)
-    const clampedVisibleY = clamp(visibleY, 0, height)
-    if (clampedVisibleX === visibleX && clampedVisibleY === visibleY) {
+    const clampedVisible = clampToRoundedRect(visibleX, visibleY, 0, width, 0, height, patternCornerRadiusPx)
+    if (clampedVisible.x === visibleX && clampedVisible.y === visibleY) {
       return { x: nextX, y: nextY }
     }
-    const corrected = inverseWedgeVector(clampedVisibleX - mirrorOriginX, clampedVisibleY - mirrorOriginY, dragCopyIndex.value, wedgeAngleDeg)
+    const corrected = inverseWedgeVector(clampedVisible.x - mirrorOriginX, clampedVisible.y - mirrorOriginY, dragCopyIndex.value, wedgeAngleDeg)
     return { x: (mirrorOriginX + corrected.dx - centerX) / width, y: (mirrorOriginY + corrected.dy - centerY) / height }
   }
 
@@ -396,19 +425,18 @@ export function useEpicenter(
     const originY = centerY + nextY * height
     const visiblePosition = wedgeVector(originX - mirrorOriginX, originY - mirrorOriginY, dragCopyIndex.value, wedgeAngleDeg)
     const visibleVelocity = wedgeVector(velocityX * width, velocityY * height, dragCopyIndex.value, wedgeAngleDeg)
-    const rx = reflectOffAxis(mirrorOriginX + visiblePosition.dx, visibleVelocity.dx, 0, width)
-    const ry = reflectOffAxis(mirrorOriginY + visiblePosition.dy, visibleVelocity.dy, 0, height)
-    const correctedPosition = inverseWedgeVector(rx.value - mirrorOriginX, ry.value - mirrorOriginY, dragCopyIndex.value, wedgeAngleDeg)
-    const correctedVelocity = inverseWedgeVector(rx.velocity, ry.velocity, dragCopyIndex.value, wedgeAngleDeg)
+    const reflected = reflectOffRoundedRect(mirrorOriginX + visiblePosition.dx, mirrorOriginY + visiblePosition.dy, visibleVelocity.dx, visibleVelocity.dy, 0, width, 0, height, patternCornerRadiusPx)
+    const correctedPosition = inverseWedgeVector(reflected.x - mirrorOriginX, reflected.y - mirrorOriginY, dragCopyIndex.value, wedgeAngleDeg)
+    const correctedVelocity = inverseWedgeVector(reflected.velocityX, reflected.velocityY, dragCopyIndex.value, wedgeAngleDeg)
     return {
       x: (mirrorOriginX + correctedPosition.dx - centerX) / width,
       y: (mirrorOriginY + correctedPosition.dy - centerY) / height,
       velocityX: correctedVelocity.dx / width,
       velocityY: correctedVelocity.dy / height,
-      bounced: rx.bounced || ry.bounced
+      bounced: reflected.bounced
     }
   }
-  const pattern = useDragPointPhysics(bounceFriction, gravity, followSpeed, onBounce, patternClamp, patternBounceBoundary, gravityCenterX, gravityCenterY, patternTiltStrength, tiltX, tiltY)
+  const pattern = useDragPointPhysics(bounceFriction, gravity, followSpeed, onBounce, patternClamp, patternBounceBoundary, gravityCenterX, gravityCenterY, patternTiltStrength, tiltX, tiltY, patternVisibleShared)
 
   // See the Epicenter type's own comment — a flick with gravity off still sets bounceActive, so this
   // isn't just "is either point bouncing," it specifically requires gravity to be the reason. !== 0,

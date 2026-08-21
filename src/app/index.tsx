@@ -26,10 +26,10 @@ import { SpeedRateWriters, useRegisterSpeedRateWriters } from '@/hooks/speedRate
 import { useRegisterSwirlRandomize } from '@/hooks/swirlRandomize'
 import { useRegisterSwirlReset } from '@/hooks/swirlReset'
 import { useAudioReactive } from '@/hooks/useAudioReactive'
-import { SCREEN_EDGE_OFFSET, useDragPointPhysics } from '@/hooks/useDragPointPhysics'
+import { SCREEN_EDGE_OFFSET, SNAP_DISTANCE, useDragPointPhysics } from '@/hooks/useDragPointPhysics'
 import { GestureTarget, useEpicenter } from '@/hooks/useEpicenter'
 import { ExtraResetFields, useLookHistory } from '@/hooks/useLookHistory'
-import { useLoopingProgress } from '@/hooks/useLoopingProgress'
+import { PAUSE_EASE_DURATION_MS, useLoopingProgress } from '@/hooks/useLoopingProgress'
 import { useRelaySound, useShutterSound, useTypewriterSound } from '@/hooks/useMechanicalSounds'
 import { MAX_PARTICLE_COLOR_BUCKETS, useParticleField } from '@/hooks/useParticleField'
 import { useRerollUnits } from '@/hooks/useRerollUnits'
@@ -1249,7 +1249,7 @@ export default function SwirlScreen() {
   const effectiveGravityCenterX = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.x.value : withSpring(tiltX.value, TILT_EASE_SPRING)))
   const effectiveGravityCenterY = useDerivedValue(() => (!gravityTargetActiveShared.value || gravityManualControl.value || !tiltEnabledShared.value ? gravityHandle.y.value : withSpring(tiltY.value, TILT_EASE_SPRING)))
 
-  const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, longPressGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, handleBounce, selection, settings.mirrorLines, bounceFriction, gravity, followSpeed, effectiveGravityCenterX, effectiveGravityCenterY, activeTargets, gravityHandle, isDraggingGravity, gravityManualControl, applyPatternRotationRelease, applyMirrorRotationRelease, applyZoomRelease, applyMirrorCycleRelease, baseRotation, baseRotationPaused, mirrorProgress, mirrorPaused, mirrorRotationSign, manualPulseOffset, basePulse, basePulsePaused, foregroundCycleRate, backgroundCycleRate, minCycleRate, maxCycleRate, tiltX, tiltY, tiltEnabledShared)
+  const { epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, gravityActive, panGesture, longPressGesture, recenterPattern, recenterMirror } = useEpicenter(selection, hideControls, handleBounce, selection, settings.mirrorLines, settings.patternVisible, bounceFriction, gravity, followSpeed, effectiveGravityCenterX, effectiveGravityCenterY, activeTargets, gravityHandle, isDraggingGravity, gravityManualControl, applyPatternRotationRelease, applyMirrorRotationRelease, applyZoomRelease, applyMirrorCycleRelease, baseRotation, baseRotationPaused, mirrorProgress, mirrorPaused, mirrorRotationSign, manualPulseOffset, basePulse, basePulsePaused, foregroundCycleRate, backgroundCycleRate, minCycleRate, maxCycleRate, tiltX, tiltY, tiltEnabledShared)
 
   // useParticleField.ts's own separate useWindowDimensions() call — cheap, and matches how
   // useEpicenter.ts already gets its own independent copy rather than threading width/height through
@@ -1362,14 +1362,55 @@ export default function SwirlScreen() {
   // actually active — pattern and/or mirror reset in place, and 'gravity' being active additionally
   // recentres the handle itself (springs back to the screen center — see gravityHandle's own recenter),
   // all three independent of each other rather than one replacing another.
+  // Three independent per-target cascades, not resetPattern/resetMirror's own flat "always do both at
+  // once" — each cascade inspects the SAME target's own current state and does whichever of
+  // position/motion/orientation isn't already settled: first recentre position (if it's drifted off
+  // center), then ease its rotation speed down to 0 (if still spinning), then reorient onto the
+  // nearest clean angle (resetRotation/resetMirrorRotation already no-op unless truly stopped, which
+  // is exactly what makes this the natural last stage rather than something to gate here too). A touch
+  // held past TRANSPORT_LONG_PRESS_MS re-fires this on every subsequent tick (see OnScreenControls'
+  // own fireRecenterDwell), so a single continued hold walks the whole cascade on its own; releasing
+  // and pressing again just picks up wherever state actually left off — if position's already centred,
+  // that press's own call falls straight through to stopping (or reorienting), rather than repeating a
+  // no-op recentre. The rotation ease itself writes baseRotationRate directly (mirroring
+  // applyPatternRotationRelease's own "live SharedValue write ahead of the settings round-trip" shape)
+  // and only commits setRotationSpeed(0) once the ease has actually finished — persisting it
+  // immediately would let the ordinary effectiveRotationSpeed-driven effect further up snap
+  // baseRotationRate back to 0 instantly, cutting the ease short before it ever became visible.
+  // Mirror's own rotation needs no such trick: setMirrorRotationSpeed(0) already eases automatically,
+  // since useLoopingProgress's own frozen branch (see its own PAUSE_EASE_DURATION_MS comment) is what
+  // mirrorRotationRate is built on. 'gravity' has no rotation of its own to cascade through (the well
+  // has no orientation — see resetGravityPosition's own comment), so it's still just the one
+  // always-safe recentre, unchanged from before.
   const recenterGestureTarget = useCallback(() => {
-    // 'crop' rides on the pattern epicentre (see useEpicenter.ts's own targetsPattern fallback) rather
-    // than having a point of its own, so recentring while it's active recentres that same epicentre.
-    if (activeTargets.has('pattern') || activeTargets.has('crop')) resetPattern()
-    if (activeTargets.has('mirror')) resetMirror()
-    if (activeTargets.has('gravity')) resetGravityPosition()
-    selection()
-  }, [activeTargets, resetGravityPosition, resetMirror, resetPattern, selection])
+    if (activeTargets.has('pattern') || activeTargets.has('crop')) {
+      if (Math.hypot(epicenterX.value, epicenterY.value) >= SNAP_DISTANCE) {
+        recenterPattern()
+      } else if (settings.rotationSpeed !== 0) {
+        // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
+        baseRotationRate.value = withTiming(0, { duration: PAUSE_EASE_DURATION_MS }, (finished) => {
+          if (finished) runOnJS(setRotationSpeed)(0)
+        })
+      } else {
+        resetRotation()
+      }
+      selection()
+    }
+    if (activeTargets.has('mirror')) {
+      if (Math.hypot(mirrorAnchorX.value, mirrorAnchorY.value) >= SNAP_DISTANCE) {
+        recenterMirror()
+      } else if (settings.mirrorRotationSpeed !== 0) {
+        setMirrorRotationSpeed(0)
+      } else {
+        resetMirrorRotation()
+      }
+      selection()
+    }
+    if (activeTargets.has('gravity')) {
+      resetGravityPosition()
+      selection()
+    }
+  }, [activeTargets, baseRotationRate, epicenterX, epicenterY, mirrorAnchorX, mirrorAnchorY, recenterMirror, recenterPattern, resetGravityPosition, resetMirrorRotation, resetRotation, selection, setMirrorRotationSpeed, setRotationSpeed, settings.mirrorRotationSpeed, settings.rotationSpeed])
 
   // Long-press bonus on the corner Pause/Play FAB (see OnScreenControls' pauseFab) — recentres AND
   // reorients every point unconditionally, not just whichever gesture target(s) happen to be active
