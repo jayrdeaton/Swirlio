@@ -376,6 +376,13 @@ export function useParticleField(
     .onEnd(() => {
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       swipeActive.value = false
+      // Also the authoritative "stop gathering" signal for a touch that actually moved — see
+      // particleGatherGesture's own onEnd comment for why *that* gesture's own onEnd can't be trusted
+      // to fire on the real finger-lift once a drag is involved, and why this one, despite watching
+      // the same physical touch, reliably can. Harmless to set unconditionally even when nothing was
+      // ever gathered (gatherActive already false, same as swipeActive above).
+      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+      gatherActive.value = false
     })
 
   // The held-still counterpart to particlePanGesture above — siblings watching the same physical
@@ -384,36 +391,46 @@ export function useParticleField(
   // moving after the gather grabs on, particlePanGesture's own onUpdate keeps updateTouchTarget live
   // for free — nothing here has to hand off tracking.
   //
-  // maxDistance is set generously large deliberately, overriding RNGH's own default (a native
-  // touch-slop constant, typically well under 20px) — that default is what a plain "long press to
-  // trigger an action" gesture wants (moving means you didn't mean to long-press), but it's exactly
-  // wrong here: once GATHER_LONG_PRESS_MS has elapsed and gatherActive.value is already true, the
-  // *whole point* is to then drag the gathered cluster an arbitrary distance before releasing it as a
-  // throw. Without this override, RNGH silently cancels the long-press recognition (fires onEnd) the
-  // instant the drag exceeds that native default — not on release, on the very first movement past a
-  // few pixels — which snaps gatherActive back to false and drops the spring pull entirely while the
-  // finger is still down, reading as "gathers fine, then I lose control the moment I move." A single
-  // shared touch can't physically travel further than the screen's own diagonal, so any value comfortably
-  // past that (MASK_EXTENT-style headroom, see kaleidoscope.ts) makes maxDistance's own cancellation path
-  // unreachable in practice — but LongPressGesture's constructor separately defaults
-  // shouldCancelWhenOutside to true, a second, independent cancellation path (native checks
-  // shouldCancelWhenOutside && !containsPointInView, ORed with the maxDistance check above, not gated by
-  // it) that maxDistance does nothing to close: dragging the gathered cluster past the edge of whatever
-  // view this gesture is attached to — exactly what throwing toward an edge tends to do — cancels the
-  // long press through this other path just as dead as an unbounded maxDistance would have. Explicitly
-  // turned off for the same reason maxDistance is generous: once gathered, the throw needs to survive
-  // the finger going anywhere, including off the edge of the screen.
+  // maxDistance deliberately left at RNGH's own native default (10 native units — see
+  // RNLongPressHandler.m's resetConfig) rather than loosened, and shouldCancelWhenOutside likewise
+  // left at LongPressGesture's own constructor default (true) — a first pass at this gesture loosened
+  // both (maxDistance to an effectively-unbounded 100000, shouldCancelWhenOutside to false) to stop a
+  // held-and-dragged gather from losing its pull the moment the finger moved (see git history), but
+  // that broke the *other* direction just as badly: RNGH's own distance-from-touch-down check is the
+  // one thing that tells a genuine "held still, then dragged" gather apart from an ordinary continuous
+  // swipe that never held still at all — loosen it enough to survive a throw and a long enough swipe
+  // eventually satisfies GATHER_LONG_PRESS_MS too, reading as "swiping around gradually pulls
+  // everything into a gather," which is exactly backwards. Both checks are measured from the *original*
+  // touch-down point for the gesture's whole lifetime, not reset once active, so there's no single
+  // maxDistance value that's simultaneously tight enough to gate activation and loose enough to survive
+  // a throw — the two needs are genuinely in tension for one native recognizer.
+  //
+  // The actual fix: let this gesture do only what it's suited for — deciding, via a *tight* distance
+  // tolerance, whether a hold was genuinely still enough to count as a long press at all — and stop
+  // relying on it to also report when gathering ends. onStart still only fires after a real
+  // GATHER_LONG_PRESS_MS-long hold that stayed within that tight tolerance (a swipe moves well past it
+  // long before minDuration elapses, so onStart never fires for one, and gatherActive never flips).
+  // Once it *has* fired, though, the subsequent throw is expected to blow straight past maxDistance
+  // (and often shouldCancelWhenOutside too) — that's fine now: onEnd below only reacts to `success`,
+  // RNGH's own signal for "ended via a real finger-lift while still active" (see eventReceiver.ts) as
+  // opposed to "cancelled out from under itself mid-drag" (success: false, fired the instant the
+  // tolerance is exceeded, same as before this comment). A cancelled gather simply leaves gatherActive
+  // as-is instead of dropping it, and particlePanGesture's own onEnd above — which isn't gated by any
+  // of this gesture's distance/bounds checks, and reliably fires on the real lift-off for any touch
+  // that included real movement — is what actually clears it once the throw is well and truly over. The
+  // one case that never reaches particlePanGesture's onEnd at all (a hold that activates gather and
+  // releases without ever moving enough to activate Pan's own onStart) is exactly the case this
+  // gesture's own `success: true` end still covers correctly on its own.
   const particleGatherGesture = Gesture.LongPress()
     .minDuration(GATHER_LONG_PRESS_MS)
-    .maxDistance(100000)
-    .shouldCancelWhenOutside(false)
     .onStart((event) => {
       if (!targetsParticles) return
       updateTouchTarget(event.x, event.y)
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       gatherActive.value = true
     })
-    .onEnd(() => {
+    .onEnd((_event, success) => {
+      if (!success) return
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       gatherActive.value = false
     })
