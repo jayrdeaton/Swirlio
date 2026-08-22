@@ -38,7 +38,7 @@
     "@rific/auto-paper": "^0.9.2",
     "@rific/drawer": "^0.4.3",
     "@rific/feedback-press": "^0.10.4",
-    "@rific/splash-gate": "^0.1.2",
+    "@rific/splash-gate": "^0.2.0",
     "@rific/updater": "^0.3.0",
     "@shopify/react-native-skia": "2.6.2",
     "eslint-plugin-package-json": "^1.7.1",
