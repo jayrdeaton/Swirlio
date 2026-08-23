@@ -61,7 +61,8 @@
           "androidForegroundService": false
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      "expo-asset"
     ],
     "runtimeVersion": {
       "policy": "fingerprint"
