@@ -2,11 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "swirlio",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "npx expo start --web --port \"$PORT\""],
-      "port": 8091,
-      "autoPort": true
+      "name": "swirlio-web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "start", "--web", "--port", "8107"],
+      "port": 8107
     }
   ]
 }

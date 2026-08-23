@@ -18,7 +18,7 @@ module.exports = defineConfig([
     settings: { react: { version: '19' } }
   },
   {
-    ignores: ['dist/**', 'node_modules/**', 'ios/**', 'android/**', '.expo/**', '.vscode/**', 'coverage/**', '.yalc/**', '.claude/worktrees/**', '**/*.generated.ts']
+    ignores: ['dist/**', 'node_modules/**', 'ios/**', 'android/**', '.expo/**', '.vscode/**', 'coverage/**', '.yalc/**', '.claude/worktrees/**']
   },
   expoConfig,
   prettierRecommended,
