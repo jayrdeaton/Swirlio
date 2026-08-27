@@ -243,7 +243,9 @@ export const defaultSettings: SwirlSettings = {
   rotationSpeed: 2,
   shakeEnabled: true,
   showLabels: false,
-  soundEnabled: true,
+  // Default muted in dev/simulator builds (no stored preference yet) so Claude/local testing
+  // doesn't blast audio; production builds still default to sound on.
+  soundEnabled: !__DEV__,
   strokeWidth: DEFAULT_STROKE_WIDTH,
   tightness: DEFAULT_TIGHTNESS,
   tiltEnabled: true,

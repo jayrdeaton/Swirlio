@@ -173,6 +173,11 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
   // to gain from the UI thread and it keeps the value a single source of truth.
   const panGesture = Gesture.Pan()
     .runOnJS(true)
+    // Empty, but required: Gesture.Simultaneous(panGesture, tapGesture) below silently recognizes
+    // neither gesture at all — no onStart/onUpdate/onEnd, for either — on RNGH 2.32.0 unless both
+    // gestures have an explicit hitSlop() call. A bare Pan with no Tap composed in works fine
+    // without it; it's specifically this Simultaneous+Tap combination that needs it.
+    .hitSlop({})
     .enabled(!disabled)
     .activeOffsetX([-ACTIVE_OFFSET_X, ACTIVE_OFFSET_X])
     .onStart((event) => {
@@ -189,6 +194,7 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
 
   const tapGesture = Gesture.Tap()
     .runOnJS(true)
+    .hitSlop({})
     .enabled(!disabled)
     .onEnd((event, success) => {
       if (success) settleAt(event.x)
