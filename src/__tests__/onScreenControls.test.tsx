@@ -346,14 +346,8 @@ describe('OnScreenControls', () => {
   // shared by both) — the mechanism itself is already thoroughly covered by useHoldToRepeat.test.ts,
   // so this is just confirming forward is actually wired to it, not re-proving the timing logic.
   describe('forward held down (repeat effect)', () => {
-    // doNotFake: ['queueMicrotask'] — see swirlScreen.gesture.test.tsx's own comment on its
-    // 'on-screen controls visibility' block for why: Jest's modern fake timers fake queueMicrotask
-    // by default, which act() depends on internally, and without this exclusion an act() call that
-    // never advances the fake clock can hang forever rather than just run slowly. Applied to every
-    // useFakeTimers() call site in this file as the same latent risk, not because each one was
-    // observed failing.
     beforeEach(() => {
-      jest.useFakeTimers({ doNotFake: ['queueMicrotask'] })
+      jest.useFakeTimers()
     })
 
     afterEach(() => {
@@ -681,7 +675,7 @@ describe('OnScreenControls', () => {
     // just confirming these two are actually wired to it.
     describe('background/foreground held down (repeat effect)', () => {
       beforeEach(() => {
-        jest.useFakeTimers({ doNotFake: ['queueMicrotask'] })
+        jest.useFakeTimers()
       })
 
       afterEach(() => {
@@ -820,7 +814,7 @@ describe('OnScreenControls', () => {
     // that continues past it for as long as the hold does.
     describe('Cycle shape held down (repeat effect)', () => {
       beforeEach(() => {
-        jest.useFakeTimers({ doNotFake: ['queueMicrotask'] })
+        jest.useFakeTimers()
       })
 
       afterEach(() => {
@@ -1060,7 +1054,7 @@ describe('OnScreenControls', () => {
   // still there" (see the wedge case below) — only for "held still from the very start."
   describe('primary FAB held down (recenter / randomize dwell)', () => {
     beforeEach(() => {
-      jest.useFakeTimers({ doNotFake: ['queueMicrotask'] })
+      jest.useFakeTimers()
     })
 
     afterEach(() => {
@@ -1373,7 +1367,7 @@ describe('OnScreenControls', () => {
   // after the other) don't stop or restart each other's repeat.
   describe('randomize long-press held down (repeat effect)', () => {
     beforeEach(() => {
-      jest.useFakeTimers({ doNotFake: ['queueMicrotask'] })
+      jest.useFakeTimers()
     })
 
     afterEach(() => {

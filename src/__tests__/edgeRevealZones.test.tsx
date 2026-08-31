@@ -109,12 +109,8 @@ describe('EdgeRevealZones', () => {
   // the instant it's released — reachable here without the real controls (and OnScreenControls' own
   // randomizeGroupHold) ever being on screen at all.
   describe('top-right long-press held down (repeat effect)', () => {
-    // doNotFake: ['queueMicrotask'] — see swirlScreen.gesture.test.tsx's own comment on its
-    // 'on-screen controls visibility' block for why: Jest's modern fake timers fake queueMicrotask
-    // by default, which act() depends on internally, and without this exclusion an act() call that
-    // never advances the fake clock can hang forever rather than just run slowly.
     beforeEach(() => {
-      jest.useFakeTimers({ doNotFake: ['queueMicrotask'] })
+      jest.useFakeTimers()
     })
 
     afterEach(() => {
