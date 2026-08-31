@@ -1696,23 +1696,49 @@ describe('SwirlScreen gestures', () => {
     })
 
     it('swaps colors on a tap without hiding the controls', async () => {
+      // eslint-disable-next-line no-console -- TEMP diagnostic for a CI-only hang, see PR discussion
+      console.log('[DIAG]', Date.now(), 'A: before renderScreen')
       await renderScreen()
+      // eslint-disable-next-line no-console -- TEMP diagnostic
+      console.log('[DIAG]', Date.now(), 'B: renderScreen resolved, pendingTimers=', jest.getTimerCount())
 
-      await act(async () => {
+      const actPromise = act(async () => {
+        // eslint-disable-next-line no-console -- TEMP diagnostic
+        console.log('[DIAG]', Date.now(), 'C: inside act callback, before handler call')
         singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
+        // eslint-disable-next-line no-console -- TEMP diagnostic
+        console.log('[DIAG]', Date.now(), 'D: inside act callback, after handler call, visible=', getLastControlsProps().visible, 'colorCalls=', setForegroundColors.mock.calls.length)
       })
+      // eslint-disable-next-line no-console -- TEMP diagnostic
+      console.log('[DIAG]', Date.now(), 'E: act() invoked, promise created, pendingTimers=', jest.getTimerCount())
+      await actPromise
+      // eslint-disable-next-line no-console -- TEMP diagnostic
+      console.log('[DIAG]', Date.now(), 'F: act() resolved')
 
       expect(getLastControlsProps().visible).toBe(true)
       expect(setForegroundColors).toHaveBeenCalledWith(['#000000'])
     })
 
     it('hides when a pinch starts', async () => {
+      // eslint-disable-next-line no-console -- TEMP diagnostic for a CI-only hang, see PR discussion
+      console.log('[DIAG]', Date.now(), 'A: before renderScreen')
       await renderScreen()
+      // eslint-disable-next-line no-console -- TEMP diagnostic
+      console.log('[DIAG]', Date.now(), 'B: renderScreen resolved, pendingTimers=', jest.getTimerCount())
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
 
-      await act(async () => {
+      const actPromise = act(async () => {
+        // eslint-disable-next-line no-console -- TEMP diagnostic
+        console.log('[DIAG]', Date.now(), 'C: inside act callback, before handler call')
         pinchGesture.__handlers.start?.()
+        // eslint-disable-next-line no-console -- TEMP diagnostic
+        console.log('[DIAG]', Date.now(), 'D: inside act callback, after handler call, visible=', getLastControlsProps().visible)
       })
+      // eslint-disable-next-line no-console -- TEMP diagnostic
+      console.log('[DIAG]', Date.now(), 'E: act() invoked, promise created, pendingTimers=', jest.getTimerCount())
+      await actPromise
+      // eslint-disable-next-line no-console -- TEMP diagnostic
+      console.log('[DIAG]', Date.now(), 'F: act() resolved')
 
       expect(getLastControlsProps().visible).toBe(false)
     })
