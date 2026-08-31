@@ -1672,8 +1672,17 @@ describe('SwirlScreen gestures', () => {
   })
 
   describe('on-screen controls visibility', () => {
+    // doNotFake: ['queueMicrotask'] — Jest's modern fake timers fake queueMicrotask by default
+    // (confirmed in @sinonjs/fake-timers' own source), which React's act() relies on internally to
+    // know when effect-flushing is done. Without this exclusion, any act() call that doesn't also
+    // call jest.advanceTimersByTimeAsync (which drains the same fake job queue as a side effect)
+    // can hang indefinitely — not just run slowly — since nothing ever advances the fake clock to
+    // release it. That's what caused two CI-only failures here ("Exceeded timeout of Nms") that
+    // never reproduced locally and didn't go away when the timeout was doubled: it wasn't slowness,
+    // it was a genuine unbounded wait. Excluding queueMicrotask leaves it real while setTimeout/
+    // setInterval stay fake, so advanceTimersByTimeAsync still drives the idle-fade timer below.
     beforeEach(() => {
-      jest.useFakeTimers()
+      jest.useFakeTimers({ doNotFake: ['queueMicrotask'] })
     })
 
     afterEach(() => {
