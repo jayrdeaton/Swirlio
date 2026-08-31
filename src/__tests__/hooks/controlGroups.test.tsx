@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react-native'
 
-import { ControlGroupProvider, useControlGroups, useControlGroupSheetDrawer, useOpenControlGroup } from './controlGroups'
+import { ControlGroupProvider, useControlGroups, useControlGroupSheetDrawer, useOpenControlGroup } from '@/hooks/controlGroups'
 
 // createDrawer is mocked rather than letting the real @rific/drawer chain render — these tests only
 // care what useOpenControlGroup/useControlGroupSheetDrawer call on the actions createDrawer hands

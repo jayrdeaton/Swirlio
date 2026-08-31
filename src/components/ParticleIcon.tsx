@@ -1,4 +1,3 @@
-import React from 'react'
 import { Circle, Path, Svg } from 'react-native-svg'
 
 import { buildFlowerPath } from '@/constants/flowerMath'

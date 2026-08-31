@@ -407,7 +407,7 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
       }
       if (isDragging.value) return
       if (isNearEquilibrium(x.value, y.value, g, gcx, gcy, ts, tcx, tcy)) return
-      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see glideTo's comment below
+
       bounceActive.value = true
     }
   )

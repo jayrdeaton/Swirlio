@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { LayoutChangeEvent, Platform, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Text, useTheme } from 'react-native-paper'
@@ -131,6 +131,11 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
   // `live` marks a call that's allowed to have its onChange half throttled (see onChangeThrottleMs's
   // own prop comment) — only onUpdate passes true. onStart and the release/tap settle (settleAt)
   // always pass false, so the very first touch and the final committed position are never delayed.
+  // commitFromX is only ever invoked from the gesture callbacks below (.onStart/.onUpdate) and
+  // settleAt (itself only called from .onEnd) — never during render — but it's a standalone
+  // function bound to several call sites, so the compiler can't prove that and flags each Date.now()
+  // below as impure "during render" conservatively. Same rule limitation the rawProgress comment
+  // above already documents for refs read inside gesture callbacks, just for purity instead.
   const commitFromX = (x: number, live = false) => {
     // Belt and suspenders with the gestures' own .enabled(!disabled) below: that stops the real
     // recognizer from claiming the touch at all, but tests drive the handlers directly without
@@ -141,9 +146,11 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
     if (next !== value) {
       lastCommit.value = { value: next, minimumValue, maximumValue }
       onLiveValue?.(next)
+      // eslint-disable-next-line react-hooks/purity -- see commitFromX's own comment above
       if (live && onChangeThrottleMs != null && Date.now() - lastOnChangeCommitMs.current < onChangeThrottleMs) {
         return next
       }
+      // eslint-disable-next-line react-hooks/purity -- see commitFromX's own comment above
       lastOnChangeCommitMs.current = Date.now()
       onChange(next)
     }
@@ -180,22 +187,30 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
     .hitSlop({})
     .enabled(!disabled)
     .activeOffsetX([-ACTIVE_OFFSET_X, ACTIVE_OFFSET_X])
+    // Each callback below reads lastOnChangeCommitMs (a plain ref, via commitFromX) — passed as an
+    // argument to .onStart/.onUpdate/.onEnd, the compiler can't prove these only ever run as event
+    // handlers (they provably do, see commitFromX's own comment) and flags the ref read the same
+    // conservative way it flags rawProgress's SharedValue writes just above.
+    // eslint-disable-next-line react-hooks/refs
     .onStart((event) => {
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see comment above
       rawProgress.value = trackWidth > 0 ? Math.min(1, Math.max(0, event.x / trackWidth)) : progress
       commitFromX(event.x)
     })
+    // eslint-disable-next-line react-hooks/refs -- see .onStart's own comment above
     .onUpdate((event) => {
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see comment above
       rawProgress.value = trackWidth > 0 ? Math.min(1, Math.max(0, event.x / trackWidth)) : progress
       commitFromX(event.x, true)
     })
+    // eslint-disable-next-line react-hooks/refs -- see .onStart's own comment above
     .onEnd((event) => settleAt(event.x))
 
   const tapGesture = Gesture.Tap()
     .runOnJS(true)
     .hitSlop({})
     .enabled(!disabled)
+    // eslint-disable-next-line react-hooks/refs -- see panGesture's .onStart comment above
     .onEnd((event, success) => {
       if (success) settleAt(event.x)
     })

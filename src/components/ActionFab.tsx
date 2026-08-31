@@ -1,5 +1,3 @@
-import React from 'react'
-
 import { LabeledFab } from './LabeledFab'
 
 type ActionFabProps = {

@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react-native'
 
-import { SwirlRandomizeProvider, useRegisterSwirlRandomize, useSwirlRandomize } from './swirlRandomize'
+import { SwirlRandomizeProvider, useRegisterSwirlRandomize, useSwirlRandomize } from '@/hooks/swirlRandomize'
 
 describe('useSwirlRandomize', () => {
   it('calls whatever randomizeGroup function was most recently registered', async () => {

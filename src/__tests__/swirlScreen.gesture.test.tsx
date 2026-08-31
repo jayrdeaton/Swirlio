@@ -1,6 +1,5 @@
 import { useVibration } from '@rific/feedback-press'
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
-import React from 'react'
 import { Dimensions } from 'react-native'
 import * as gestureHandlerModule from 'react-native-gesture-handler'
 import * as reanimatedModule from 'react-native-reanimated'

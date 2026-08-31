@@ -3,7 +3,6 @@ import * as reanimatedModule from 'react-native-reanimated'
 
 import { useParticleField } from '@/hooks/useParticleField'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the real SharedValue type (get/set/
 // addListener/removeListener/modify) isn't implemented by jest.setup.ts's mock, only .value is real
 function shared<T>(initial: T): any {
   return { value: initial }
@@ -43,10 +42,8 @@ describe('useParticleField', () => {
   // triggers once it exceeds the tight tolerance) is expected and ignored; particlePanGesture's own
   // onEnd — not gated by any of this gesture's checks — is what actually clears gatherActive, on the
   // real finger-lift, however far the throw travelled (case 1).
-  it('keeps pulling a gathered particle through a cancelled long-press, and only stops on the pan gesture\'s own end', async () => {
-    const { result } = await renderHook(() =>
-      useParticleField(shared(1), shared(0), shared(0), shared(0), shared(0), shared(2), shared(0), shared(0), 800, 600, 0, true)
-    )
+  it("keeps pulling a gathered particle through a cancelled long-press, and only stops on the pan gesture's own end", async () => {
+    const { result } = await renderHook(() => useParticleField(shared(1), shared(0), shared(0), shared(0), shared(0), shared(2), shared(0), shared(0), 800, 600, 0, true))
 
     const gather = result.current.particleGatherGesture as unknown as MockGesture
     const pan = result.current.particlePanGesture as unknown as MockGesture
@@ -82,9 +79,7 @@ describe('useParticleField', () => {
   })
 
   it('stops on its own clean end for a hold that releases without ever turning into a drag', async () => {
-    const { result } = await renderHook(() =>
-      useParticleField(shared(1), shared(0), shared(0), shared(0), shared(0), shared(2), shared(0), shared(0), 800, 600, 0, true)
-    )
+    const { result } = await renderHook(() => useParticleField(shared(1), shared(0), shared(0), shared(0), shared(0), shared(2), shared(0), shared(0), 800, 600, 0, true))
 
     const gather = result.current.particleGatherGesture as unknown as MockGesture
 
@@ -111,10 +106,8 @@ describe('useParticleField', () => {
   // survive, but it's exactly what let a continuous swipe eventually satisfy GATHER_LONG_PRESS_MS too
   // (see the first test's own comment for the full "why"). Left unset here deliberately, at RNGH's own
   // tight native defaults — this only asserts neither config key made it back onto the gesture at all.
-  it('leaves particleGatherGesture at RNGH\'s own tight distance/bounds defaults', async () => {
-    const { result } = await renderHook(() =>
-      useParticleField(shared(1), shared(0), shared(0), shared(0), shared(0), shared(2), shared(0), shared(0), 800, 600, 0, true)
-    )
+  it("leaves particleGatherGesture at RNGH's own tight distance/bounds defaults", async () => {
+    const { result } = await renderHook(() => useParticleField(shared(1), shared(0), shared(0), shared(0), shared(0), shared(2), shared(0), shared(0), 800, 600, 0, true))
 
     const config = (result.current.particleGatherGesture as unknown as { __config: Record<string, unknown> }).__config
     expect(config.maxDistance).toBeUndefined()

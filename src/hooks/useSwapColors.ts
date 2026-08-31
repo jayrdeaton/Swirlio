@@ -15,16 +15,7 @@ export function useSwapColors() {
     setBackgroundColors(settings.foregroundColors)
     setForegroundCycleSpeed(settings.backgroundCycleSpeed)
     setBackgroundCycleSpeed(settings.foregroundCycleSpeed)
-  }, [
-    setBackgroundColors,
-    setBackgroundCycleSpeed,
-    setForegroundColors,
-    setForegroundCycleSpeed,
-    settings.backgroundColors,
-    settings.backgroundCycleSpeed,
-    settings.foregroundColors,
-    settings.foregroundCycleSpeed,
-  ])
+  }, [setBackgroundColors, setBackgroundCycleSpeed, setForegroundColors, setForegroundCycleSpeed, settings.backgroundColors, settings.backgroundCycleSpeed, settings.foregroundColors, settings.foregroundCycleSpeed])
 
   return { swapColors }
 }

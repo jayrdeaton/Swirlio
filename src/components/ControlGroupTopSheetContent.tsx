@@ -1,6 +1,5 @@
 import { useThemeSettings } from '@rific/auto-paper'
 import { useUpdater } from '@rific/updater'
-import React from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
@@ -8,9 +7,9 @@ import { release } from '@/constants/release'
 import { TOP_SHEET_HEADER_CLEARANCE, TOP_SHEET_RIGHT_CLEARANCE } from '@/constants/sheetLayout'
 import { MAX_RAINBOW_SOUP_COLORS } from '@/constants/swirlSettingsRanges'
 import { useControlGroups } from '@/hooks/controlGroups'
-import { MAX_PARTICLE_COLOR_BUCKETS } from '@/hooks/useParticleField'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { useSwirlReset } from '@/hooks/swirlReset'
+import { MAX_PARTICLE_COLOR_BUCKETS } from '@/hooks/useParticleField'
 import { useSwapColors } from '@/hooks/useSwapColors'
 import { DEFAULT_BACKGROUND_COLORS, DEFAULT_BOUNCE_FRICTION, DEFAULT_DASH_STYLE, DEFAULT_FIXED_SPACING, DEFAULT_FOREGROUND_COLORS, DEFAULT_GRAVITY, DEFAULT_MIRROR_ALTERNATE_COLORS, DEFAULT_MIRROR_GAP, DEFAULT_MIRROR_LINES, DEFAULT_MIRROR_ROTATION_SPEED, DEFAULT_PARTICLE_BORDER_COLORS, DEFAULT_PARTICLE_BORDER_WIDTH, DEFAULT_PARTICLE_COLORS, DEFAULT_PARTICLE_COUNT, DEFAULT_PARTICLE_SHAPES, DEFAULT_PARTICLE_SIZE, DEFAULT_STROKE_WIDTH, DEFAULT_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
 

@@ -95,7 +95,7 @@ export function GravityWell({ x, y, holeRadius, gravity, gravityParticleProgress
       {GRAVITY_PARTICLE_INDICES.map((index) => (
         <GravityParticle key={index} index={index} x={x} y={y} gravity={gravity} gravityParticleProgress={gravityParticleProgress} holeRadius={holeRadius} foreground={foreground} />
       ))}
-      <Circle cx={x} cy={y} r={holeRadius} style="stroke" strokeWidth={GRAVITY_HOLE_OUTLINE_WIDTH_PX} color={foreground} />
+      <Circle cx={x} cy={y} r={holeRadius} style='stroke' strokeWidth={GRAVITY_HOLE_OUTLINE_WIDTH_PX} color={foreground} />
     </Group>
   )
 }

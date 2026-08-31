@@ -1,5 +1,4 @@
 import { useHoldToRepeat } from '@rific/feedback-press'
-import React from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 

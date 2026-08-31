@@ -1,12 +1,10 @@
 import { act, fireEvent, render } from '@testing-library/react-native'
-import React from 'react'
 
 import { useColorListFabs } from '@/components/useColorListFabs'
 
 // jest.mock factories can't close over module-scope imports (only jest's own globals and
 // "mock"-prefixed bindings) — require() inside the factory is the standard escape hatch.
 jest.mock('react-native-paper', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
   return {
     Icon: () => null,
@@ -28,7 +26,6 @@ jest.mock('react-native-paper', () => {
 // only replacing the package's own top-level Button/FAB/TouchableOpacity exports — it hits the real
 // one, backed by jest-expo's own built-in expo-haptics mock.
 jest.mock('@rific/feedback-press', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
   const actual = jest.requireActual('@rific/feedback-press')
   return {

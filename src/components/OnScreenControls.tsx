@@ -9,7 +9,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { contrastColor, DISABLED_ON_CANVAS_SCRIM_COLOR, disabledOnCanvasFabTheme, TOGGLE_OFF_BLUR_TINT_OPACITY, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
 import { RANDOMIZE_HOLD_REPEAT_MS } from '@/constants/holdToRepeat'
-import { PARTICLE_SHAPE_ORDER } from '@/constants/particleShapes'
 import { ControlGroup, useControlGroups, useControlGroupSheetDrawer, useOpenControlGroup } from '@/hooks/controlGroups'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { GESTURE_TARGET_ORDER, GestureTarget } from '@/hooks/useEpicenter'
@@ -479,6 +478,16 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     recenterRepeatTimeout.current = setTimeout(() => {
       notification()
       onRecenter()
+      // Self-recursive via this const binding's own closure, not a freshest-value ref — safe at
+      // runtime (this callback only runs later, after the binding above is assigned), but pins an
+      // in-flight repeat chain to whichever notification/onRecenter were current when this
+      // particular instance was armed, rather than picking up a mid-chain identity change to
+      // either. Accepted deliberately: a chain is short (bounded by MAX_RECENTER_REPEATS), tied to
+      // a single continuous touch, and notification/onRecenter aren't expected to change identity
+      // mid-gesture in practice — a ref-holds-latest-callback indirection was tried and
+      // consistently tripped this same rule in a different, unresolved way, for a correctness gain
+      // this narrow.
+      // eslint-disable-next-line react-hooks/immutability
       armRecenterRepeat()
     }, TRANSPORT_LONG_PRESS_MS)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Node's Timeout has unref(); jsdom's plain number doesn't, hence the guard rather than the real type
@@ -958,19 +967,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     // color pair already established for foregroundColors — slotA points that same pair at
     // particleShapes instead, slotB (just below) at particleColors — see index.tsx's own
     // nextParticleShape/growParticleShapes/randomizeParticleColors/growParticleColors.
-    slotA = (
-      <FAB
-        testID='fab-cycle-particle-shape'
-        icon={cycleParticleShapeIcon}
-        size='small'
-        color={solidFabColor}
-        style={[solidFabStyle, solidFabSizeSmall]}
-        onPress={onCycleParticleShape}
-        onLongPress={growParticleShapesHold.onLongPress}
-        delayLongPress={TRANSPORT_LONG_PRESS_MS}
-        onPressOut={growParticleShapesHold.onPressOut}
-      />
-    )
+    slotA = <FAB testID='fab-cycle-particle-shape' icon={cycleParticleShapeIcon} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onCycleParticleShape} onLongPress={growParticleShapesHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={growParticleShapesHold.onPressOut} />
     slotB = <FAB testID='fab-randomize-particle-colors' icon={resolveIcon('palette')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={onRandomizeParticleColors} onLongPress={growParticleColorsHold.onLongPress} delayLongPress={TRANSPORT_LONG_PRESS_MS} onPressOut={growParticleColorsHold.onPressOut} />
   }
 

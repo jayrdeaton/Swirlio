@@ -8,8 +8,8 @@ import { buildFlowerPoints } from '@/constants/flowerMath'
 import { gravityHoleRadius } from '@/constants/gravityWellMath'
 import { buildHeartPoints } from '@/constants/heartMath'
 import { copyCountForMirrorLines, farthestCornerDistance, rotationMatrix, translateRotateMatrix, wedgeAngleDegrees } from '@/constants/kaleidoscope'
-import { hasPolygonSides, PatternType } from '@/constants/patterns'
 import { ParticleShape } from '@/constants/particleShapes'
+import { hasPolygonSides, PatternType } from '@/constants/patterns'
 import { buildPolygonPoints } from '@/constants/polygonMath'
 import { buildStarPoints } from '@/constants/starMath'
 import { DashStyle } from '@/constants/strokeDash'
@@ -418,8 +418,11 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
   // particle, rather than each of up to 12 KaleidoscopeCopy instances rebuilding its own copy of this
   // same work.
   const particleBucketPaths = useDerivedValue(() => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions -- read purely to establish
     // the dependency described above; the tick's own value is never otherwise needed.
+    // useDerivedValue tracks dependencies by which SharedValues get .value read during this
+    // function; discarding the read result is the standard Reanimated idiom for "recompute on X
+    // changing" alone.
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     particleFrameTick.value
 
     const count = Math.min(Math.round(particleCount.value), particlePositionX.value.length)

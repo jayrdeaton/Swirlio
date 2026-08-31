@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Button } from '@rific/feedback-press'
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { Portal, Text, useTheme } from 'react-native-paper'
 import Animated, { Easing, useAnimatedStyle, withTiming } from 'react-native-reanimated'

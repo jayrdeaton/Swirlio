@@ -1,4 +1,3 @@
-import React from 'react'
 import { StyleSheet } from 'react-native'
 import Animated, { Easing, useAnimatedStyle, withTiming } from 'react-native-reanimated'
 

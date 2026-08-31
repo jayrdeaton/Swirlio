@@ -1,4 +1,4 @@
-import { contrastColor, disabledFabTheme, disabledOnCanvasFabTheme, MONOCHROME_BLACK, MONOCHROME_WHITE, toggleFabBackgroundColor, toggleFabIconColor, withAlpha } from './fabTheme'
+import { contrastColor, disabledFabTheme, disabledOnCanvasFabTheme, MONOCHROME_BLACK, MONOCHROME_WHITE, toggleFabBackgroundColor, toggleFabIconColor, withAlpha } from '@/constants/fabTheme'
 
 describe('withAlpha', () => {
   it('converts a hex color to an rgba string at the given alpha', () => {

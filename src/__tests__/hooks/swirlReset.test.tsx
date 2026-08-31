@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react-native'
 
-import { SwirlResetProvider, useRegisterSwirlReset, useSwirlReset } from './swirlReset'
+import { SwirlResetProvider, useRegisterSwirlReset, useSwirlReset } from '@/hooks/swirlReset'
 
 describe('useSwirlReset', () => {
   it('calls whatever reset functions were most recently registered', async () => {

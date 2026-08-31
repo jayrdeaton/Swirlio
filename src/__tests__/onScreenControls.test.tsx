@@ -1,5 +1,5 @@
 import { act, fireEvent, render, within } from '@testing-library/react-native'
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { Platform } from 'react-native'
 import * as gestureHandlerModule from 'react-native-gesture-handler'
 
@@ -20,7 +20,6 @@ const gestureTestUtils = (gestureHandlerModule as typeof gestureHandlerModule & 
 // jest.mock factories can't close over module-scope imports — require() inside the factory is the
 // standard escape hatch (see colorListEditor.test.tsx for the same pattern).
 jest.mock('react-native-paper', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
   return {
     Icon: ({ source }: any) => <RN.Text testID='thumb-icon'>{source}</RN.Text>,
@@ -54,7 +53,6 @@ jest.mock('react-native-paper', () => {
 const mockSelection = jest.fn()
 const mockNotification = jest.fn()
 jest.mock('@rific/feedback-press', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
   const actual = jest.requireActual('@rific/feedback-press')
   return {
@@ -106,7 +104,6 @@ jest.mock('@/hooks/swirlRandomize', () => ({
 let mockPattern = 'spiral'
 let mockDashStyle = 'solid'
 jest.mock('@/hooks/useSwirlSettings', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { useState } = require('react')
   return {
     useSwirlSettings: () => {
@@ -140,7 +137,6 @@ jest.mock('@/hooks/useSwirlSettings', () => {
 // the real-blur render apart from the solid-fallback one without inspecting styles.
 let mockBlurEnabled = true
 jest.mock('@rific/auto-paper', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
   return {
     useBlur: () => mockBlurEnabled,

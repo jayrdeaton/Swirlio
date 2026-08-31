@@ -1,4 +1,4 @@
-import { copyCountForMirrorLines, farthestCornerDistance, inverseWedgeVector, mirrorLinesFromSigned, reflectionMatrix, rotationMatrix, signedMirrorLines, wedgeAngleDegrees, wedgeClipPath, wedgeContentTransform, wedgeIndexAtPoint, wedgePath, wedgeVector } from './kaleidoscope'
+import { copyCountForMirrorLines, farthestCornerDistance, inverseWedgeVector, mirrorLinesFromSigned, reflectionMatrix, rotationMatrix, signedMirrorLines, wedgeAngleDegrees, wedgeClipPath, wedgeContentTransform, wedgeIndexAtPoint, wedgePath, wedgeVector } from '@/constants/kaleidoscope'
 
 describe('copyCountForMirrorLines', () => {
   it('is 1 at 0 lines (unmirrored), and 2x lines otherwise', () => {

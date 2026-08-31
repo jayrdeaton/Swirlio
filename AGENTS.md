@@ -1,3 +1,5 @@
-# Expo HAS CHANGED
+# AGENTS.md
 
-Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
+This file provides guidance to Codex when working in this repository.
+
+See [.claude/CLAUDE.md](.claude/CLAUDE.md) for full repo guidance (commands, tooling, testing, code style, architecture, CI) — kept there as the single source of truth to avoid this file and that one silently drifting apart.

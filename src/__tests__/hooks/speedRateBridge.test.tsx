@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react-native'
 
-import { SpeedRateBridgeProvider, SpeedRateWriters, useRegisterSpeedRateWriters, useSpeedRateBridge } from './speedRateBridge'
+import { SpeedRateBridgeProvider, SpeedRateWriters, useRegisterSpeedRateWriters, useSpeedRateBridge } from '@/hooks/speedRateBridge'
 
 function makeWriters(): SpeedRateWriters {
   return {

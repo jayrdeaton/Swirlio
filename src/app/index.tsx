@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { isDarkColor } from '@rific/auto-paper'
 import { useVibration } from '@rific/feedback-press'
 import { StatusBar } from 'expo-status-bar'
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { cancelAnimation, runOnJS, useDerivedValue, useFrameCallback, useSharedValue, withSpring, withTiming } from 'react-native-reanimated'
@@ -35,31 +35,7 @@ import { MAX_PARTICLE_COLOR_BUCKETS, useParticleField } from '@/hooks/useParticl
 import { useRerollUnits } from '@/hooks/useRerollUnits'
 import { useShakeToRandomize } from '@/hooks/useShakeToRandomize'
 import { useSwapColors } from '@/hooks/useSwapColors'
-import {
-  DEFAULT_DASH_STYLE,
-  MAX_BOUNCE_FRICTION,
-  MAX_CROP_RADIUS,
-  MAX_CYCLE_SPEED,
-  MAX_GRAVITY,
-  MAX_HOLE_RADIUS,
-  MAX_MIRROR_GAP,
-  MAX_PARTICLE_COUNT,
-  MAX_PARTICLE_SIZE,
-  MAX_POLYGON_SIDES,
-  MAX_STROKE_WIDTH,
-  MAX_TIGHTNESS,
-  MIN_BOUNCE_FRICTION,
-  MIN_CROP_RADIUS,
-  MIN_GRAVITY,
-  MIN_HOLE_RADIUS,
-  MIN_MIRROR_GAP,
-  MIN_PARTICLE_COUNT,
-  MIN_PARTICLE_SIZE,
-  MIN_POLYGON_SIDES,
-  MIN_STROKE_WIDTH,
-  MIN_TIGHTNESS,
-  useSwirlSettings
-} from '@/hooks/useSwirlSettings'
+import { DEFAULT_DASH_STYLE, MAX_BOUNCE_FRICTION, MAX_CROP_RADIUS, MAX_CYCLE_SPEED, MAX_GRAVITY, MAX_HOLE_RADIUS, MAX_MIRROR_GAP, MAX_PARTICLE_COUNT, MAX_PARTICLE_SIZE, MAX_POLYGON_SIDES, MAX_STROKE_WIDTH, MAX_TIGHTNESS, MIN_BOUNCE_FRICTION, MIN_CROP_RADIUS, MIN_GRAVITY, MIN_HOLE_RADIUS, MIN_MIRROR_GAP, MIN_PARTICLE_COUNT, MIN_PARTICLE_SIZE, MIN_POLYGON_SIDES, MIN_STROKE_WIDTH, MIN_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
 import { TILT_EASE_SPRING, useTiltGravityCenter } from '@/hooks/useTiltGravityCenter'
 
 const BASE_ROTATION_DURATION_MS = 12000
@@ -320,40 +296,11 @@ const GROUP_GESTURE_TARGET: Partial<Record<ControlGroup, GestureTarget>> = {
   line: 'pattern',
   mirror: 'mirror',
   particles: 'particles',
-  pattern: 'pattern',
+  pattern: 'pattern'
 }
 
 export default function SwirlScreen() {
-  const {
-    settings,
-    resetSettings,
-    setBackgroundColors,
-    setBackgroundCycleSpeed,
-    setBounceFriction,
-    setCropRadius,
-    setDashStyle,
-    setForegroundColors,
-    setForegroundCycleSpeed,
-    setGestureTarget,
-    setGravity,
-    setHoleRadius,
-    setMirrorAlternateColors,
-    setMirrorGap,
-    setMirrorLines,
-    setMirrorRotationSpeed,
-    setParticleColors,
-    setParticleCount,
-    setParticleShapes,
-    setParticleSize,
-    setPattern,
-    setPatternVisible,
-    setPolygonSides,
-    setRotationSpeed,
-    setStrokeWidth,
-    setTightness,
-    setTriggerStackExpanded,
-    setZoomSpeed
-  } = useSwirlSettings()
+  const { settings, resetSettings, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setDashStyle, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPatternVisible, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setTriggerStackExpanded, setZoomSpeed } = useSwirlSettings()
   const { medium, notification: hapticNotification, selection: hapticSelection } = useVibration()
   const playTypewriter = useTypewriterSound()
   const playShutter = useShutterSound()
@@ -1260,16 +1207,7 @@ export default function SwirlScreen() {
   // file (see targetsPatternRotation and friends further down) — used both here (gating
   // useParticleField's own gestures) and again near the pinch/rotation gestures below.
   const targetsParticles = activeTargets.has('particles')
-  const {
-    positionX: particlePositionX,
-    positionY: particlePositionY,
-    colorIndex: particleColorIndex,
-    shapeIndex: particleShapeIndex,
-    borderColorIndex: particleBorderColorIndex,
-    particleFrameTick,
-    particlePanGesture,
-    particleGatherGesture
-  } = useParticleField(particleCount, gravity, bounceFriction, effectiveGravityCenterX, effectiveGravityCenterY, particleSize, mirrorAnchorX, mirrorAnchorY, particleWindowWidth, particleWindowHeight, settings.mirrorLines, targetsParticles)
+  const { positionX: particlePositionX, positionY: particlePositionY, colorIndex: particleColorIndex, shapeIndex: particleShapeIndex, borderColorIndex: particleBorderColorIndex, particleFrameTick, particlePanGesture, particleGatherGesture } = useParticleField(particleCount, gravity, bounceFriction, effectiveGravityCenterX, effectiveGravityCenterY, particleSize, mirrorAnchorX, mirrorAnchorY, particleWindowWidth, particleWindowHeight, settings.mirrorLines, targetsParticles)
 
   // Drives GravityWell's particles (Spiral.tsx) — bounceFriction's own speed, full stop (see
   // gravityParticleFrictionSpeed's own comment and GRAVITY_PARTICLE_FRICTION_MIN/MAX_SPEED above).
@@ -1636,22 +1574,18 @@ export default function SwirlScreen() {
   }, [particleSize, settings.particleSize])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/immutability
     particleShapeCount.value = settings.particleShapes.length
   }, [particleShapeCount, settings.particleShapes.length])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/immutability
     particleColorCount.value = settings.particleColors.length
   }, [particleColorCount, settings.particleColors.length])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/immutability
     particleBorderColorCount.value = settings.particleBorderColors.length
   }, [particleBorderColorCount, settings.particleBorderColors.length])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/immutability
     particleBorderWidth.value = settings.particleBorderWidth
   }, [particleBorderWidth, settings.particleBorderWidth])
 
@@ -2287,35 +2221,7 @@ export default function SwirlScreen() {
       node.removeEventListener?.('wheel', onWheel)
       if (idleTimer !== null) clearTimeout(idleTimer)
     }
-  }, [
-    targetsMirrorPinch,
-    targetsPatternZoom,
-    targetsGravityPinch,
-    targetsCropPinch,
-    targetsParticlesPinch,
-    hideControls,
-    setMirrorGap,
-    setTightness,
-    setGravity,
-    setCropRadius,
-    setParticleSize,
-    selection,
-    basePulse,
-    manualPulseOffset,
-    mirrorGap,
-    gravity,
-    cropRadius,
-    particleSize,
-    reversed,
-    startMirrorGap,
-    startPulseOffset,
-    startTightness,
-    startGravity,
-    startCropRadius,
-    startParticleSize,
-    tightness,
-    gravityStuckAtZero
-  ])
+  }, [targetsMirrorPinch, targetsPatternZoom, targetsGravityPinch, targetsCropPinch, targetsParticlesPinch, hideControls, setMirrorGap, setTightness, setGravity, setCropRadius, setParticleSize, selection, basePulse, manualPulseOffset, mirrorGap, gravity, cropRadius, particleSize, reversed, startMirrorGap, startPulseOffset, startTightness, startGravity, startCropRadius, startParticleSize, tightness, gravityStuckAtZero])
 
   // The twist/rotation gesture's job is Focus now, not "spin the pattern": rotationSpeed/
   // mirrorRotationSpeed live on the canvas's own outer-field drag instead (see useEpicenter.ts). Pattern
@@ -2588,7 +2494,39 @@ export default function SwirlScreen() {
       <EdgeRevealZones active={!controlsVisible} onReveal={revealControls} triggerStackExpanded={settings.triggerStackExpanded} onPause={pause} onRecenterEverything={recenterEverything} onExpandTriggerStack={expandTriggerStack} onRandomizeEverything={randomizeEverything} />
       {/* Forced on (independent of controlsVisible) while the group sheet is open — see
       OnScreenControls' own Portal, which keeps the trigger stack reachable the whole time. */}
-      <OnScreenControls visible={controlsVisible || groupSheetVisible} activeTargets={activeTargets} backDisabled={backDisabled} frozen={frozen} onToggleFrozen={toggleFrozen} onRecenterEverything={recenterEverything} gestureFanOpen={gestureFanOpen} onGestureFanOpenChange={setGestureFanOpen} onSelectGestureTarget={selectGestureTarget} onRandomizeGestureTarget={randomizeGestureTarget} onRecenter={recenterGestureTarget} onReveal={revealControls} onGoBack={goBack} onResetAllSettings={resetAllSettings} onGoForward={goForward} onGoForwardBatch={goForwardBatch} onAlternateBackground={alternateBackground} onCycleBackgroundTwoTone={cycleBackgroundTwoTone} onRandomizeForeground={randomizeForeground} onGrowForeground={growForeground} onCycleShape={nextPattern} onCycleLineType={nextDashStyle} onCycleSides={cycleSides} onResetLineToSolid={resetLineToSolid} onCycleParticleShape={nextParticleShape} onGrowParticleShapes={growParticleShapes} onRandomizeParticleColors={randomizeParticleColors} onGrowParticleColors={growParticleColors} gravityRepelling={settings.gravity < 0} onReverseGravity={reverseGravity} onHideControls={hideControls} />
+      <OnScreenControls
+        visible={controlsVisible || groupSheetVisible}
+        activeTargets={activeTargets}
+        backDisabled={backDisabled}
+        frozen={frozen}
+        onToggleFrozen={toggleFrozen}
+        onRecenterEverything={recenterEverything}
+        gestureFanOpen={gestureFanOpen}
+        onGestureFanOpenChange={setGestureFanOpen}
+        onSelectGestureTarget={selectGestureTarget}
+        onRandomizeGestureTarget={randomizeGestureTarget}
+        onRecenter={recenterGestureTarget}
+        onReveal={revealControls}
+        onGoBack={goBack}
+        onResetAllSettings={resetAllSettings}
+        onGoForward={goForward}
+        onGoForwardBatch={goForwardBatch}
+        onAlternateBackground={alternateBackground}
+        onCycleBackgroundTwoTone={cycleBackgroundTwoTone}
+        onRandomizeForeground={randomizeForeground}
+        onGrowForeground={growForeground}
+        onCycleShape={nextPattern}
+        onCycleLineType={nextDashStyle}
+        onCycleSides={cycleSides}
+        onResetLineToSolid={resetLineToSolid}
+        onCycleParticleShape={nextParticleShape}
+        onGrowParticleShapes={growParticleShapes}
+        onRandomizeParticleColors={randomizeParticleColors}
+        onGrowParticleColors={growParticleColors}
+        gravityRepelling={settings.gravity < 0}
+        onReverseGravity={reverseGravity}
+        onHideControls={hideControls}
+      />
     </View>
   )
 }

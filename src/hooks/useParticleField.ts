@@ -233,6 +233,10 @@ export function useParticleField(
   // Float32Array (not Int32Array) purely so it shares the exact same SharedValue<Float32Array> shape
   // every other struct-of-arrays field here already has — values are always written/read as whole
   // numbers regardless.
+  // useSharedValue has no lazy-initializer form (unlike useState) — its argument is evaluated on
+  // every render, only the first result is kept, matching this comment's own "assigned once"
+  // intent, but with no pure-render alternative Reanimated's own API offers for it.
+  // eslint-disable-next-line react-hooks/purity
   const colorIndex = useSharedValue(makeInitialFloatArray(() => Math.floor(Math.random() * MAX_PARTICLE_COLOR_BUCKETS)))
   // Same "assigned once, resolved against whatever's currently enabled at render time" split as
   // colorIndex just above — a bead's own shape bucket is fixed for its whole lifetime, but which
@@ -243,6 +247,7 @@ export function useParticleField(
   // right now), for the same reason colorIndex's own range is the full MAX_PARTICLE_COLOR_BUCKETS
   // regardless of the live color list's length: enabling a shape later shouldn't require re-seeding
   // every already-tumbling bead just to make some of them eligible to show it.
+  // eslint-disable-next-line react-hooks/purity -- see colorIndex's own comment above
   const shapeIndex = useSharedValue(makeInitialFloatArray(() => Math.floor(Math.random() * PARTICLE_SHAPE_ORDER.length)))
   // Same "assigned once, resolved against whatever's currently enabled at render time" split as
   // colorIndex above, just for each bead's own outline instead of its fill — an independent random
@@ -250,6 +255,7 @@ export function useParticleField(
   // edits separately from particleColors (see useSwirlSettings.tsx's own particleBorderColors comment
   // for why this replaced an earlier computed-from-the-fill-color approach). Same full
   // MAX_PARTICLE_COLOR_BUCKETS-wide range and same reasoning for it as colorIndex's own comment.
+  // eslint-disable-next-line react-hooks/purity -- see colorIndex's own comment above
   const borderColorIndex = useSharedValue(makeInitialFloatArray(() => Math.floor(Math.random() * MAX_PARTICLE_COLOR_BUCKETS)))
 
   // Every point-attraction force in the frame callback below (gravity well, gather) pulls
@@ -326,11 +332,11 @@ export function useParticleField(
     const mirrorOriginY = centerY + mirrorAnchorY.value * windowHeight
     const copyIndex = copyCount > 1 ? wedgeIndexAtPoint(mirrorOriginX, mirrorOriginY, screenX, screenY, wedgeAngleDeg, copyCount) : 0
     const corrected = inverseWedgeVector(screenX - mirrorOriginX, screenY - mirrorOriginY, copyIndex, wedgeAngleDeg)
-    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+
     touchTargetX.value = mirrorOriginX + corrected.dx - centerX
-    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+
     touchTargetY.value = mirrorOriginY + corrected.dy - centerY
-    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+
     touchCopyIndex.value = copyIndex
   }
 
@@ -342,9 +348,9 @@ export function useParticleField(
   const updateTouchVelocity = (screenVx: number, screenVy: number) => {
     'worklet'
     const corrected = inverseWedgeVector(screenVx, screenVy, touchCopyIndex.value, wedgeAngleDeg)
-    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+
     touchVelocityX.value = corrected.dx
-    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+
     touchVelocityY.value = corrected.dy
   }
 
@@ -365,7 +371,7 @@ export function useParticleField(
       if (!targetsParticles) return
       updateTouchTarget(event.x, event.y)
       updateTouchVelocity(event.velocityX, event.velocityY)
-      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+
       swipeActive.value = true
     })
     .onUpdate((event) => {
@@ -374,14 +380,13 @@ export function useParticleField(
       updateTouchVelocity(event.velocityX, event.velocityY)
     })
     .onEnd(() => {
-      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       swipeActive.value = false
       // Also the authoritative "stop gathering" signal for a touch that actually moved — see
       // particleGatherGesture's own onEnd comment for why *that* gesture's own onEnd can't be trusted
       // to fire on the real finger-lift once a drag is involved, and why this one, despite watching
       // the same physical touch, reliably can. Harmless to set unconditionally even when nothing was
       // ever gathered (gatherActive already false, same as swipeActive above).
-      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+
       gatherActive.value = false
     })
 
@@ -426,12 +431,12 @@ export function useParticleField(
     .onStart((event) => {
       if (!targetsParticles) return
       updateTouchTarget(event.x, event.y)
-      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+
       gatherActive.value = true
     })
     .onEnd((_event, success) => {
       if (!success) return
-      // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
+
       gatherActive.value = false
     })
 
@@ -593,7 +598,6 @@ export function useParticleField(
       }
     }
 
-    // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
     particleFrameTick.value = particleFrameTick.value + 1
   }, true)
 

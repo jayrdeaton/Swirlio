@@ -1,5 +1,5 @@
 import { act, render } from '@testing-library/react-native'
-import React, { useState } from 'react'
+import { useState } from 'react'
 import * as gestureHandlerModule from 'react-native-gesture-handler'
 
 import { SettingSlider } from '@/components/SettingSlider'
@@ -13,7 +13,6 @@ const gestureTestUtils = (gestureHandlerModule as typeof gestureHandlerModule & 
 // jest.mock factories can't close over module-scope imports — require() inside the factory is the
 // standard escape hatch (see colorListEditor.test.tsx for the same pattern).
 jest.mock('react-native-paper', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
   return {
     // A real pass-through (not the usual `() => null`) so the showLabels tests below can assert on
@@ -31,7 +30,6 @@ jest.mock('react-native-paper', () => {
 // subpath directly, and that mock only echoes back `children` — MdIcon never passes any, so it'd
 // render nothing to assert against. This local, more specific mock stands in for it here instead.
 jest.mock('@expo/vector-icons/MaterialCommunityIcons', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native')
   return {
     __esModule: true,

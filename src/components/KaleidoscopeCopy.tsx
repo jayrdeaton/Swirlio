@@ -174,8 +174,8 @@ export function KaleidoscopeCopy({ copyIndex, wedgeAngleDeg, mirrorGap, active, 
   const positionedContent = (
     <>
       {patternVisible && (
-      <Group matrix={innerTransform} clip={cropClip}>
-        {/* strokeCap has no effect on a solid stroke for the closed-loop patterns (rings/polygon/star/
+        <Group matrix={innerTransform} clip={cropClip}>
+          {/* strokeCap has no effect on a solid stroke for the closed-loop patterns (rings/polygon/star/
         flower's own contours already close via addCircle/addPoly's `close: true`) or for spiral/
         starburst's open curves either — but every pattern's own dashed style needs it: a near-zero-
         length dash with the default butt cap renders as essentially nothing, and round is what turns it
@@ -191,10 +191,10 @@ export function KaleidoscopeCopy({ copyIndex, wedgeAngleDeg, mirrorGap, active, 
         pinch in cleanly. 'round' sidesteps the miter-limit cutover entirely — every join, however sharp,
         just gets a small rounded cap — rather than raising the limit instead, which only pushes the same
         cutover to an even sharper (but still reachable) angle. */}
-        <Path path={geometry.path} style='stroke' strokeWidth={geometry.width} strokeCap='round' strokeJoin='round' color={strokeColor}>
-          <DashPathEffect intervals={geometry.intervals} />
-        </Path>
-      </Group>
+          <Path path={geometry.path} style='stroke' strokeWidth={geometry.width} strokeCap='round' strokeJoin='round' color={strokeColor}>
+            <DashPathEffect intervals={geometry.intervals} />
+          </Path>
+        </Group>
       )}
       {/* Drawn after the pattern's own Group, so beads sit visually on top of it — a sibling Group
       using particleTransform (translate to the fixed window center, no rotation) instead of
