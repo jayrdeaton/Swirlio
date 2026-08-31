@@ -144,10 +144,14 @@ describe('EdgeRevealZones', () => {
   it('calls onReveal on hover for every zone, not just press — the only way a mouse user (or web preview) can bring the controls back without a touch', async () => {
     const { props, getByTestId } = await renderZones()
 
+    // fireEvent is itself async (it awaits its own act() call internally) — firing three in a row
+    // without awaiting each one first left their act() scopes racing each other, which surfaced as
+    // "overlapping act() calls" console errors under CI/CPU load even though the assertion below
+    // still passed either way.
     await act(async () => {
-      fireEvent(getByTestId('edge-reveal-top-left'), 'hoverIn')
-      fireEvent(getByTestId('edge-reveal-bottom'), 'hoverIn')
-      fireEvent(getByTestId('edge-reveal-top-right'), 'hoverIn')
+      await fireEvent(getByTestId('edge-reveal-top-left'), 'hoverIn')
+      await fireEvent(getByTestId('edge-reveal-bottom'), 'hoverIn')
+      await fireEvent(getByTestId('edge-reveal-top-right'), 'hoverIn')
     })
 
     expect(props.onReveal).toHaveBeenCalledTimes(3)
