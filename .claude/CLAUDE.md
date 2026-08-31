@@ -25,6 +25,10 @@ npm run build:web       # expo export -p web
 
 Always run `npm run lint` before finishing any task. This is an app (`"private": true`, no publish scripts) — `verify` doesn't include a build step.
 
+`build:development`/`build:preview`/`build:production`/`build:web`, and `update` (which `update:development`/`update:preview`/`update:production` all delegate to via `npm run update -- --branch ...`), are each gated behind `verify` by prefixing `npm run verify && ` directly onto the script's own definition — e.g. `"build:development": "npm run verify && expo prebuild --clean && eas build --profile development --local"`. Not redundant with CI: `npm-ci.yml` only runs after a push, and EAS builds/OTA updates aren't triggered through a GitHub Action at all (unlike npm packages' tag-triggered `publish.yml`) — this local gate is the *only* checkpoint that exists for this app, not a second layer behind one that already runs earlier.
+
+An earlier pass implemented this via a separate `npm` `pre<script>` hook per target (`"prebuild:development": "npm run verify"` sitting before `"build:development"`, mirroring how npm library packages gate `npm version` behind `preversion`) and was deliberately reverted. The hook mechanism exists to intercept *builtin* npm commands you don't control the invocation of — `npm version` isn't a script you write, so `preversion` is the only way to gate it. `build:development` and `update` are scripts we author ourselves; there's no builtin invocation to intercept, so wrapping them in a same-named hook is pure indirection (3 build targets + `update` = 4 extra hook scripts doing nothing a direct `&&` prefix doesn't already do). Inline chaining is the correct form here — reserve the `pre<script>`/`post<script>` mechanism for actual npm lifecycle commands.
+
 ## Tooling
 
 Onboarded onto the shared `@infinitetoken` config packages (`eslint-config`, `jest-config`, `tsconfig`) — previously hand-rolled its own `eslint-config-expo`-based config, `jest-expo`-preset-direct config, and `expo/tsconfig.base`-extending tsconfig.
