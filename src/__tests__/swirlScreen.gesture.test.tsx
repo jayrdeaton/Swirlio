@@ -1685,23 +1685,52 @@ describe('SwirlScreen gestures', () => {
   // tests failing in 23 minutes instead of 2 in under 2) by turning the same stall into something every
   // test in the block hit, not just the first two. Skipping the whole block rather than continuing to
   // guess against live CI runs; revisit without that time pressure.
-  describe.skip('on-screen controls visibility', () => {
+  describe('on-screen controls visibility', () => {
+    // TEMP diagnostic, round 3 — see the describe.skip comment this replaced for the full
+    // investigation history. Spies on every real setTimeout call (site + delay + timestamp) during
+    // this block, with zero control-flow change, to test a specific new hypothesis: that the
+    // controls-auto-hide effect's own setTimeout(..., 5000) (index.tsx ~566-571, which arms
+    // unconditionally on every mount under this suite's default settings) is implicated in the
+    // render()-time stall — since, unlike React Scheduler's own internal timer refs (verified via
+    // source reading to be captured from real Node timers at module-load, before fake timers ever
+    // exist, and therefore immune to jest.useFakeTimers()), this one reads global.setTimeout fresh,
+    // at the moment the mount's passive-effect flush actually calls it.
+    let underlyingSetTimeout: typeof setTimeout | undefined
     beforeEach(() => {
       jest.useFakeTimers()
+      underlyingSetTimeout = global.setTimeout
+      // eslint-disable-next-line no-console -- TEMP diagnostic, round 3
+      const log = (...args: unknown[]) => console.log('[DIAG3]', Date.now(), ...args)
+      // Direct reassignment (not jest.spyOn) so the captured stack trace shows the real caller, not
+      // jest-mock's own wrapper frames.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matching global.setTimeout's own broad signature for this diagnostic wrapper
+      global.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+        log('setTimeout called, delay=', args[1], 'stack=', new Error().stack?.split('\n').slice(1, 5).join(' | '))
+        return underlyingSetTimeout!(...args)
+      }) as any
     })
 
     afterEach(() => {
+      if (underlyingSetTimeout) global.setTimeout = underlyingSetTimeout
       jest.useRealTimers()
     })
 
     it('starts visible', async () => {
+      // eslint-disable-next-line no-console -- TEMP diagnostic, round 3
+      const log = (...args: unknown[]) => console.log('[DIAG3]', Date.now(), ...args)
+      log('renderScreen: start')
       await renderScreen()
+      log('renderScreen: resolved')
 
       expect(getLastControlsProps().visible).toBe(true)
-    })
+    }, 60000)
 
     it('swaps colors on a tap without hiding the controls', async () => {
+      // eslint-disable-next-line no-console -- TEMP diagnostic, round 3
+      const log = (...args: unknown[]) => console.log('[DIAG3]', Date.now(), ...args)
+      log('renderScreen: start')
       await renderScreen()
+      log('renderScreen: resolved')
 
       await act(async () => {
         singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
@@ -1709,10 +1738,14 @@ describe('SwirlScreen gestures', () => {
 
       expect(getLastControlsProps().visible).toBe(true)
       expect(setForegroundColors).toHaveBeenCalledWith(['#000000'])
-    })
+    }, 60000)
 
     it('hides when a pinch starts', async () => {
+      // eslint-disable-next-line no-console -- TEMP diagnostic, round 3
+      const log = (...args: unknown[]) => console.log('[DIAG3]', Date.now(), ...args)
+      log('renderScreen: start')
       await renderScreen()
+      log('renderScreen: resolved')
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
 
       await act(async () => {
@@ -1720,7 +1753,7 @@ describe('SwirlScreen gestures', () => {
       })
 
       expect(getLastControlsProps().visible).toBe(false)
-    })
+    }, 60000)
 
     it('hides when a rotation starts', async () => {
       await renderScreen()
