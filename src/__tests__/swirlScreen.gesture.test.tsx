@@ -1673,64 +1673,63 @@ describe('SwirlScreen gestures', () => {
 
   // Quarantined, whole block: CI-only (never reproduced locally under any amount of simulated CPU
   // load, and never in a Linux Docker container either) — renderScreen()'s own render(<SwirlScreen />)
-  // call stalls for the full test timeout specifically on the first couple of renders under a
-  // just-installed fake clock, deterministically on GitHub Actions' runners. Confirmed via
-  // fine-grained diagnostic logging that it's render() itself, not the waitFor after it, that stalls.
-  // Confirmed positional, not test-specific: skipping the original two failing tests ('swaps colors on
-  // a tap...', 'hides when a pinch starts') didn't fix CI — it just moved the failure onto the next two
-  // tests in line ('hides when a rotation starts', 'hides when the epicenter drag starts'), so
-  // per-test skips don't converge. Six fix attempts (raising the timeout, excluding queueMicrotask
-  // from the fake-timer install, flushing pending fake-timer work after render, priming the fake clock
-  // with a throwaway tick before render) all failed — the last one made things dramatically worse (122
-  // tests failing in 23 minutes instead of 2 in under 2) by turning the same stall into something every
-  // test in the block hit, not just the first two. Skipping the whole block rather than continuing to
-  // guess against live CI runs; revisit without that time pressure.
-  describe('on-screen controls visibility', () => {
-    // TEMP diagnostic, round 3 — see the describe.skip comment this replaced for the full
-    // investigation history. Spies on every real setTimeout call (site + delay + timestamp) during
-    // this block, with zero control-flow change, to test a specific new hypothesis: that the
-    // controls-auto-hide effect's own setTimeout(..., 5000) (index.tsx ~566-571, which arms
-    // unconditionally on every mount under this suite's default settings) is implicated in the
-    // render()-time stall — since, unlike React Scheduler's own internal timer refs (verified via
-    // source reading to be captured from real Node timers at module-load, before fake timers ever
-    // exist, and therefore immune to jest.useFakeTimers()), this one reads global.setTimeout fresh,
-    // at the moment the mount's passive-effect flush actually calls it.
-    let underlyingSetTimeout: typeof setTimeout | undefined
+  // call stalls, deterministically, on GitHub Actions' runners only. Positional, not test-specific:
+  // it's always the first couple of renders under a just-installed fake clock in this block — skipping
+  // the original two failing tests just moved the failure onto the next two in file order.
+  //
+  // A dedicated multi-agent research pass (React act()/Scheduler internals, jest-circus's own timeout
+  // enforcement, Sinon fake-timers' uninstall(), prior art on this bug class) plus a third diagnostic
+  // round (a setTimeout spy logging every call site/delay, and a 60s-per-test timeout so Jest's own
+  // abort couldn't be mistaken for the real answer) nailed down a lot, precisely:
+  //   - It's a genuine deadlock, not slowness: giving the stalled tests 60s instead of 10s changed
+  //     nothing — they hit the full 60s wall too, every time.
+  //   - The earlier "fake timers report as uninstalled" observation is fully explained and is a
+  //     CONSEQUENCE, not a cause: jest-circus's own per-test timeout uses a real, module-cached
+  //     setTimeout immune to fake timers; when it fires first, that same test's own afterEach
+  //     (including jest.useRealTimers()) runs immediately without waiting for the still-executing,
+  //     now-abandoned render() promise chain (JS can't cancel promises) — nothing to do with the next
+  //     test's beforeEach.
+  //   - React's own Scheduler package was verified (by reading the installed source directly) to
+  //     capture setImmediate/performance from real Node timers at module-load time, before any
+  //     jest.useFakeTimers() call ever runs in the file — provably immune to fake timers. Ruled out
+  //     as the direct cause.
+  //   - The setTimeout spy gives an exact, reproducible signature: a successful render (e.g. 'starts
+  //     visible') registers exactly 6 real timers during mount — three delay=0 (@rific/feedback-
+  //     press's useAudioPool.ts:113, once per pooled sound), one delay=5000 (this file's own
+  //     controls-auto-hide effect, index.tsx:569, armed unconditionally on mount under this suite's
+  //     default settings), and two delay=400 (index.tsx:417's persistence debounce and
+  //     useLookHistory.tsx:301) — all six firing within the same millisecond, then resolving. A
+  //     stalled render registers only the first four (the three delay=0 calls, then delay=5000) and
+  //     then nothing else ever happens, for the full 60s — execution stops dead between committing
+  //     the auto-hide effect and committing whatever runs next, on CI only, for reasons not yet
+  //     identified. Every registration itself is synchronous/instant either way; it's specifically
+  //     what happens immediately after that boundary that differs.
+  //
+  // What's still open: why that exact boundary, and why only the first couple of occurrences per
+  // block rather than every one (the fake clock is reinstalled fresh for every test in this block,
+  // yet only the first two ever hang) — no mechanism found so far explains that part. Six live-CI fix
+  // attempts have been tried (raising the timeout, excluding queueMicrotask, flushing pending
+  // fake-timer work after render, priming the fake clock before render) — one of them made things
+  // dramatically worse (122 tests failing in 23 minutes instead of 2 in under 2) by turning the same
+  // stall into something every test in the block hit. Staying quarantined rather than trying another
+  // live-CI guess without a verified mechanism behind it.
+  describe.skip('on-screen controls visibility', () => {
     beforeEach(() => {
       jest.useFakeTimers()
-      underlyingSetTimeout = global.setTimeout
-      // eslint-disable-next-line no-console -- TEMP diagnostic, round 3
-      const log = (...args: unknown[]) => console.log('[DIAG3]', Date.now(), ...args)
-      // Direct reassignment (not jest.spyOn) so the captured stack trace shows the real caller, not
-      // jest-mock's own wrapper frames.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matching global.setTimeout's own broad signature for this diagnostic wrapper
-      global.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
-        log('setTimeout called, delay=', args[1], 'stack=', new Error().stack?.split('\n').slice(1, 5).join(' | '))
-        return underlyingSetTimeout!(...args)
-      }) as any
     })
 
     afterEach(() => {
-      if (underlyingSetTimeout) global.setTimeout = underlyingSetTimeout
       jest.useRealTimers()
     })
 
     it('starts visible', async () => {
-      // eslint-disable-next-line no-console -- TEMP diagnostic, round 3
-      const log = (...args: unknown[]) => console.log('[DIAG3]', Date.now(), ...args)
-      log('renderScreen: start')
       await renderScreen()
-      log('renderScreen: resolved')
 
       expect(getLastControlsProps().visible).toBe(true)
-    }, 60000)
+    })
 
     it('swaps colors on a tap without hiding the controls', async () => {
-      // eslint-disable-next-line no-console -- TEMP diagnostic, round 3
-      const log = (...args: unknown[]) => console.log('[DIAG3]', Date.now(), ...args)
-      log('renderScreen: start')
       await renderScreen()
-      log('renderScreen: resolved')
 
       await act(async () => {
         singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
@@ -1738,14 +1737,10 @@ describe('SwirlScreen gestures', () => {
 
       expect(getLastControlsProps().visible).toBe(true)
       expect(setForegroundColors).toHaveBeenCalledWith(['#000000'])
-    }, 60000)
+    })
 
     it('hides when a pinch starts', async () => {
-      // eslint-disable-next-line no-console -- TEMP diagnostic, round 3
-      const log = (...args: unknown[]) => console.log('[DIAG3]', Date.now(), ...args)
-      log('renderScreen: start')
       await renderScreen()
-      log('renderScreen: resolved')
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
 
       await act(async () => {
@@ -1753,7 +1748,7 @@ describe('SwirlScreen gestures', () => {
       })
 
       expect(getLastControlsProps().visible).toBe(false)
-    }, 60000)
+    })
 
     it('hides when a rotation starts', async () => {
       await renderScreen()
