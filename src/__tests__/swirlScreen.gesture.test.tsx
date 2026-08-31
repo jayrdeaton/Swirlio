@@ -336,8 +336,36 @@ const oneFingerLongPress = () => {
 }
 const twoFingerLongPress = () => gestureTestUtils.getLastGesture('LongPress')
 
+// Only meaningful when fake timers are currently active (checked the same side-effect-free way
+// Testing Library's own waitFor does internally, via setTimeout's sinon-installed .clock property —
+// jest.isMockFunction(setTimeout)/jest.getTimerCount() both work too, but the latter logs a console
+// warning when timers AREN'T faked, which would fire on every one of this file's 200+ real-timer
+// tests). A zero-length advance is a no-op in terms of fake time, but it still runs one full
+// act()-wrapped tick of Testing Library's own timer-advance machinery, giving any effect that's
+// mid-flight (still waiting on a microtask, timer, or promise queued before fake timers took over)
+// a chance to settle *before* the render below's own waitFor has to find out for itself.
+//
+// Necessary because, confirmed via CI-only diagnostic logging (never reproduced locally, on any
+// amount of simulated CPU load): when fake timers are already active for the *entire* mount (every
+// test below installs them in its own describe block's beforeEach), waitFor(() => expect(mockSpiralSpy)
+// .toHaveBeenCalled()) can find that expectation not yet true on its first, synchronous check — and
+// its fallback for that under fake timers is a per-50ms-tick advance-and-recheck loop, not a cheap
+// wait. Each tick was real-CPU-costly enough on GitHub Actions' shared runners (never observed
+// locally) to blow through the whole test's timeout budget before the loop ever caught up — which is
+// what caused two CI-only "Exceeded timeout" failures. Flushing once, explicitly, right here, means
+// the mount has every chance to fully settle before waitFor's own fast, synchronous first check —
+// so that loop is never needed.
+async function flushPendingFakeTimerWork() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sinon's own runtime marker, not exposed in @types/jest
+  if (typeof (setTimeout as any).clock === 'undefined') return
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(0)
+  })
+}
+
 async function renderScreen() {
   const result = await render(<SwirlScreen />)
+  await flushPendingFakeTimerWork()
   await waitFor(() => expect(mockSpiralSpy).toHaveBeenCalled())
   return result
 }
@@ -1687,49 +1715,23 @@ describe('SwirlScreen gestures', () => {
     })
 
     it('swaps colors on a tap without hiding the controls', async () => {
-      // eslint-disable-next-line no-console -- TEMP diagnostic for a CI-only hang, see PR discussion
-      console.log('[DIAG]', Date.now(), 'A: before renderScreen')
       await renderScreen()
-      // eslint-disable-next-line no-console -- TEMP diagnostic
-      console.log('[DIAG]', Date.now(), 'B: renderScreen resolved, pendingTimers=', jest.getTimerCount())
 
-      const actPromise = act(async () => {
-        // eslint-disable-next-line no-console -- TEMP diagnostic
-        console.log('[DIAG]', Date.now(), 'C: inside act callback, before handler call')
+      await act(async () => {
         singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
-        // eslint-disable-next-line no-console -- TEMP diagnostic
-        console.log('[DIAG]', Date.now(), 'D: inside act callback, after handler call, visible=', getLastControlsProps().visible, 'colorCalls=', setForegroundColors.mock.calls.length)
       })
-      // eslint-disable-next-line no-console -- TEMP diagnostic
-      console.log('[DIAG]', Date.now(), 'E: act() invoked, promise created, pendingTimers=', jest.getTimerCount())
-      await actPromise
-      // eslint-disable-next-line no-console -- TEMP diagnostic
-      console.log('[DIAG]', Date.now(), 'F: act() resolved')
 
       expect(getLastControlsProps().visible).toBe(true)
       expect(setForegroundColors).toHaveBeenCalledWith(['#000000'])
     })
 
     it('hides when a pinch starts', async () => {
-      // eslint-disable-next-line no-console -- TEMP diagnostic for a CI-only hang, see PR discussion
-      console.log('[DIAG]', Date.now(), 'A: before renderScreen')
       await renderScreen()
-      // eslint-disable-next-line no-console -- TEMP diagnostic
-      console.log('[DIAG]', Date.now(), 'B: renderScreen resolved, pendingTimers=', jest.getTimerCount())
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
 
-      const actPromise = act(async () => {
-        // eslint-disable-next-line no-console -- TEMP diagnostic
-        console.log('[DIAG]', Date.now(), 'C: inside act callback, before handler call')
+      await act(async () => {
         pinchGesture.__handlers.start?.()
-        // eslint-disable-next-line no-console -- TEMP diagnostic
-        console.log('[DIAG]', Date.now(), 'D: inside act callback, after handler call, visible=', getLastControlsProps().visible)
       })
-      // eslint-disable-next-line no-console -- TEMP diagnostic
-      console.log('[DIAG]', Date.now(), 'E: act() invoked, promise created, pendingTimers=', jest.getTimerCount())
-      await actPromise
-      // eslint-disable-next-line no-console -- TEMP diagnostic
-      console.log('[DIAG]', Date.now(), 'F: act() resolved')
 
       expect(getLastControlsProps().visible).toBe(false)
     })
