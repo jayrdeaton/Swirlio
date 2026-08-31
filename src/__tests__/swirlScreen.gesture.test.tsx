@@ -355,18 +355,33 @@ const twoFingerLongPress = () => gestureTestUtils.getLastGesture('LongPress')
 // what caused two CI-only "Exceeded timeout" failures. Flushing once, explicitly, right here, means
 // the mount has every chance to fully settle before waitFor's own fast, synchronous first check —
 // so that loop is never needed.
-async function flushPendingFakeTimerWork() {
+async function flushPendingFakeTimerWork(log: (...args: unknown[]) => void = () => undefined) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sinon's own runtime marker, not exposed in @types/jest
-  if (typeof (setTimeout as any).clock === 'undefined') return
+  if (typeof (setTimeout as any).clock === 'undefined') {
+    log('flush: skipped, fake timers not active')
+    return
+  }
+  log('flush: advancing by 0ms')
   await act(async () => {
     await jest.advanceTimersByTimeAsync(0)
   })
+  log('flush: advanceTimersByTimeAsync(0) resolved')
 }
 
-async function renderScreen() {
+async function renderScreen(diag = false) {
+  // eslint-disable-next-line no-console -- TEMP fine-grained diagnostic, round 2
+  const log = diag ? (...args: unknown[]) => console.log('[DIAG2]', Date.now(), ...args) : () => undefined
+  log('render(): start')
   const result = await render(<SwirlScreen />)
-  await flushPendingFakeTimerWork()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- sinon's own runtime marker
+  log('render(): resolved, spyCalls=', mockSpiralSpy.mock.calls.length, 'fakeActive=', typeof (setTimeout as any).clock !== 'undefined', 'timerCount=', typeof (setTimeout as any).clock !== 'undefined' ? jest.getTimerCount() : 'n/a')
+
+  await flushPendingFakeTimerWork(log)
+  log('flush: resolved, spyCalls=', mockSpiralSpy.mock.calls.length)
+
   await waitFor(() => expect(mockSpiralSpy).toHaveBeenCalled())
+  log('waitFor(): resolved')
+
   return result
 }
 
@@ -1715,7 +1730,7 @@ describe('SwirlScreen gestures', () => {
     })
 
     it('swaps colors on a tap without hiding the controls', async () => {
-      await renderScreen()
+      await renderScreen(true)
 
       await act(async () => {
         singleTap().__handlers.end?.({ x: 0, y: 0 }, true)
@@ -1726,7 +1741,7 @@ describe('SwirlScreen gestures', () => {
     })
 
     it('hides when a pinch starts', async () => {
-      await renderScreen()
+      await renderScreen(true)
       const pinchGesture = gestureTestUtils.getLastGesture('Pinch')
 
       await act(async () => {
