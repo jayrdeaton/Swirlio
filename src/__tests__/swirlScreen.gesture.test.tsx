@@ -1715,21 +1715,8 @@ describe('SwirlScreen gestures', () => {
   })
 
   describe('on-screen controls visibility', () => {
-    // The zero-length advance right after installing fake timers (before any render happens) is a
-    // priming tick — confirmed via CI-only fine-grained diagnostic logging: it's renderScreen()'s own
-    // render(<SwirlScreen />) call itself (not the waitFor after it) that stalls for the full test
-    // timeout on CI, and it stalls specifically on the FIRST render under a just-installed fake clock
-    // — the same "first render since useFakeTimers()" that jest.useFakeTimers() being called again by
-    // the *next* test's own beforeEach (which uninstalls-then-reinstalls the clock) reliably unblocks,
-    // which is why it's always exactly the first couple of tests in a fake-timer block, never a later
-    // one. Running one throwaway act()-wrapped tick immediately after installing the clock — before
-    // the expensive mount — gives whatever needs that first tick to fully wire up a chance to do so
-    // right away, rather than only ever getting it from the following test's own re-install.
-    beforeEach(async () => {
+    beforeEach(() => {
       jest.useFakeTimers()
-      await act(async () => {
-        await jest.advanceTimersByTimeAsync(0)
-      })
     })
 
     afterEach(() => {
