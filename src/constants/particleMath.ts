@@ -2,7 +2,16 @@
 // same reason rippleMath.ts/gravityWellMath.ts are split out from their own patterns: worklet-tagged
 // math that's independently testable without mounting a Skia canvas or a frame callback.
 
-import { GOLDEN_ANGLE_RAD } from '@/constants/gravityWellMath'
+// π(3 - √5) radians — the golden angle (~137.5077640500378°), spreading N points evenly around a
+// circle with no two ever landing on the same ray. A local copy, not imported from
+// @tastic/sprites/gravity (which exports this exact constant): that package's own /gravity subpath
+// barrel-exports its Skia-dependent GravityWell component alongside its pure math in one index.ts, so
+// even a destructured single-constant import evaluates a real `@shopify/react-native-skia` import
+// along with it — exactly what this file's own top comment says it's kept free of (worklet-tagged
+// math, independently testable without mounting a Skia canvas). Spiral.tsx (already Skia-dependent
+// either way, and the only place GravityWell itself renders) imports the shared component directly;
+// this file just keeps its own copy of the one constant it actually needs.
+const GOLDEN_ANGLE_RAD = Math.PI * (3 - Math.sqrt(5))
 
 // A proper damped spring pull toward a point — not just an acceleration term (`a = stiffness*
 // displacement`, no damping of its own), which was tried first and reads as "bounces around and
@@ -47,11 +56,13 @@ export function applyGravityAndFriction(x: number, y: number, vx: number, vy: nu
 }
 
 // Deterministic "sunflower seed" disk placement for spawn — avoids Math.random() in a worklet the
-// same way gravityWellMath.ts's own angle placement already does (deterministic in, deterministic
+// same way GOLDEN_ANGLE_RAD's own angle placement above already does (deterministic in, deterministic
 // out, so a fixed particleCount always seeds the same layout). r = R*sqrt((i+0.5)/N) is the standard
 // uniform-disk-packing formula (sqrt is what keeps density even by area, not just by radius); the
-// golden-angle spread on top of it is exactly gravityWellMath.ts's own gravityParticleAngleRad trick,
-// re-applied here so no two particles ever land on the same ray out from center.
+// golden-angle spread on top of it is the same trick @tastic/sprites/gravity's own
+// gravityParticleAngleRad applies for GravityWell's own particles, re-applied here (this file's own
+// local GOLDEN_ANGLE_RAD copy, per its own comment above) so no two particles ever land on the same
+// ray out from center.
 export function particleSpawnPosition(index: number, count: number, boundaryRadius: number): { x: number; y: number } {
   'worklet'
   const r = boundaryRadius * Math.sqrt((index + 0.5) / count)

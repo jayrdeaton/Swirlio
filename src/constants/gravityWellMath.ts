@@ -1,7 +1,17 @@
-// Pure math for GravityWell (Spiral.tsx) — the filled hole plus falling/emanating particles that
-// replaced the old two-ring placeholder marker. Kept separate from Spiral.tsx for the same reason
-// rippleMath.ts is split out from RingsPattern.tsx: worklet-tagged math that's independently testable
-// without mounting a Skia canvas.
+// Two Swirlio-specific inputs feeding GravityWell (Spiral.tsx, now @tastic/sprites/gravity's shared
+// component) — mapping this app's own settings (gravity strength, bounce friction) onto the plain
+// SharedValue props that component actually takes. The particle-field visual math itself (angle
+// placement, phase, radius, dot size, size scale, opacity, GOLDEN_ANGLE_RAD/
+// GRAVITY_PARTICLE_FADE_FRACTION) used to live here too, but moved to @tastic/sprites/gravity once
+// BoxHockey's own GravityWellMarker.tsx turned out to need the exact same math (see that package's
+// own gravityParticleMath.ts comment) — Spiral.tsx and constants/particleMath.ts both import it from
+// there directly now. gravityHoleRadius and gravityParticleFrictionSpeed stayed local instead of
+// moving too: both translate a live Swirlio settings value (gravity, bounceFriction) into a prop the
+// shared component wants (holeRadius, the particle clock's own speed) — call-site glue BoxHockey has
+// no equivalent for (its wells are static per board layout, not driven by a live gravity/friction
+// slider), not part of the shared visual itself. Kept separate from Spiral.tsx/index.tsx for the same
+// reason rippleMath.ts is split out from RingsPattern.tsx: worklet-tagged math that's independently
+// testable without mounting a Skia canvas.
 
 import { clamp } from '@/constants/clamp'
 
@@ -37,82 +47,4 @@ export function gravityParticleFrictionSpeed(bounceFriction: number, maxBounceFr
   const t = bounceFriction / maxBounceFriction
   const clampedT = clamp(t, 0, 1)
   return maxSpeed - clampedT * (maxSpeed - minSpeed)
-}
-
-// π(3 - √5) radians — the golden angle (~137.5077640500378°). Placing particle `index` at
-// `index * GOLDEN_ANGLE_RAD` spreads any number of them evenly around the well with no two ever
-// landing on the same ray, and does it without Math.random() (avoided throughout this codebase's
-// worklets/tests — deterministic in, deterministic out).
-export const GOLDEN_ANGLE_RAD = Math.PI * (3 - Math.sqrt(5))
-
-export function gravityParticleAngleRad(index: number): number {
-  'worklet'
-  const raw = index * GOLDEN_ANGLE_RAD
-  return raw - Math.floor(raw / (2 * Math.PI)) * (2 * Math.PI)
-}
-
-// Where particle `index` (of `count` total) currently sits along its own fall/emanate cycle, as a
-// 0..1 loop — every particle reads the same shared `clockProgress` clock, offset by its own
-// `index / count` share of a lap, the same "stagger many repeating elements off one clock" trick
-// rippleMath.ts's rippleProgress already uses for RingsPattern's many rings.
-export function gravityParticlePhase(clockProgress: number, index: number, count: number): number {
-  'worklet'
-  const raw = clockProgress + index / count
-  return raw - Math.floor(raw)
-}
-
-// Maps a particle's phase onto an actual pixel distance from the well's center, between its very
-// center (innerRadius, normally 0) and the hole's own edge (outerRadius) — particles stay contained
-// inside the hole itself, never spilling out into the pattern around it. `pulling` (gravity.value >=
-// 0) flips which end phase 0 starts at: pulling counts down from outerRadius to innerRadius (falling
-// in toward the center, toward the pull), pushing counts up from innerRadius to outerRadius (emanating
-// out toward the hole's edge, away from the push) — this is what gives gravity's sign, otherwise
-// invisible on the old marker, an actual visual direction.
-export function gravityParticleRadius(phase: number, innerRadius: number, outerRadius: number, pulling: boolean): number {
-  'worklet'
-  const span = outerRadius - innerRadius
-  return pulling ? outerRadius - phase * span : innerRadius + phase * span
-}
-
-// Maps a particle's own orbitRadius (its live distance from center, see gravityParticleRadius above)
-// onto a dot size — smaller the closer it sits to the center, larger out toward the hole's edge. Pure
-// perspective, not physics: a particle already reads as "further into the well" by virtue of sitting
-// closer to its center, and shrinking it there too is what actually sells that as depth rather than
-// just a flat field of same-size dots sliding around. holeRadius <= 0 (never hit in practice — see
-// gravityHoleRadius's own floor of minRadius — but not guaranteed by this function's own signature)
-// falls back to minDotRadius rather than dividing by zero.
-export function gravityParticleDotRadius(orbitRadius: number, holeRadius: number, minDotRadius: number, maxDotRadius: number): number {
-  'worklet'
-  if (holeRadius <= 0) return minDotRadius
-  const t = clamp(orbitRadius / holeRadius, 0, 1)
-  return minDotRadius + t * (maxDotRadius - minDotRadius)
-}
-
-// How much a weak, small well shrinks its particles overall, on top of gravityParticleDotRadius's own
-// center-to-edge depth scaling — a bare 14px hole (gravity near 0) should carry noticeably smaller
-// dust than a wide-open 50px one, not the same size chunks just packed into less room. holeRadius is
-// already a magnitude-based value (see gravityHoleRadius — it never cares about gravity's sign, only
-// its strength), so this reuses it directly rather than taking gravity/maxGravity a second time.
-// maxHoleRadius <= 0 (never hit in practice — GRAVITY_HOLE_MAX_RADIUS_PX in Spiral.tsx is a fixed
-// positive constant — but not guaranteed by this function's own signature) falls back to 0 rather than
-// dividing by zero.
-export function gravityParticleSizeScale(holeRadius: number, maxHoleRadius: number): number {
-  'worklet'
-  if (maxHoleRadius <= 0) return 0
-  return clamp(holeRadius / maxHoleRadius, 0, 1)
-}
-
-// How much of a lap, at each end, a particle spends fading rather than snapping in/out of existence —
-// see gravityParticleOpacity below.
-export const GRAVITY_PARTICLE_FADE_FRACTION = 0.15
-
-// Fades a particle in over the first GRAVITY_PARTICLE_FADE_FRACTION of its phase and back out over
-// the last, full opacity in between — without this, every particle would pop into view at whichever
-// end of the field it spawns at (and vanish just as abruptly at the other), rather than gently
-// arriving and departing.
-export function gravityParticleOpacity(phase: number): number {
-  'worklet'
-  if (phase < GRAVITY_PARTICLE_FADE_FRACTION) return phase / GRAVITY_PARTICLE_FADE_FRACTION
-  if (phase > 1 - GRAVITY_PARTICLE_FADE_FRACTION) return (1 - phase) / GRAVITY_PARTICLE_FADE_FRACTION
-  return 1
 }

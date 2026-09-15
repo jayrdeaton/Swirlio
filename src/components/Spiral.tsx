@@ -1,4 +1,5 @@
 import { Canvas, FillType, Group, Rect, Skia, SkPath, SkPoint } from '@shopify/react-native-skia'
+import { GravityWell } from '@tastic/sprites/gravity'
 import React from 'react'
 import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { SharedValue, useDerivedValue } from 'react-native-reanimated'
@@ -17,7 +18,6 @@ import { useCyclingColor } from '@/hooks/useCyclingColor'
 import { baseShapePoints, MAX_PARTICLE_COLOR_BUCKETS } from '@/hooks/useParticleField'
 import { MAX_CROP_RADIUS, MAX_GRAVITY, MIN_CROP_RADIUS } from '@/hooks/useSwirlSettings'
 
-import { GRAVITY_HOLE_MAX_RADIUS_PX, GRAVITY_HOLE_MIN_RADIUS_PX, GravityWell } from './GravityWell'
 import { KaleidoscopeCopy } from './KaleidoscopeCopy'
 import { FlowerPattern } from './patterns/FlowerPattern'
 import { HeartPattern } from './patterns/HeartPattern'
@@ -47,6 +47,18 @@ const NO_CROP_CLIP_RADIUS_MULTIPLIER = 2.5
 // keeps scaling correctly if MIN/MAX_CROP_RADIUS are ever retuned; first-pass width meant to be
 // retuned by eye on a real device, the same as NO_CROP_CLIP_RADIUS_MULTIPLIER itself.
 const NO_CROP_TRANSITION_WIDTH = (MAX_CROP_RADIUS - MIN_CROP_RADIUS) * 0.08
+
+// The gravity marker's own sizing — the only marker Spiral draws anymore (pattern's and the mirror
+// anchor's were both removed) — deliberately not scaled by zoom/tightness/anything else the pattern
+// itself animates, the same way a map pin stays a constant size regardless of what the map underneath
+// it is doing. The hole's radius scales with how strong gravity currently is (see
+// gravityWellHoleRadius below): 0 maps to the smaller radius, either extreme (MIN_GRAVITY or
+// MAX_GRAVITY — a pull and a push of the same strength) maps to the larger one, so a more intense
+// effect visibly reads as a bigger hole regardless of which direction it's acting in. Local to this
+// file, not exported: @tastic/sprites/gravity's own GravityWell takes holeRadius/maxHoleRadiusForScale
+// as plain props rather than owning these bounds itself, since BoxHockey's own wells size differently.
+const GRAVITY_HOLE_MIN_RADIUS_PX = 14
+const GRAVITY_HOLE_MAX_RADIUS_PX = 62
 
 // The closed vertex list to trace a "shaped" crop/hole contour at the given radius for whichever
 // pattern is active, or null to fall back to a plain circle — Rings/Spiral/Starburst have no closed
@@ -272,6 +284,13 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
   // hand-rolled rather than Reanimated's own interpolate. Named `gravityWellHoleRadius`, not just
   // `holeRadius`, since that name is already taken by the unrelated pattern crop-hole prop above.
   const gravityWellHoleRadius = useDerivedValue(() => gravityHoleRadius(gravity.value, MAX_GRAVITY, GRAVITY_HOLE_MIN_RADIUS_PX, GRAVITY_HOLE_MAX_RADIUS_PX))
+  // @tastic/sprites/gravity's own GravityWell takes a plain `attracting` boolean instead of Swirlio's
+  // signed `gravity` value directly — it has no opinion on what "attracting" means for a given app,
+  // just which way particles move once it knows. Re-derived every frame (not computed once) so a sign
+  // flip — the reverse-gravity control, or the gravity-targeting pinch sweeping through 0 — still takes
+  // effect on the very next frame, the same live responsiveness gravity.value >= 0 always had when
+  // GravityWell's own particle read it directly, back when that logic lived here in this codebase.
+  const gravityAttracting = useDerivedValue(() => gravity.value >= 0)
 
   // Distance to the furthest corner from wherever the epicentre currently sits — a fixed
   // half-diagonal would leave a bare wedge of screen once the swirl is dragged off-centre.
@@ -579,7 +598,7 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
         underneath. showGravityMarker is a plain JS conditional (not a worklet-reactive opacity) —
         it only ever changes from a deliberate toggle press (see its own prop comment), which already
         re-renders this component, so there's nothing here that needs to react on the UI thread. */}
-        {showGravityMarker && <GravityWell x={gravityOriginX} y={gravityOriginY} holeRadius={gravityWellHoleRadius} gravity={gravity} gravityParticleProgress={gravityParticleProgress} foreground={foreground} background={background} />}
+        {showGravityMarker && <GravityWell x={gravityOriginX} y={gravityOriginY} holeRadius={gravityWellHoleRadius} attracting={gravityAttracting} progress={gravityParticleProgress} foreground={foreground} holeFillColor={background} holeOutlineColor={foreground} maxHoleRadiusForScale={GRAVITY_HOLE_MAX_RADIUS_PX} />}
       </Canvas>
     </View>
   )
