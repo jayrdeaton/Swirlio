@@ -5,7 +5,9 @@ import { AudioContext, AudioManager, AudioRecorder } from 'react-native-audio-ap
 import { useAudioReactive } from '@/hooks/useAudioReactive'
 
 const mockedAudioContext = AudioContext as jest.Mock
-const mockedAudioRecorder = AudioRecorder as jest.Mock
+// Via `unknown`: AudioRecorder's static methods (added in react-native-audio-api 0.13.6) leave too
+// little overlap with jest.Mock for tsc to accept a direct cast, unlike AudioContext above.
+const mockedAudioRecorder = AudioRecorder as unknown as jest.Mock
 const mockedRequestRecordingPermissions = AudioManager.requestRecordingPermissions as jest.Mock
 
 // The hook's own setup chains two awaits (permission, then recorder.start()) before anything else
