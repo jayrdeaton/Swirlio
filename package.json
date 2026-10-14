@@ -35,7 +35,7 @@
     "@rific/auto-paper": "^0.12.1",
     "@rific/core": "^0.3.0",
     "@rific/drawer": "^0.6.1",
-    "@rific/feedback-press": "^0.12.1",
+    "@rific/feedback-press": "^0.12.2",
     "@rific/splash-gate": "^0.2.2",
     "@rific/updater": "^0.6.0",
     "@shopify/react-native-skia": "2.6.2",
