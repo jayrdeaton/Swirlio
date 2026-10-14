@@ -996,7 +996,7 @@ describe('useSwirlSettings', () => {
     })
   })
 
-  // The Settings group's "Reset all" button (see ControlGroupTopSheetContent) - a flat replacement
+  // The Settings group's "Reset All" button (see ControlGroupTopSheetContent) - a flat replacement
   // covering every field at once, not a loop over the individual setters, so it can't drift out of
   // sync with whichever fields those setters happen to guard (e.g. the empty-list refusal on colors).
   it('resetSettings restores every field to its default, overwriting both hand-made changes and hydrated values', async () => {

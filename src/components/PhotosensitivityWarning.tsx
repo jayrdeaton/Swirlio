@@ -14,7 +14,7 @@ const FADE_DURATION_MS = 250
 
 type Props = {
   // Fires once the warning is out of the way: right after the storage check finds it already
-  // acknowledged, or when the player taps "I understand". GuideHost holds the first-run guide back
+  // acknowledged, or when the player taps "I Understand". GuideHost holds the first-run guide back
   // until then, so the two never stack on a fresh install.
   onCleared?: () => void
 }
@@ -81,11 +81,11 @@ export function PhotosensitivityWarning({ onCleared }: Props) {
         <View style={[styles.card, { backgroundColor: colors.primary }]}>
           <MdIcon name='alert' size={32} color={ink} />
           <Text variant='titleMedium' style={[styles.title, { color: ink }]}>
-            Photosensitivity warning
+            Photosensitivity Warning
           </Text>
           <Text style={[styles.body, { color: ink }]}>This app displays rapidly flashing, pulsing, and color-cycling patterns that may trigger seizures in people with photosensitive epilepsy. Stop using the app if you experience dizziness, altered vision, eye or muscle twitching, or disorientation.</Text>
           <Button mode='contained' buttonColor={ink} textColor={colors.primary} onPress={acknowledge}>
-            I understand
+            I Understand
           </Button>
         </View>
       </Animated.View>

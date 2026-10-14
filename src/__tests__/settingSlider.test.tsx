@@ -55,7 +55,7 @@ function Host({ initial, min = 1, max = 30, step = 0.5, tickStep, disabled = fal
   const [value, setValue] = useState(initial)
   return (
     <SettingSlider
-      label='Stroke width'
+      label='Stroke Width'
       value={value}
       displayValue={value.toFixed(1)}
       minimumValue={min}
@@ -441,14 +441,14 @@ describe('SettingSlider', () => {
     mockUseSwirlSettings.mockReturnValue({ settings: { showLabels: false } })
     const screen = await render(<Host initial={6} />)
 
-    expect(screen.queryByText('Stroke width', { exact: false })).toBeNull()
+    expect(screen.queryByText('Stroke Width', { exact: false })).toBeNull()
   })
 
   it('shows its label and value when showLabels is on', async () => {
     mockUseSwirlSettings.mockReturnValue({ settings: { showLabels: true } })
     const screen = await render(<Host initial={6} />)
 
-    expect(screen.getByText('Stroke width', { exact: false })).toBeTruthy()
+    expect(screen.getByText('Stroke Width', { exact: false })).toBeTruthy()
     expect(screen.getByText('(6.0)', { exact: false })).toBeTruthy()
   })
 })

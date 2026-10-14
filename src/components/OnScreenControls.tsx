@@ -189,10 +189,10 @@ type OnScreenControlsProps = {
   onRecenter: () => void
   onGoBack: () => void
   // Bonus long-press gesture on the same skip-previous FAB as onGoBack - the settings drawer's own
-  // "Reset all" button (see ControlGroupTopSheetContent's 'settings' branch), reachable without
+  // "Reset All" button (see ControlGroupTopSheetContent's 'settings' branch), reachable without
   // opening that sheet. Layered onto the exact same FAB as onGoBack (same disabled/backDisabled
   // gating), so it shares that FAB's one existing dead end: nothing to reach here while backDisabled
-  // is true. The sheet's own "Reset all" button stays the reliable fallback in that state.
+  // is true. The sheet's own "Reset All" button stays the reliable fallback in that state.
   onResetAllSettings: () => void
   onGoForward: () => void
   onGoForwardBatch: () => void

@@ -3800,7 +3800,7 @@ describe('SwirlScreen gestures', () => {
     })
 
     // onResetAllSettings is the skip-previous FAB's own long press (see OnScreenControls), matching
-    // the settings drawer's own "Reset all" button exactly - resetSettings() for every persisted
+    // the settings drawer's own "Reset All" button exactly - resetSettings() for every persisted
     // look/tuning field, plus resetPattern/resetMirror's own position-squaring (but not
     // gravityHandle.recenter()/gravityManualControl, which aren't part of the drawer's button either).
     it('onResetAllSettings calls resetSettings and recentres both pattern and mirror', async () => {

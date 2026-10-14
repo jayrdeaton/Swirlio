@@ -6,9 +6,9 @@ export const DASH_STYLE_LABELS: Record<DashStyle, string> = {
   solid: 'Solid',
   dots: 'Dots',
   dashes: 'Dashes',
-  dashDot: 'Dash-dot',
-  dashDotDot: 'Dash-dot-dot',
-  doubleDash: 'Double dash'
+  dashDot: 'Dash-Dot',
+  dashDotDot: 'Dash-Dot-Dot',
+  doubleDash: 'Double Dash'
 }
 
 // A near-zero dash length paired with a round linecap renders each "dash" as a circular bead - the

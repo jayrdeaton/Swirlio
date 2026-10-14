@@ -124,7 +124,7 @@ export function ControlGroupTopSheetContent() {
               enabled even at 0 mirror lines (where it has nothing to act on yet) rather than disabled
               until the Mirror lines slider (see the bottom sheet) is raised - toggling it ahead of
               time just pre-arms the setting for whenever mirror lines does go above 0. */}
-              <SettingToggleFab icon='checkerboard' label='Alternate colors' value={settings.mirrorAlternateColors} onValueChange={setMirrorAlternateColors} />
+              <SettingToggleFab icon='checkerboard' label='Alternate Colors' value={settings.mirrorAlternateColors} onValueChange={setMirrorAlternateColors} />
             </FabRow>
           </>
         )}
@@ -211,8 +211,8 @@ export function ControlGroupTopSheetContent() {
               Crop, a bounded/contained outline for the inner Hole) - matching this app's own
               one-icon-per-control convention rather than reusing Sides' own vector-polygon glyph,
               which reads as "how many points", not "trace the shape". */}
-              <SettingToggleFab icon='shape-outline' label='Crop shape' value={settings.cropShaped} onValueChange={setCropShaped} />
-              <SettingToggleFab icon='contain' label='Hole shape' value={settings.holeShaped} onValueChange={setHoleShaped} />
+              <SettingToggleFab icon='shape-outline' label='Crop Shape' value={settings.cropShaped} onValueChange={setCropShaped} />
+              <SettingToggleFab icon='contain' label='Hole Shape' value={settings.holeShaped} onValueChange={setHoleShaped} />
             </FabRow>
             {/* The type picker gets its own row rather than trailing the actions/toggles above on
             whatever line it happens to wrap to - see Mirror's own comment for why a row break, not a
@@ -261,7 +261,7 @@ export function ControlGroupTopSheetContent() {
               every ring/turn/ray is spaced as a fraction of that radius, so they spread out right
               along with it. This pins that spacing to what it looks like at a centered epicentre
               instead. */}
-              <SettingToggleFab icon='ruler' label='Fixed spacing' value={settings.fixedSpacing} onValueChange={setFixedSpacing} />
+              <SettingToggleFab icon='ruler' label='Fixed Spacing' value={settings.fixedSpacing} onValueChange={setFixedSpacing} />
             </FabRow>
             {/* The dash style picker gets its own row rather than trailing the actions/toggle above on
             whatever line it happens to wrap to - see Mirror's own comment for why a row break, not a
@@ -293,7 +293,7 @@ export function ControlGroupTopSheetContent() {
               across all five groups, plus the pattern/mirror rotation+position the per-group Reset
               buttons above already square back up (resetPattern/resetMirror), in one tap. 'Reset'
               alone (matching Mirror/Pattern/Colors' own buttons) would read as scoped to whichever
-              sheet happens to be open, same as those three - 'Reset all' says plainly that this one
+              sheet happens to be open, same as those three - 'Reset All' says plainly that this one
               isn't. themeSettings (appearance/blur/blurTint/harmony - a separate persisted store from
               useSwirlSettings, see @rific/auto-paper's ThemeProvider) is deliberately left untouched
               entirely, not just its `color` field: appearance and blur are look preferences the user
@@ -301,7 +301,7 @@ export function ControlGroupTopSheetContent() {
               resetSettings' own comment, so a flat reset shouldn't silently switch them back either. */}
               <ActionFab
                 icon='backup-restore'
-                label='Reset all'
+                label='Reset All'
                 onPress={() => {
                   resetSettings()
                   resetPattern()
@@ -320,7 +320,7 @@ export function ControlGroupTopSheetContent() {
               {/* Governs every FAB and SettingSlider on screen - see LabeledFab/SettingSlider - not
               just this sheet's own controls. */}
               <SettingToggleFab icon='label' label='Labels' value={settings.showLabels} onValueChange={setShowLabels} />
-              {!isWeb && <SettingToggleFab icon='vibrate' label='Shake to randomize' value={settings.shakeEnabled} onValueChange={setShakeEnabled} />}
+              {!isWeb && <SettingToggleFab icon='vibrate' label='Shake to Randomize' value={settings.shakeEnabled} onValueChange={setShakeEnabled} />}
               {/* iOS only, the same toggle (label, shield icon, off by default) the fleet games show in
               @tastic/hud's BaseSettingsDialog as "Edge Guard: Requires a second swipe". Mirrors into
               UserDefaults via _layout.tsx's EdgeGuardBridge for @tastic/edge-guard's own config plugin
@@ -337,7 +337,7 @@ export function ControlGroupTopSheetContent() {
               there - worse, the toggle itself would still pin rotation/zoom/tightness/crop/hole/mirror
               gap/stroke width to their zero-audio-input values the moment it's on, since those
               `effective*` overrides in index.tsx only check audioReactiveEnabled, not platform. */}
-              {!isWeb && <SettingToggleFab icon='microphone' label='Audio reactive' value={settings.audioReactiveEnabled} onValueChange={setAudioReactiveEnabled} />}
+              {!isWeb && <SettingToggleFab icon='microphone' label='Audio Reactive' value={settings.audioReactiveEnabled} onValueChange={setAudioReactiveEnabled} />}
               {/* Governs the same shared HapticSettingsContext flag every haptic call site in the app
               already gates on - see _layout.tsx's HapticsSettingsBridge - so this one toggle covers
               both the manual useVibration() calls and every auto-haptic FAB/button with no per-call-site
@@ -371,7 +371,7 @@ export function ControlGroupTopSheetContent() {
               uses. Hidden on web for the same reason Shake/Audio reactive/Haptics are: expo-updates has
               no web target, so useUpdater's own check() just shows an "unsupported on web" Alert
               instead of ever actually checking - nothing here for the button to do. */}
-              <ActionFab icon='help-circle-outline' label='How to play' onPress={openGuide} />
+              <ActionFab icon='help-circle-outline' label='How to Play' onPress={openGuide} />
               {!isWeb && <ActionFab icon={checkingForUpdate ? 'progress-download' : 'download'} label={`Update v${release.otaVersion}`} disabled={checkingForUpdate} onPress={checkForUpdate} />}
             </FabRow>
           </>
@@ -423,7 +423,7 @@ export function ControlGroupTopSheetContent() {
             this group's own Randomize above for the same reason Shake/Mic are (see resetSettings' own
             comment and useRerollUnits.tsx): a behavioral device-capability toggle the user sets
             deliberately, not a look to reroll. */}
-            {!isWeb && <SettingToggleFab icon='axis-arrow' label='Tilt control' value={settings.tiltEnabled} onValueChange={setTiltEnabled} />}
+            {!isWeb && <SettingToggleFab icon='axis-arrow' label='Tilt Control' value={settings.tiltEnabled} onValueChange={setTiltEnabled} />}
           </FabRow>
         )}
 

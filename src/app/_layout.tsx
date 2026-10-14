@@ -171,7 +171,7 @@ export default function RootLayout() {
                         edges, which otherwise sits above (and steals touches from) any FAB placed within it. */}
                         {/* GuideHost also mounts the first-launch PhotosensitivityWarning, so it can hold the
                         how-to-play guide back until that's cleared. Wraps both sheet providers, not just the
-                        Stack: the Settings sheet's "How to play" FAB renders inside the top sheet's own
+                        Stack: the Settings sheet's "How to Play" FAB renders inside the top sheet's own
                         provider, which would otherwise sit outside GuideProvider's context. */}
                         <GuideHost>
                           <ControlGroupTopSheetProvider content={<ControlGroupTopSheetContent />} enabled={false}>

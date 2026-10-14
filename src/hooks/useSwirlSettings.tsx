@@ -442,7 +442,7 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       // see gravityMarkerVisible's own field comment), interaction feel rather than art (followSpeed -
       // how touch input eases, not what gets drawn), or a tool mode (gestureTarget - which point a drag
       // targets has no bearing on what the art itself looks like) - not look/tuning preferences like
-      // everything else this button touches. 'Reset all' is scoped to visual items, not to how the UI
+      // everything else this button touches. 'Reset All' is scoped to visual items, not to how the UI
       // itself behaves. audioReactiveEnabled is live session state tied to a mic the user just granted;
       // the rest are explicit choices the user made - either way, a flat reset shouldn't silently
       // switch them back on/off (or back to 'pattern', or back to the original follow feel/auto-hide

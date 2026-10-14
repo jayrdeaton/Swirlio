@@ -1263,12 +1263,12 @@ export default function SwirlScreen() {
   useRegisterSwirlReset(resetPattern, resetMirror, resetGravityPosition)
 
   // Long-press on the transport row's skip-previous FAB (see OnScreenControls) - the same three calls
-  // as the settings drawer's own "Reset all" button (see ControlGroupTopSheetContent's 'settings'
+  // as the settings drawer's own "Reset All" button (see ControlGroupTopSheetContent's 'settings'
   // branch), reachable without opening that sheet at all: every persisted look/tuning setting (colors,
   // stroke width, dash style, and so on) via
   // resetSettings - which already carries over audioReactiveEnabled/shakeEnabled/showLabels/
   // tiltEnabled/followSpeed/controlsAutoHideSpeed/triggerStackExpanded rather than resetting them (see
-  // resetSettings' own comment: 'Reset all' is scoped to visual items, not device-capability toggles,
+  // resetSettings' own comment: 'Reset All' is scoped to visual items, not device-capability toggles,
   // chrome/interface preferences, or interaction feel), and never touches
   // themeSettings (appearance/blur), a separate persisted store this screen doesn't own at all.
   // pushHistory first so a "back" after an accidental long-hold restores the whole look this just

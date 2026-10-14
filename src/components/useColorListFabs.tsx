@@ -83,7 +83,7 @@ export function useColorListFabs(label: string, colors: string[], onChange: (col
     // sits on screen, never push + itself sideways out from under the finger still holding it -
     // trailing would do exactly that on every single tick of a hold, since a swatch row grows by
     // appending at the end.
-    <ActionFab key='add' testID={`color-list-add-${label}`} icon='plus' label='Add color' onPress={() => setDialogState('add')} onLongPress={growColorsHold.onLongPress} onPressOut={growColorsHold.onPressOut} delayLongPress={GROW_LONG_PRESS_MS} />,
+    <ActionFab key='add' testID={`color-list-add-${label}`} icon='plus' label='Add Color' onPress={() => setDialogState('add')} onLongPress={growColorsHold.onLongPress} onPressOut={growColorsHold.onPressOut} delayLongPress={GROW_LONG_PRESS_MS} />,
     ...colors.map((hex, index) => (
       // No icon - the swatch's own fill color is the payload, matching the pattern/dash pickers'
       // "square FAB" language instead of the small round dots this used to be. The first swatch wears

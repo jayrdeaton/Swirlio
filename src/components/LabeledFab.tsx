@@ -108,7 +108,7 @@ export function LabeledFab({ icon, label, active, colorOverride, disabled = fals
       own: a browser sizes an auto-width block to its max-width whenever IT has to wrap the text
       itself (CSS's fit-content clamps toward max-width, not toward the width of the wrapped line
       it actually produces), so any caption over LABEL_MAX_WIDTH - "Gravity marker", "Alternate
-      colors", "Shake to randomize" - ended up in a column notably wider than every single-word
+      colors", "Shake to Randomize" - ended up in a column notably wider than every single-word
       neighbour's, throwing off FabRow's otherwise-even gaps (see the FAB that follows it). Pre-
       breaking at each word sidesteps that: every word here is short enough to render on its own
       line without wrapping, so the box always shrinks to its widest *word*, which stays under the

@@ -25,7 +25,7 @@ function GuideAutoShow({ enabled }: { enabled: boolean }) {
 // Wires @tastic/hud/guide's provider to this app, the way each fleet game's GuideHost does, minus the
 // Redux slice (Swirlio has no store): the "seen" version lives under its own AsyncStorage key instead
 // (see constants/guide.ts). Mounted once in _layout.tsx, above both control-group sheet providers, so
-// the Settings sheet's "How to play" FAB (rendered inside the top sheet's own provider, not under the
+// the Settings sheet's "How to Play" FAB (rendered inside the top sheet's own provider, not under the
 // Stack) can still reach useGuide().
 //
 // Also owns the first-run order: PhotosensitivityWarning comes first, and the guide only auto-shows

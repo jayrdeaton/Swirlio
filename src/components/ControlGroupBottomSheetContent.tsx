@@ -86,7 +86,7 @@ export function ControlGroupBottomSheetContent() {
             2 * lines wedges, alternating direct/reflected copies around it (0 lines is the one
             exception - just the single unmirrored copy, nothing to reflect). See
             constants/kaleidoscope.ts for the full construction. */}
-            <SettingSlider label='Mirror lines' icon='mirror' value={settings.mirrorLines} displayValue={`${settings.mirrorLines}, ${copyCountForMirrorLines(settings.mirrorLines)} ${copyCountForMirrorLines(settings.mirrorLines) === 1 ? 'copy' : 'copies'}`} minimumValue={MIN_MIRROR_LINES} maximumValue={MAX_MIRROR_LINES} step={MIRROR_LINES_SLIDER_STEP} showTicks onChange={setMirrorLines} />
+            <SettingSlider label='Mirror Lines' icon='mirror' value={settings.mirrorLines} displayValue={`${settings.mirrorLines}, ${copyCountForMirrorLines(settings.mirrorLines)} ${copyCountForMirrorLines(settings.mirrorLines) === 1 ? 'copy' : 'copies'}`} minimumValue={MIN_MIRROR_LINES} maximumValue={MAX_MIRROR_LINES} step={MIRROR_LINES_SLIDER_STEP} showTicks onChange={setMirrorLines} />
             {/* Replaces what used to be a plain "Mirror line" toggle tracing a debug reference overlay
             over the mirror axis - that overlay wasn't part of the art at all, just a thin line to show
             where mirroring happened. This keeps the same idea (showing where each wedge's edge sits)
@@ -95,7 +95,7 @@ export function ControlGroupBottomSheetContent() {
             (same "pre-arm ahead of having anything to act on" reasoning as Mirror rotation speed below)
             - no effect until there's a wedge for it to open a gap in. See kaleidoscope.ts's
             wedgeClipPath for why this is a fraction of the wedge's own angle, not a fixed degree amount. */}
-            <SettingSlider label='Mirror gap' icon='ray-start-end' value={settings.mirrorGap} displayValue={`${Math.round(settings.mirrorGap * 100)}%`} minimumValue={MIN_MIRROR_GAP} maximumValue={MAX_MIRROR_GAP} step={FREE_STEP} onChange={setMirrorGap} />
+            <SettingSlider label='Mirror Gap' icon='ray-start-end' value={settings.mirrorGap} displayValue={`${Math.round(settings.mirrorGap * 100)}%`} minimumValue={MIN_MIRROR_GAP} maximumValue={MAX_MIRROR_GAP} step={FREE_STEP} onChange={setMirrorGap} />
             {/* Spins the whole wedge assembly as one rigid unit around the epicentre - independent of
             Pattern's own Rotation speed, which only spins the pattern content drawn inside each fixed
             wedge. See Spiral.tsx's outer AnimatedG. 0 is the original, still-default fixed-wedge look
@@ -103,7 +103,7 @@ export function ControlGroupBottomSheetContent() {
             Also settable live from the canvas's own outer-field drag while 'mirror' is the active
             gesture target (see useEpicenter.ts) - this slider and that gesture both just write
             mirrorRotationSpeed, so either one moves the other. */}
-            <SettingSlider label='Mirror rotation speed' icon='rotate-orbit' value={settings.mirrorRotationSpeed} displayValue={`${settings.mirrorRotationSpeed.toFixed(2)}x`} minimumValue={MIN_MIRROR_ROTATION_SPEED} maximumValue={MAX_MIRROR_ROTATION_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setMirrorRotationSpeed} onLiveValue={writeMirrorRotationRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
+            <SettingSlider label='Mirror Rotation Speed' icon='rotate-orbit' value={settings.mirrorRotationSpeed} displayValue={`${settings.mirrorRotationSpeed.toFixed(2)}x`} minimumValue={MIN_MIRROR_ROTATION_SPEED} maximumValue={MAX_MIRROR_ROTATION_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setMirrorRotationSpeed} onLiveValue={writeMirrorRotationRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
           </>
         )}
 
@@ -114,8 +114,8 @@ export function ControlGroupBottomSheetContent() {
             color gets added, instead of a returning user having to remember to also come back and
             set this. Matches the Mirror group's own Alternate colors toggle and Mirror gap slider,
             left enabled ahead of having anything to act on for the same reason. */}
-            <SettingSlider label='Foreground cycle speed' icon='palette' value={settings.foregroundCycleSpeed} displayValue={`${settings.foregroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setForegroundCycleSpeed} onLiveValue={writeForegroundCycleRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
-            <SettingSlider label='Background cycle speed' icon='palette-swatch' value={settings.backgroundCycleSpeed} displayValue={`${settings.backgroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setBackgroundCycleSpeed} onLiveValue={writeBackgroundCycleRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
+            <SettingSlider label='Foreground Cycle Speed' icon='palette' value={settings.foregroundCycleSpeed} displayValue={`${settings.foregroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setForegroundCycleSpeed} onLiveValue={writeForegroundCycleRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
+            <SettingSlider label='Background Cycle Speed' icon='palette-swatch' value={settings.backgroundCycleSpeed} displayValue={`${settings.backgroundCycleSpeed.toFixed(2)}x`} minimumValue={MIN_CYCLE_SPEED} maximumValue={MAX_CYCLE_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setBackgroundCycleSpeed} onLiveValue={writeBackgroundCycleRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
           </>
         )}
 
@@ -141,14 +141,14 @@ export function ControlGroupBottomSheetContent() {
             from the canvas's own outer-field drag while 'pattern' is the active gesture target (see
             useEpicenter.ts) - these two sliders and that gesture all just write rotationSpeed/
             zoomSpeed, so any one of them moves the others. */}
-            <SettingSlider label='Rotation speed' icon='speedometer' value={settings.rotationSpeed} displayValue={`${settings.rotationSpeed.toFixed(2)}x`} minimumValue={MIN_ROTATION_SPEED} maximumValue={MAX_ROTATION_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setRotationSpeed} onLiveValue={writeRotationRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
-            <SettingSlider label='Zoom speed' icon='magnify' value={settings.zoomSpeed} displayValue={`${settings.zoomSpeed.toFixed(2)}x`} minimumValue={MIN_ZOOM_SPEED} maximumValue={MAX_ZOOM_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setZoomSpeed} onLiveValue={writeZoomRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
+            <SettingSlider label='Rotation Speed' icon='speedometer' value={settings.rotationSpeed} displayValue={`${settings.rotationSpeed.toFixed(2)}x`} minimumValue={MIN_ROTATION_SPEED} maximumValue={MAX_ROTATION_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setRotationSpeed} onLiveValue={writeRotationRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
+            <SettingSlider label='Zoom Speed' icon='magnify' value={settings.zoomSpeed} displayValue={`${settings.zoomSpeed.toFixed(2)}x`} minimumValue={MIN_ZOOM_SPEED} maximumValue={MAX_ZOOM_SPEED} step={FREE_STEP} snapToZero disabled={settings.audioReactiveEnabled} onChange={setZoomSpeed} onLiveValue={writeZoomRate} onChangeThrottleMs={SPEED_ONCHANGE_THROTTLE_MS} />
           </>
         )}
 
         {group === 'line' && (
           <>
-            <SettingSlider label='Stroke width' icon='format-line-weight' value={settings.strokeWidth} displayValue={settings.strokeWidth.toFixed(1)} minimumValue={MIN_STROKE_WIDTH} maximumValue={MAX_STROKE_WIDTH} step={FREE_STEP} disabled={settings.audioReactiveEnabled} onChange={setStrokeWidth} />
+            <SettingSlider label='Stroke Width' icon='format-line-weight' value={settings.strokeWidth} displayValue={settings.strokeWidth.toFixed(1)} minimumValue={MIN_STROKE_WIDTH} maximumValue={MAX_STROKE_WIDTH} step={FREE_STEP} disabled={settings.audioReactiveEnabled} onChange={setStrokeWidth} />
             {/* Lives here rather than in Pattern - see the top sheet's own 'line' branch comment for
             why: paired with Fixed spacing above, this is about how densely the rendered strokes are
             packed, not which shape is showing. */}
@@ -170,7 +170,7 @@ export function ControlGroupBottomSheetContent() {
             Gravity's own bipolar one (see its own comment), so grouping the two one-directional sliders
             together and trailing with the slider whose "off" sits at a true middle reads as a deliberate
             order, not an arbitrary one. */}
-            <SettingSlider label='Follow speed' icon='run-fast' value={settings.followSpeed} displayValue={`${settings.followSpeed.toFixed(2)}x`} minimumValue={MIN_FOLLOW_SPEED} maximumValue={MAX_FOLLOW_SPEED} step={FREE_STEP} onChange={setFollowSpeed} />
+            <SettingSlider label='Follow Speed' icon='run-fast' value={settings.followSpeed} displayValue={`${settings.followSpeed.toFixed(2)}x`} minimumValue={MIN_FOLLOW_SPEED} maximumValue={MAX_FOLLOW_SPEED} step={FREE_STEP} onChange={setFollowSpeed} />
             {/* Damps a released epicentre's free movement overall, every frame it's active - not just
             its bounce off the drag boundary, despite the internal bounceFriction name (see the frame
             callback in useEpicenter.ts) - so plain 'Friction' reads truer than 'Bounce friction' ever
@@ -217,7 +217,7 @@ export function ControlGroupBottomSheetContent() {
             {/* Left draggable even while audio-reactive mode is off - pre-arming it ahead of having
             anything to act on, same reasoning as Mirror gap/Mirror rotation speed in the mirror group
             above, rather than gating it behind the mode it only affects. */}
-            <SettingSlider label='Mic sensitivity' icon='microphone-plus' value={settings.micSensitivity} displayValue={`${settings.micSensitivity.toFixed(2)}x`} minimumValue={MIN_MIC_SENSITIVITY} maximumValue={MAX_MIC_SENSITIVITY} step={FREE_STEP} onChange={setMicSensitivity} />
+            <SettingSlider label='Mic Sensitivity' icon='microphone-plus' value={settings.micSensitivity} displayValue={`${settings.micSensitivity.toFixed(2)}x`} minimumValue={MIN_MIC_SENSITIVITY} maximumValue={MAX_MIC_SENSITIVITY} step={FREE_STEP} onChange={setMicSensitivity} />
             {/* Drives the idle-fade timer in index.tsx, not tap-to-dismiss (see hideControls' own call
             sites there) - this only governs how long the controls linger with zero activity before
             fading away on their own. Value is a rate (0 = never, 5 = as fast as this goes), the same
@@ -225,7 +225,7 @@ export function ControlGroupBottomSheetContent() {
             controlsAutoHideDelayMs's own comment for why - so the seconds shown here are derived for
             display rather than read straight off settings. */}
             <SettingSlider
-              label='Auto-hide delay'
+              label='Auto-Hide Delay'
               icon='timer-outline'
               value={settings.controlsAutoHideSpeed}
               displayValue={(() => {
