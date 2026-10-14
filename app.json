@@ -26,11 +26,12 @@
     "android": {
       "predictiveBackGestureEnabled": false,
       "package": "com.jayrdeaton.Swirlio",
-      "permissions": [
+      "blockedPermissions": [
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "web": {
@@ -61,7 +62,19 @@
           "androidForegroundService": false
         }
       ],
-      "expo-audio",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": false,
+          "microphonePermission": "Swirlio uses the microphone to make the swirl react to sound."
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Swirlio uses motion to roll the swirl when you tilt your device."
+        }
+      ],
       "expo-asset",
       "@tastic/edge-guard"
     ],
