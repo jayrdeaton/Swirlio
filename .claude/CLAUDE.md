@@ -29,6 +29,8 @@ Always run `npm run lint` before finishing any task. This is an app (`"private":
 
 An earlier pass implemented this via a separate `npm` `pre<script>` hook per target (`"prebuild:development": "npm run verify"` sitting before `"build:development"`, mirroring how npm library packages gate `npm version` behind `preversion`) and was deliberately reverted. The hook mechanism exists to intercept *builtin* npm commands you don't control the invocation of - `npm version` isn't a script you write, so `preversion` is the only way to gate it. `build:development` and `update` are scripts we author ourselves; there's no builtin invocation to intercept, so wrapping them in a same-named hook is pure indirection (3 build targets + `update` = 4 extra hook scripts doing nothing a direct `&&` prefix doesn't already do). Inline chaining is the correct form here - reserve the `pre<script>`/`post<script>` mechanism for actual npm lifecycle commands.
 
+**iOS 27 / Xcode 27:** see "Xcode 26 image pin" at the end of this file. `pod install` from a non-UTF-8 shell fails with a Unicode normalization error: set `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`.
+
 ## Tooling
 
 Onboarded onto the shared `@infinitetoken` config packages (`eslint-config`, `jest-config`, `tsconfig`) - previously hand-rolled its own `eslint-config-expo`-based config, `jest-expo`-preset-direct config, and `expo/tsconfig.base`-extending tsconfig.
@@ -113,3 +115,7 @@ src/
 ## CI
 
 `.github/workflows/ci.yml` uses the shared reusable workflow (`infinitetoken/Workflows/.github/workflows/npm-ci.yml@v1`, defaults to `npm run verify`) - previously a hand-rolled workflow running `npm ci && npm run ci`. The `ci` npm script was renamed to `verify` to match.
+
+## Xcode 26 image pin (remove on Expo SDK 58)
+
+`eas.json` pins the `preview` and `production` iOS builds to `macos-tahoe-26.5-xcode-26.6` (set fleet-wide 2026-10-14). An app linked against the iOS 27 SDK aborts at launch on iOS 27 ("UIScene life cycle is required for apps built with this SDK") unless it adopts the UIScene life cycle, which SDK 57's native template doesn't do and SDK 58's does. A build made with Xcode 26 runs fine on iOS 27. **When this app moves to Expo SDK 58, remove both `ios.image` pins and this section**, so builds go back to EAS's default image for the SDK. Local builds (`expo run:ios`, the `development` profile) ignore the pin and use this Mac's Xcode 27, so until then they crash at launch on an iOS 27 device or simulator.
