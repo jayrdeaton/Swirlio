@@ -3,17 +3,17 @@
 // 0.25..5 in steps of 0.1, so every stop sits on a .x5).
 const FLOAT_DUST_DECIMALS = 6
 
-// How close (in on-screen pixels, not value units — a physical distance feels the same regardless of
+// How close (in on-screen pixels, not value units - a physical distance feels the same regardless of
 // how wide a given min..max span happens to be stretched across the track) a touch needs to land to
 // 0 before snapping there outright, for a slider that wants exactly one magnetic stop at zero without
-// giving up free dragging everywhere else — see SettingSlider's own snapToZero prop, and
+// giving up free dragging everywhere else - see SettingSlider's own snapToZero prop, and
 // ControlGroupBottomSheetContent's speed sliders for why: freely draggable, but landing precisely on
-// "off" (0 — the direction reverses there) by feel, without a value-line's worth of decimal places to
+// "off" (0 - the direction reverses there) by feel, without a value-line's worth of decimal places to
 // hunt for it in.
 const ZERO_SNAP_PX = 12
 
 // Maps a touch position along the track to a value, snapped to `step` (or, with step 0, returned as
-// the raw continuous position — see SettingSlider's own step comment for which sliders want which).
+// the raw continuous position - see SettingSlider's own step comment for which sliders want which).
 // Returns null when the track has no measured width: a zero-width track can't be mapped to anything,
 // and reporting a value anyway is what pinned every slider to its minimum.
 export function positionToValue(x: number, trackWidth: number, minimumValue: number, maximumValue: number, step: number, snapToZero = false): number | null {
@@ -21,7 +21,7 @@ export function positionToValue(x: number, trackWidth: number, minimumValue: num
   if (!Number.isFinite(minimumValue) || !Number.isFinite(maximumValue) || maximumValue <= minimumValue) return null
 
   // Checked before falling through to the plain progress/step math below, and independent of step
-  // entirely — a slider can be freely continuous (step 0) and still have this one magnetic stop, which
+  // entirely - a slider can be freely continuous (step 0) and still have this one magnetic stop, which
   // is exactly what the three ±speed sliders want. Only meaningful when 0 actually sits strictly
   // between the two ends; a slider whose own range never crosses zero (Friction, Crop, cycle speed…)
   // already gets an exact 0 for free by dragging to that end of the track, no magnet needed.

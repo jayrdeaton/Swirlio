@@ -23,7 +23,7 @@ describe('useCyclingColor', () => {
     expect(result.current.value).toBe('#111111')
   })
 
-  // A UI-thread derived value now (see useCyclingColor's own comment for why) — read fresh off
+  // A UI-thread derived value now (see useCyclingColor's own comment for why) - read fresh off
   // `progress` on every access rather than polled on an interval, so there's no clock to advance:
   // mutating progress.value and reading result.current.value straight after is enough.
   it('blends live as progress changes', async () => {
@@ -33,7 +33,7 @@ describe('useCyclingColor', () => {
     expect(result.current.value).toBe('#000000')
 
     // cycleColor divides [0, 1) into one segment per colour, so with 2 colours 0.5 is a pure stop
-    // on the second one (segment = 0.5 * 2 = 1.0 exactly) — the 50/50 blend sits at the segment's
+    // on the second one (segment = 0.5 * 2 = 1.0 exactly) - the 50/50 blend sits at the segment's
     // own midpoint, 0.25.
     progress.value = 0.25
 

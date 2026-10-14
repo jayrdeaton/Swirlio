@@ -11,7 +11,7 @@ const mockedAudioRecorder = AudioRecorder as unknown as jest.Mock
 const mockedRequestRecordingPermissions = AudioManager.requestRecordingPermissions as jest.Mock
 
 // The hook's own setup chains two awaits (permission, then recorder.start()) before anything else
-// happens — a couple of microtask turns lets both resolve within a single act() the same way real
+// happens - a couple of microtask turns lets both resolve within a single act() the same way real
 // promise scheduling would, without needing fake timers just to flush plain Promise.resolve() chains.
 async function flushSetup() {
   await act(async () => {
@@ -22,7 +22,7 @@ async function flushSetup() {
 }
 
 // Builds a fake onAudioReady event carrying a single, constant-amplitude channel of `length` samples
-// — enough for the hook's own RMS/one-pole-filter math to produce a real, non-zero reading without
+// - enough for the hook's own RMS/one-pole-filter math to produce a real, non-zero reading without
 // needing an actual audio buffer implementation.
 function fakeAudioReadyEvent(amplitude: number, length = 4096) {
   const channelData = new Float32Array(length).fill(amplitude)
@@ -35,7 +35,7 @@ describe('useAudioReactive', () => {
     mockedRequestRecordingPermissions.mockResolvedValue('Granted')
   })
 
-  it('never touches the microphone while disabled — no permission prompt, no recorder', async () => {
+  it('never touches the microphone while disabled - no permission prompt, no recorder', async () => {
     const { result } = await renderHook(() => useAudioReactive(false))
     await flushSetup()
 
@@ -58,7 +58,7 @@ describe('useAudioReactive', () => {
     const contextInstance = mockedAudioContext.mock.results[0].value
     const recorderInstance = mockedAudioRecorder.mock.results[0].value
     // AudioContext/RecorderAdapterNode are still created and connected even though nothing reads an
-    // analyser from them anymore (see useAudioReactive.ts's own comment on why) — onAudioReady has
+    // analyser from them anymore (see useAudioReactive.ts's own comment on why) - onAudioReady has
     // only ever been exercised with this pairing in place.
     expect(contextInstance.createRecorderAdapter).toHaveBeenCalledTimes(1)
     expect(recorderInstance.connect).toHaveBeenCalledTimes(1)
@@ -66,8 +66,8 @@ describe('useAudioReactive', () => {
     expect(recorderInstance.start).toHaveBeenCalledTimes(1)
   })
 
-  // A freshly-constructed AudioContext starts 'suspended' — asserting resume() ran, and ran before
-  // start() (not after — a suspended context during recorder.start() would miss whatever the
+  // A freshly-constructed AudioContext starts 'suspended' - asserting resume() ran, and ran before
+  // start() (not after - a suspended context during recorder.start() would miss whatever the
   // recorder captures in between), is what actually locks in a working capture pipeline.
   it('resumes a suspended audio context before starting the recorder', async () => {
     await renderHook(() => useAudioReactive(true))
@@ -109,7 +109,7 @@ describe('useAudioReactive', () => {
     expect(result.current.loudness).toBe(0)
   })
 
-  it('no-ops on web instead of crashing — the library has no mic API for that target', async () => {
+  it('no-ops on web instead of crashing - the library has no mic API for that target', async () => {
     const originalOS = Platform.OS
     Platform.OS = 'web'
 
@@ -129,8 +129,8 @@ describe('useAudioReactive', () => {
     }
   })
 
-  // Silence (amplitude 0) must stay exactly 0 — rmsToUnit's own `rms <= 0` short-circuit, not just a
-  // very-quiet-but-nonzero reading — since a room with no sound at all should never register as
+  // Silence (amplitude 0) must stay exactly 0 - rmsToUnit's own `rms <= 0` short-circuit, not just a
+  // very-quiet-but-nonzero reading - since a room with no sound at all should never register as
   // "the mic picked something up."
   it('reports zero for a silent buffer', async () => {
     const { result } = await renderHook(() => useAudioReactive(true))
@@ -151,7 +151,7 @@ describe('useAudioReactive', () => {
 
   // A loud, constant-amplitude buffer should register on every band (a pure DC-ish signal has no
   // real bass/mid/treble character, but the one-pole filters still have to pass SOME energy through
-  // each band rather than only one) and on loudness — this is the sanity check that the raw-PCM path
+  // each band rather than only one) and on loudness - this is the sanity check that the raw-PCM path
   // actually produces live, non-zero output at all, the thing the old analyser-based pipeline
   // couldn't do (see useAudioReactive.ts's own comment on why that was abandoned).
   it('produces non-zero bass/mid/treble/loudness for a loud buffer', async () => {
@@ -173,7 +173,7 @@ describe('useAudioReactive', () => {
 
   // mid/treble/loudness are throttled (see BAND_STATE_THROTTLE_MS in useAudioReactive.ts) so a burst
   // of buffers arriving faster than that doesn't restart index.tsx's speed-driven animations on every
-  // single one — bass has no such throttle since it drives a plain per-frame SharedValue read, not a
+  // single one - bass has no such throttle since it drives a plain per-frame SharedValue read, not a
   // restarted animation, so it should still track the second (quieter) buffer even though the
   // throttled fields don't.
   it('throttles mid/treble/loudness updates but not bass', async () => {
@@ -193,7 +193,7 @@ describe('useAudioReactive', () => {
       onAudioReady(fakeAudioReadyEvent(0.01))
     })
 
-    // Asserting a strict decrease (not a magic threshold) — the one-pole filter's RMS over the
+    // Asserting a strict decrease (not a magic threshold) - the one-pole filter's RMS over the
     // transition blends both amplitudes, so the exact landing value isn't itself meaningful, only
     // that it moved toward the new, quieter buffer while mid stayed frozen at the throttled reading.
     expect(result.current.bass.value).toBeLessThan(loudBass)
@@ -201,7 +201,7 @@ describe('useAudioReactive', () => {
   })
 
   // A quiet buffer boosted by a high sensitivity should read at least as loud as the same buffer at
-  // unity gain — the actual number isn't meaningful (rmsToUnit's dB conversion is nonlinear), only
+  // unity gain - the actual number isn't meaningful (rmsToUnit's dB conversion is nonlinear), only
   // that turning sensitivity up measurably helps a quiet room register.
   it('scales quieter readings up when sensitivity is raised', async () => {
     const { result: unityResult } = await renderHook(() => useAudioReactive(true, 1))
@@ -228,7 +228,7 @@ describe('useAudioReactive', () => {
   })
 
   // A live drag on the sensitivity slider must reach the very next buffer without tearing down and
-  // restarting mic capture — the ref-based wiring in useAudioReactive.ts is what makes that possible;
+  // restarting mic capture - the ref-based wiring in useAudioReactive.ts is what makes that possible;
   // asserting the recorder/context are untouched is what would catch a regression back to a dependency
   // that restarts the whole effect instead.
   it('picks up a live sensitivity change without restarting the recorder', async () => {
@@ -257,7 +257,7 @@ describe('useAudioReactive', () => {
   })
 
   // start() reports failure through this Result object, not a rejected promise (see
-  // useAudioReactive.ts's own comment on why it checks `status`) — a native-level failure here must
+  // useAudioReactive.ts's own comment on why it checks `status`) - a native-level failure here must
   // not crash the render tree, the same "degrade silently" contract as the outer catch below.
   it('does not crash when the recorder reports a start failure', async () => {
     mockedAudioRecorder.mockImplementation(() => ({

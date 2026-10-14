@@ -5,18 +5,18 @@ const passthrough = (value: unknown) => value
 const passthroughLast = (...values: unknown[]) => values[values.length - 1]
 
 // Same registry-plus-reset shape as react-native-gesture-handler's __gestureTestUtils below: real
-// frame callbacks run on every display refresh on the UI thread, which doesn't exist here — tests
+// frame callbacks run on every display refresh on the UI thread, which doesn't exist here - tests
 // instead grab the last-registered one and invoke its callback directly with a fabricated
 // FrameInfo, stepping the physics deterministically instead of racing real time.
 let frameCallbackRegistry: any[] = []
 
-// Same registry-plus-reset shape as frameCallbackRegistry above, for useAnimatedReaction —
+// Same registry-plus-reset shape as frameCallbackRegistry above, for useAnimatedReaction -
 // useDragPointPhysics.ts uses one to make gravity ambient (reactivating the bounce frame callback
 // whenever gravityCenter/gravity change, not just after a release), so this needs to actually run
 // for that mechanism to be testable at all, unlike the inert `=> undefined` a plain passthrough
 // would give it. Real reanimated fires `react` immediately on mount with the first `prepare()`
 // result (previous is null that first time), then again only when a later `prepare()` result
-// differs from the last one — runAll below mirrors both halves of that.
+// differs from the last one - runAll below mirrors both halves of that.
 let animatedReactionRegistry: { prepare: () => unknown; react: (value: unknown, previous: unknown) => void; lastValue: unknown; hasRun: boolean }[] = []
 
 const useAnimatedReaction = (prepare: () => unknown, react: (value: unknown, previous: unknown) => void) => {
@@ -26,7 +26,7 @@ const useAnimatedReaction = (prepare: () => unknown, react: (value: unknown, pre
     ref.current = entry
     animatedReactionRegistry.push(entry)
   } else {
-    // Same "keep the closure fresh every render" reasoning as useFrameCallback above — prepare/
+    // Same "keep the closure fresh every render" reasoning as useFrameCallback above - prepare/
     // react close over whichever render's SharedValues/props are current. This mock is never a
     // real component render, so the mutation is safe despite the rule's static shape-matching.
     // eslint-disable-next-line react-hooks/refs
@@ -52,7 +52,7 @@ const useFrameCallback = (callback: (frameInfo: any) => void, autostart = true) 
     frameCallbackRegistry.push(entry)
   } else {
     // Real reanimated re-registers the latest closure on every render too (see useFrameCallback's
-    // own effect deps) — keeping the callback reference fresh here matters since it closes over
+    // own effect deps) - keeping the callback reference fresh here matters since it closes over
     // bounceFriction and the other shared values from whichever render created it. This mock is
     // never a real component render, so the mutation/read here are safe despite the rule's static
     // shape-matching.
@@ -70,7 +70,7 @@ const Animated = {
   ScrollView: RN.ScrollView,
   FlatList: RN.FlatList,
   createAnimatedComponent: (Component: unknown) => Component,
-  // Real reanimated hands back the same object across a component's whole lifetime — a ref is
+  // Real reanimated hands back the same object across a component's whole lifetime - a ref is
   // what makes that true here too, so a re-render triggered mid-gesture (e.g. a runOnJS callback
   // setting other React state) doesn't silently reset every shared value to its initial prop.
   useSharedValue: <T>(value: T) => {
@@ -118,8 +118,8 @@ const Animated = {
   __frameCallbackTestUtils: {
     getLastFrameCallback: () => frameCallbackRegistry[frameCallbackRegistry.length - 1] || null,
     // Same registry-plus-picker shape as react-native-gesture-handler's own getGestures/
-    // getLastGesture below — added once useEpicenter started registering more than one frame
-    // callback (pattern's own drag physics, then the mirror anchor's — see useDragPointPhysics),
+    // getLastGesture below - added once useEpicenter started registering more than one frame
+    // callback (pattern's own drag physics, then the mirror anchor's - see useDragPointPhysics),
     // at which point "the last one" stopped reliably meaning "the pattern's."
     getFrameCallbacks: () => frameCallbackRegistry.slice(),
     reset: () => {
@@ -127,10 +127,10 @@ const Animated = {
     }
   },
   __animatedReactionTestUtils: {
-    // Simulates one UI-thread evaluation of every registered useAnimatedReaction — there's no real
+    // Simulates one UI-thread evaluation of every registered useAnimatedReaction - there's no real
     // frame loop driving these here, so a test calls this explicitly (the same shape as stepBounce
     // driving a frame callback) after setting up whatever SharedValues the reaction's `prepare`
-    // reads. JSON.stringify is an easy stand-in for reanimated's own deep-equal change check —
+    // reads. JSON.stringify is an easy stand-in for reanimated's own deep-equal change check -
     // every prepare() in this codebase returns plain numbers/plain objects of numbers, never
     // anything that would round-trip lossy (function, undefined-in-array, etc.).
     runAll: () => {

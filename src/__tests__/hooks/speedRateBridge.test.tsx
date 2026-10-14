@@ -35,14 +35,14 @@ describe('useSpeedRateBridge', () => {
     expect(writers.writeGravityParticleRate).toHaveBeenCalledWith(2.5)
   })
 
-  // The actual rate SharedValues only exist once SwirlScreen has mounted and registered — a slider
+  // The actual rate SharedValues only exist once SwirlScreen has mounted and registered - a slider
   // dragged before that (or after SwirlScreen unmounts) has nothing to call, and shouldn't throw just
   // because nobody's listening yet; the settings → effect sync is still what drives the rate once
   // SwirlScreen does mount, so a dropped fast-path write here is harmless, not a correctness gap.
   it('is a harmless no-op when nothing has registered', async () => {
     const { result } = await renderHook(() => useSpeedRateBridge(), { wrapper: SpeedRateBridgeProvider })
 
-    // If any call threw, this test would fail with an unhandled error — nothing further to assert.
+    // If any call threw, this test would fail with an unhandled error - nothing further to assert.
     await act(async () => {
       result.current.writeRotationRate(2)
       result.current.writeMirrorRotationRate(-3)

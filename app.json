@@ -62,7 +62,8 @@
         }
       ],
       "expo-audio",
-      "expo-asset"
+      "expo-asset",
+      "@tastic/edge-guard"
     ],
     "runtimeVersion": {
       "policy": "fingerprint"

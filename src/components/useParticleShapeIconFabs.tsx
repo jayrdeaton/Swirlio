@@ -11,7 +11,7 @@ const PARTICLE_SHAPE_OPTIONS: PreviewOption<ParticleShape>[] = PARTICLE_SHAPE_OR
   renderIcon: ({ color, size }) => <ParticleIcon shape={shape} color={color} size={size} />
 }))
 
-// Same usePreviewOptionToggleFabs shape as useColorListFabs — a hook, not a component, so
+// Same usePreviewOptionToggleFabs shape as useColorListFabs - a hook, not a component, so
 // ControlGroupTopSheetContent's own FabRow sees every FAB as a real flat sibling instead of one
 // opaque child (see usePreviewOptionFabs's own comment for why). Multi-select: live beads resolve a
 // random pick from whichever shapes are enabled here (see Spiral.tsx's particleBucketPaths).

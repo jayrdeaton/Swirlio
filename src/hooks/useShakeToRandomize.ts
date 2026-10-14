@@ -38,7 +38,7 @@ export function useShakeToRandomize(enabled: boolean, onShake: () => void) {
         })
       })
       .catch(() => {
-        // expo-sensors can report availability inaccurately (notably on web) —
+        // expo-sensors can report availability inaccurately (notably on web) -
         // shake-to-randomize is a nice-to-have, so fail silently rather than crash the app
       })
 

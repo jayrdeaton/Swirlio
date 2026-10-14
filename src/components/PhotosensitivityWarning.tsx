@@ -12,7 +12,7 @@ import { MdIcon } from './MdIcon'
 const STORAGE_KEY = 'photosensitivity-warning-acknowledged'
 const FADE_DURATION_MS = 250
 
-// Shown once, ever, on first launch — the swirl's rapid color cycling and audio-reactive pulsing are
+// Shown once, ever, on first launch - the swirl's rapid color cycling and audio-reactive pulsing are
 // exactly the kind of flashing content that can trigger seizures in people with photosensitive
 // epilepsy. A storage read failure (rare, but AsyncStorage can throw) errs toward showing the warning
 // rather than silently skipping it, since the cost of an extra tap is far lower than the cost of
@@ -48,7 +48,7 @@ export function PhotosensitivityWarning() {
   function acknowledge() {
     setVisible(false)
     AsyncStorage.setItem(STORAGE_KEY, 'true').catch(() => {
-      // ignore persistence errors — worst case the warning reappears next launch
+      // ignore persistence errors - worst case the warning reappears next launch
     })
   }
 

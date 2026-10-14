@@ -1,6 +1,6 @@
 import type { SkPoint } from '@shopify/react-native-skia'
 
-// Matches MIN_POLYGON_SIDES..MAX_POLYGON_SIDES in useSwirlSettings — a friendlier slider readout
+// Matches MIN_POLYGON_SIDES..MAX_POLYGON_SIDES in useSwirlSettings - a friendlier slider readout
 // than a bare number.
 export const POLYGON_SIDE_NAMES: Record<number, string> = {
   3: 'Triangle',
@@ -11,7 +11,7 @@ export const POLYGON_SIDE_NAMES: Record<number, string> = {
   8: 'Octagon'
 }
 
-// A closed regular polygon centred on the origin, one vertex pointing straight up — purely
+// A closed regular polygon centred on the origin, one vertex pointing straight up - purely
 // cosmetic, but it means a hexagon's flat top sits where a circle's topmost point would.
 export function buildPolygonPath(sides: number, radius: number): string {
   'worklet'
@@ -27,7 +27,7 @@ export function buildPolygonPath(sides: number, radius: number): string {
   return `${d}Z`
 }
 
-// Same geometry as buildPolygonPath, as raw vertices rather than an SVG string — PolygonPattern feeds
+// Same geometry as buildPolygonPath, as raw vertices rather than an SVG string - PolygonPattern feeds
 // this straight into Skia's PathBuilder.addPoly(points, true) (see its own comment) instead of
 // building a string every frame only to have Skia immediately re-parse it back into the same points.
 // One vertex per side, not sides + 1: addPoly's own `close` flag draws the final closing edge, so

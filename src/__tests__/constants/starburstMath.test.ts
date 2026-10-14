@@ -44,7 +44,7 @@ describe('buildStarburstPath', () => {
 
 describe('starburstRayTips', () => {
   // Same geometry as buildStarburstPath (see its own tests above), just the ray tips alone instead of
-  // a full SVG string — StarburstPattern pairs each tip with an explicit moveTo(0,0) via Skia's
+  // a full SVG string - StarburstPattern pairs each tip with an explicit moveTo(0,0) via Skia's
   // PathBuilder, the same shared origin buildStarburstPath's own repeated M0,0 draws.
   it('returns one tip per ray', () => {
     expect(starburstRayTips(6, 100).length).toBe(6)

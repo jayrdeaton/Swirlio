@@ -43,7 +43,7 @@ describe('particleSpawnPosition', () => {
     }
   })
 
-  it('is deterministic — the same index/count/radius always produces the same position', () => {
+  it('is deterministic - the same index/count/radius always produces the same position', () => {
     expect(particleSpawnPosition(7, 50, 100)).toEqual(particleSpawnPosition(7, 50, 100))
   })
 
@@ -74,9 +74,9 @@ describe('applySpringForce', () => {
     expect(applySpringForce(0, 0, 5, 5, 5, 5, 10, 0, 1)).toEqual({ vx: 0, vy: 0 })
   })
 
-  it('damping opposes existing velocity even at the target — a spring is not just a stiffness term', () => {
+  it('damping opposes existing velocity even at the target - a spring is not just a stiffness term', () => {
     // At the target, stiffness contributes nothing (targetX - x === 0), but a real spring's damping
-    // still resists whatever velocity the particle already has — this is exactly the term the old,
+    // still resists whatever velocity the particle already has - this is exactly the term the old,
     // pre-fix applyGatherForce never had, which is why beads never settled and just oscillated. A
     // small dt (a realistic per-frame step, not the deliberately coarse dt=1 the other tests in this
     // file use to isolate a single step's math) keeps the damping term from overshooting past zero in
@@ -137,8 +137,8 @@ describe('resolveParticleCollision', () => {
     expect(Math.hypot(result.x2 - result.x1, result.y2 - result.y1)).toBeCloseTo(10, 10)
   })
 
-  it('at restitution 1, a head-on equal-mass hit exchanges velocity exactly — particle 1 stops, particle 2 takes off', () => {
-    // Particle 1 moving straight right into a stationary particle 2 sitting directly to its right —
+  it('at restitution 1, a head-on equal-mass hit exchanges velocity exactly - particle 1 stops, particle 2 takes off', () => {
+    // Particle 1 moving straight right into a stationary particle 2 sitting directly to its right -
     // the classic Newton's-cradle result for two equal masses at a perfectly elastic restitution.
     const result = resolveParticleCollision(0, 0, 5, 0, 5, 0, 0, 0, 10, 1)
     expect(result.vx1).toBeCloseTo(0, 10)
@@ -148,7 +148,7 @@ describe('resolveParticleCollision', () => {
   })
 
   it('at restitution 0, a head-on equal-mass hit leaves both particles sharing the average velocity (perfectly inelastic)', () => {
-    // Same head-on setup as the restitution-1 test above — this time all of the closing speed is
+    // Same head-on setup as the restitution-1 test above - this time all of the closing speed is
     // absorbed rather than exchanged, so both particles end up moving together at the pair's own
     // average velocity (2.5, the average of 5 and 0) instead of swapping.
     const result = resolveParticleCollision(0, 0, 5, 0, 5, 0, 0, 0, 10, 0)
@@ -161,7 +161,7 @@ describe('resolveParticleCollision', () => {
   it('at a fractional restitution, a head-on hit only partly closes the velocity gap, losing energy in between', () => {
     // 0.6 is exactly what useParticleField.ts's own PARTICLE_COLLISION_RESTITUTION calibrates to (see
     // its own comment for why an actively-colliding gathered/thrown cluster needs some loss per
-    // collision to ever settle) — verified here as the actual number a caller would use, not just the
+    // collision to ever settle) - verified here as the actual number a caller would use, not just the
     // two textbook extremes (0 and 1) above.
     const result = resolveParticleCollision(0, 0, 5, 0, 5, 0, 0, 0, 10, 0.6)
     // v1' = v1 + (1+e)/2 * (v2-v1) = 5 + 0.8*(0-5) = 1; v2' = 0 - 0.8*(0-5) = 4.
@@ -220,7 +220,7 @@ describe('resolveParticleCollision', () => {
   })
 
   it('only untangles position when overlapping particles are already separating, leaving velocity alone', () => {
-    // Particle 1 moving left, particle 2 moving right — already pulling apart along the line between
+    // Particle 1 moving left, particle 2 moving right - already pulling apart along the line between
     // them, even though they're still (barely) overlapping this frame. An impulse here would be a
     // spurious extra kick, not a real bounce, so velocity should pass through unchanged.
     const result = resolveParticleCollision(0, 0, -5, 0, 5, 0, 5, 0, 10, 1)
@@ -235,7 +235,7 @@ describe('resolveParticleCollision', () => {
   })
 
   it('applies no impulse to a purely tangential graze (moving side by side, not toward each other)', () => {
-    // Both particles moving straight up together, sitting side by side — the line between them is
+    // Both particles moving straight up together, sitting side by side - the line between them is
     // horizontal, their shared velocity is entirely vertical (perpendicular to that line), so there's
     // no closing speed along the normal at all.
     const result = resolveParticleCollision(0, 0, 0, 5, 5, 0, 0, 5, 10, 1)

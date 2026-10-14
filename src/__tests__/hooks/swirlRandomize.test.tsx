@@ -15,13 +15,13 @@ describe('useSwirlRandomize', () => {
     expect(randomizeGroup).toHaveBeenCalledWith('mirror')
   })
 
-  // The actual rerollUnitsByGroup logic only exists once SwirlScreen has mounted and registered — a
+  // The actual rerollUnitsByGroup logic only exists once SwirlScreen has mounted and registered - a
   // Randomize button pressed before that (or after SwirlScreen unmounts) has nothing to call, and
   // shouldn't throw just because nobody's listening yet.
   it('is a harmless no-op when nothing has registered', async () => {
     const { result } = await renderHook(() => useSwirlRandomize(), { wrapper: SwirlRandomizeProvider })
 
-    // If the call threw, this test would fail with an unhandled error — nothing further to assert.
+    // If the call threw, this test would fail with an unhandled error - nothing further to assert.
     await act(async () => {
       result.current.randomizeGroup('pattern')
     })

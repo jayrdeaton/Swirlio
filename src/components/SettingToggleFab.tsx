@@ -8,7 +8,7 @@ type SettingToggleFabProps = {
   onValueChange: (value: boolean) => void
 }
 
-// The same on/off FAB treatment as the mic FAB and the group-trigger row (see useToggleFabAppearance) —
+// The same on/off FAB treatment as the mic FAB and the group-trigger row (see useToggleFabAppearance) -
 // used for every boolean setting instead of a standard Switch, so a toggle reads the same way
 // everywhere on screen rather than two different control languages for the same kind of choice.
 export function SettingToggleFab({ icon, label, value, disabled = false, onValueChange }: SettingToggleFabProps) {

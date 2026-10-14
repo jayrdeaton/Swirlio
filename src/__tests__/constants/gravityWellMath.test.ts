@@ -9,7 +9,7 @@ describe('gravityHoleRadius', () => {
     expect(gravityHoleRadius(5, 5, 14, 50)).toBeCloseTo(50, 10)
   })
 
-  it('sits at maxRadius at the strongest push too — magnitude, not sign', () => {
+  it('sits at maxRadius at the strongest push too - magnitude, not sign', () => {
     expect(gravityHoleRadius(-5, 5, 14, 50)).toBeCloseTo(50, 10)
   })
 
@@ -29,7 +29,7 @@ describe('gravityParticleFrictionSpeed', () => {
     expect(gravityParticleFrictionSpeed(0, 5, 0.3, 1.5)).toBeCloseTo(1.5, 10)
   })
 
-  it('sits at minSpeed at the strongest friction — more drag, slower baseline flow', () => {
+  it('sits at minSpeed at the strongest friction - more drag, slower baseline flow', () => {
     expect(gravityParticleFrictionSpeed(5, 5, 0.3, 1.5)).toBeCloseTo(0.3, 10)
   })
 
@@ -45,7 +45,7 @@ describe('gravityParticleFrictionSpeed', () => {
     expect(gravityParticleFrictionSpeed(-1, 5, 0.3, 1.5)).toBeCloseTo(1.5, 10)
   })
 
-  it('never returns 0, even at maxBounceFriction — the well should always keep some baseline flow', () => {
+  it('never returns 0, even at maxBounceFriction - the well should always keep some baseline flow', () => {
     expect(gravityParticleFrictionSpeed(5, 5, 0.3, 1.5)).toBeGreaterThan(0)
   })
 })

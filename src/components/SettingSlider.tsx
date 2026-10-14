@@ -11,7 +11,7 @@ import { useSwirlSettings } from '@/hooks/useSwirlSettings'
 import { MdIcon } from './MdIcon'
 
 // Deliberately tighter than the epicenter's own snap-back spring (useEpicenter.ts's SPRING is
-// 18/140) — that one is settling a large, freely-thrown drag, so a slow float reads as physical.
+// 18/140) - that one is settling a large, freely-thrown drag, so a slow float reads as physical.
 // This is settling a thumb onto a step a few pixels away; a critically-damped, high-stiffness snap
 // (damping ~= 2*sqrt(stiffness), so essentially no overshoot) reads as precise and near-instant.
 const SNAP_SPRING = { damping: 60, stiffness: 800 }
@@ -22,16 +22,16 @@ const THUMB_ICON_SIZE = 15
 const ROW_HEIGHT = 30
 const TICK_WIDTH = 2
 // A little taller than the track itself, so a tick reads as its own mark rather than a blemish on
-// the track line — not sized to poke past the thumb, which isn't the thing that was hiding it (see
+// the track line - not sized to poke past the thumb, which isn't the thing that was hiding it (see
 // SliderTick below for what actually was).
 const TICK_HEIGHT = 10
 // react-native-web passes `cursor` straight through to the DOM style, but core RN's ViewStyle type
-// doesn't know about it — hence the cast rather than a StyleSheet entry, which would fail to typecheck.
+// doesn't know about it - hence the cast rather than a StyleSheet entry, which would fail to typecheck.
 const webPointerCursor = Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : undefined
 // Half the thumb's own width, spent as the outer wrapper's horizontal padding rather than left for
 // the thumb to paint outside its box. RN positions an absolute child's left/right/width against its
 // parent's padding box already, so reserving this much padding is enough on its own to keep the
-// thumb — wider than the 0%/100% track ends it rides on — fully inside every ancestor's bounds. No
+// thumb - wider than the 0%/100% track ends it rides on - fully inside every ancestor's bounds. No
 // `overflow: visible` anywhere, which Android doesn't reliably honor.
 const THUMB_HALF = THUMB_SIZE / 2
 // Enough horizontal intent to claim the drag, so a vertical swipe still scrolls the drawer.
@@ -45,50 +45,50 @@ type SettingSliderProps = {
   maximumValue: number
   step: number
   disabled?: boolean
-  // A MaterialCommunityIcons name — matches the icon on this setting's on-screen edge slider, for
+  // A MaterialCommunityIcons name - matches the icon on this setting's on-screen edge slider, for
   // settings that have one, so the same control reads as "the same thing" in both places.
   icon?: string
   // Marks every value the step lands on, so a discrete slider (mirror lines, polygon sides) reads as
-  // "pick one of these stops" instead of a continuous drag. Only meaningful for a small step count —
+  // "pick one of these stops" instead of a continuous drag. Only meaningful for a small step count -
   // left off by default so a fine-grained slider (tightness, speed) doesn't turn into tick soup.
   showTicks?: boolean
   // Spaces ticks at a coarser interval than the actual drag/snap step, for a slider that wants
   // landmark ticks (e.g. 0/1/2/3/4/5) without giving up fine-grained dragging between them (e.g.
-  // bounce friction, gravity — step 0.1 across a 0-5 range would otherwise mean 51 ticks, the exact
+  // bounce friction, gravity - step 0.1 across a 0-5 range would otherwise mean 51 ticks, the exact
   // tick-soup case showTicks' own default-off exists to avoid). Defaults to `step` itself, so a
   // caller that doesn't pass this gets the original one-tick-per-step behavior unchanged.
   tickStep?: number
-  // A single magnetic stop at 0, independent of step/showTicks/tickStep entirely — for a slider that
+  // A single magnetic stop at 0, independent of step/showTicks/tickStep entirely - for a slider that
   // should otherwise drag completely freely (no step grid at all) but still wants to be easy to land
   // exactly on 0 by feel, without hunting for it among decimal places. Draws its own single tick at
   // 0's own position regardless of whatever showTicks/tickStep are doing (or not doing) elsewhere on
-  // this same slider. See positionToValue's own comment for the actual snap distance/logic — a no-op
+  // this same slider. See positionToValue's own comment for the actual snap distance/logic - a no-op
   // whenever 0 isn't strictly between minimumValue and maximumValue.
   snapToZero?: boolean
   onChange: (value: number) => void
-  // A plain JS function, called alongside onChange on every commit — commitFromX already runs on the
+  // A plain JS function, called alongside onChange on every commit - commitFromX already runs on the
   // JS thread (see panGesture's own .runOnJS(true) comment below for why), so no worklet is needed
   // here either. Not a replacement for onChange: a low-latency addition for the handful of sliders
   // (Rotation/Zoom/Mirror rotation speed, Foreground/Background cycle speed, Friction) that also need
   // to write straight to a UI-thread rate SharedValue the instant a drag moves, instead of waiting for
   // onChange's own React state → re-render → effect round trip. Left undefined everywhere else.
   onLiveValue?: (value: number) => void
-  // Caps how often a continuous drag (onUpdate specifically — onStart and the release/tap settle
+  // Caps how often a continuous drag (onUpdate specifically - onStart and the release/tap settle
   // always commit immediately, see commitFromX's own `live` parameter) is allowed to call onChange,
-  // in ms between commits. onLiveValue is never throttled — it's cheap (a direct SharedValue write,
+  // in ms between commits. onLiveValue is never throttled - it's cheap (a direct SharedValue write,
   // no re-render); onChange is what's expensive here, since it drives a React state update and a
   // full re-render of whichever screen owns the setting. Undefined (the default) means "no cap,
   // commit every pixel," the original behavior every other slider keeps. Only the 6 speed sliders
-  // (Rotation/Zoom/Mirror rotation speed, Foreground/Background cycle speed, Friction) opt in — see
+  // (Rotation/Zoom/Mirror rotation speed, Foreground/Background cycle speed, Friction) opt in - see
   // ControlGroupBottomSheetContent's own SPEED_ONCHANGE_THROTTLE_MS. Those are the only sliders that
   // also drive a continuously-*integrated* value (see onLiveValue's own comment): dropping frames of
   // React-render work never shows up as a visible gap for the level sliders that don't set this
-  // (the pattern just is whatever it currently is, live, each frame — see index.tsx's own comment on
+  // (the pattern just is whatever it currently is, live, each frame - see index.tsx's own comment on
   // why manual-drag level values already read as smooth without help), but on a platform with no
   // separate UI thread to insulate the animation from render cost (react-native-web, see
   // useFrameCallback's own reasoning elsewhere in this codebase), a full re-render on every single
   // pixel of a fast drag can itself compete for the same thread the animation runs on and visibly
-  // stall it — throttling the expensive half while leaving the cheap half at full frequency is what
+  // stall it - throttling the expensive half while leaving the cheap half at full frequency is what
   // this exists to fix.
   onChangeThrottleMs?: number
 }
@@ -117,11 +117,11 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
   // A SharedValue rather than a plain ref, even though nothing here runs on the UI thread: the
   // compiler's react-hooks/refs rule forbids reading a plain ref from inside a closure handed to
   // Gesture's builder methods (it can't prove the closure runs outside render), where SharedValues
-  // are the established exception — see the react-hooks/immutability comments in useEpicenter.ts.
+  // are the established exception - see the react-hooks/immutability comments in useEpicenter.ts.
   const rawProgress = useSharedValue(progress)
   // lastCommit lets the sync effect below tell "value changed because we just committed it" (during a
   // drag, or the spring settle below) apart from "value changed for some other reason" (a preset,
-  // randomize, or a different pattern shrinking this slider's own min/max) — only the latter should
+  // randomize, or a different pattern shrinking this slider's own min/max) - only the latter should
   // yank rawProgress back in sync outside of a gesture, since the former already manages it directly.
   const lastCommit = useSharedValue({ value, minimumValue, maximumValue })
   // Plain ref, not a SharedValue: read/written only from this JS-thread function itself, never from
@@ -129,10 +129,10 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
   const lastOnChangeCommitMs = useRef(0)
 
   // `live` marks a call that's allowed to have its onChange half throttled (see onChangeThrottleMs's
-  // own prop comment) — only onUpdate passes true. onStart and the release/tap settle (settleAt)
+  // own prop comment) - only onUpdate passes true. onStart and the release/tap settle (settleAt)
   // always pass false, so the very first touch and the final committed position are never delayed.
   // commitFromX is only ever invoked from the gesture callbacks below (.onStart/.onUpdate) and
-  // settleAt (itself only called from .onEnd) — never during render — but it's a standalone
+  // settleAt (itself only called from .onEnd) - never during render - but it's a standalone
   // function bound to several call sites, so the compiler can't prove that and flags each Date.now()
   // below as impure "during render" conservatively. Same rule limitation the rawProgress comment
   // above already documents for refs read inside gesture callbacks, just for purity instead.
@@ -181,13 +181,13 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     // Empty, but required: Gesture.Simultaneous(panGesture, tapGesture) below silently recognizes
-    // neither gesture at all — no onStart/onUpdate/onEnd, for either — on RNGH 2.32.0 unless both
+    // neither gesture at all - no onStart/onUpdate/onEnd, for either - on RNGH 2.32.0 unless both
     // gestures have an explicit hitSlop() call. A bare Pan with no Tap composed in works fine
     // without it; it's specifically this Simultaneous+Tap combination that needs it.
     .hitSlop({})
     .enabled(!disabled)
     .activeOffsetX([-ACTIVE_OFFSET_X, ACTIVE_OFFSET_X])
-    // Each callback below reads lastOnChangeCommitMs (a plain ref, via commitFromX) — passed as an
+    // Each callback below reads lastOnChangeCommitMs (a plain ref, via commitFromX) - passed as an
     // argument to .onStart/.onUpdate/.onEnd, the compiler can't prove these only ever run as event
     // handlers (they provably do, see commitFromX's own comment) and flags the ref read the same
     // conservative way it flags rawProgress's SharedValue writes just above.
@@ -230,11 +230,11 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
       <GestureDetector gesture={gesture}>
         <View testID='setting-slider-track' style={[styles.row, disabled && styles.disabled, webPointerCursor]} onLayout={onLayout} accessibilityRole='adjustable' aria-disabled={disabled} aria-valuemin={minimumValue} aria-valuemax={maximumValue} aria-valuenow={value}>
           {/* Outlined rather than filled: a grey fill read as a disabled/inactive control, and the
-          outline alone is already enough to show the empty part of the track — everywhere past the
-          thumb — as a track with room left to drag, not just blank space.
+          outline alone is already enough to show the empty part of the track - everywhere past the
+          thumb - as a track with room left to drag, not just blank space.
           colors.primary, not colors.outline: react-native-paper's outline token is only diluted 45%
           toward this app's monochrome seed (see MonochromeThemeBridge in _layout.tsx), so it never
-          reliably reads as white in dark mode the way this needs — colors.primary already is exactly
+          reliably reads as white in dark mode the way this needs - colors.primary already is exactly
           that color, set directly by the bridge. */}
           <View style={[styles.track, styles.trackOutline, { borderColor: colors.primary }]} />
           <Animated.View style={[styles.track, { backgroundColor: colors.primary }, fillAnimatedStyle]} />
@@ -243,28 +243,28 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
               const tickProgress = index / (tickCount - 1)
               // Opposite pairing, not the same primary/outline mixup as the track above: a reached
               // tick sits on top of the primary-colored fill, so it needs contrastColor(primary) to
-              // stand out against *that* — an unreached tick sits on the plain track, on top of
+              // stand out against *that* - an unreached tick sits on the plain track, on top of
               // whatever's behind the whole slider, so it needs primary itself (see the track outline
               // comment above for why that's the token that actually tracks light/dark correctly here,
               // unlike colors.outlineVariant, which this used to read and which paper never adapts to
               // this app's seed at all).
               return <SliderTick key={index} rawProgress={rawProgress} tickProgress={tickProgress} reachedColor={contrastColor(colors.primary)} unreachedColor={colors.primary} />
             })}
-          {/* Independent of the showTicks loop above — a single fixed landmark at 0 for a slider
+          {/* Independent of the showTicks loop above - a single fixed landmark at 0 for a slider
           that's otherwise entirely free (no step grid, so no natural tick spacing to hang a mark on
           in the first place), matching where positionToValue's own magnet actually pulls toward. See
           snapToZero's own prop comment. */}
           {snapToZero && minimumValue < 0 && maximumValue > 0 && <SliderTick rawProgress={rawProgress} tickProgress={valueToProgress(0, minimumValue, maximumValue)} reachedColor={contrastColor(colors.primary)} unreachedColor={colors.primary} />}
-          {/* The icon rides on the thumb itself now rather than sitting beside the label — see
+          {/* The icon rides on the thumb itself now rather than sitting beside the label - see
           THUMB_HALF above for how it stays fully on-screen at either end of the track. Bordered in
-          contrastColor(primary) for the same reason as the fill bar above — the thumb's own fill is
+          contrastColor(primary) for the same reason as the fill bar above - the thumb's own fill is
           colors.primary too, so its border needs to be guaranteed different from that fill, not another
           colors.primary that would vanish right along with it. Its own icon already uses this same
           color, so the border now always matches what's drawn on top of it, not just what happens to
           be legible against the icon by coincidence. */}
           <Animated.View testID='setting-slider-thumb' style={[styles.thumb, styles.thumbBorder, { backgroundColor: colors.primary, borderColor: contrastColor(colors.primary) }, thumbAnimatedStyle]}>
             {/* nudgeX/nudgeY=0: this thumb's own icon container already centers exactly (measured,
-            no rounding drift — see MdIcon's prop comment), so it skips MdIcon's FAB-calibrated
+            no rounding drift - see MdIcon's prop comment), so it skips MdIcon's FAB-calibrated
             default nudge entirely rather than inheriting a correction sized for a much bigger icon. */}
             {icon ? <MdIcon name={icon} size={THUMB_ICON_SIZE} color={contrastColor(colors.primary)} nudgeX={0} nudgeY={0} /> : null}
           </Animated.View>
@@ -283,14 +283,14 @@ type SliderTickProps = {
 
 // A component of its own, not an inline useAnimatedStyle call inside the tick .map() above: the
 // number of ticks varies per slider, and hooks can't be called a variable number of times from one
-// component — but a variable number of *component instances*, each calling the hook exactly once,
+// component - but a variable number of *component instances*, each calling the hook exactly once,
 // is fine (same reasoning as the ripple pool components elsewhere in this app).
 //
 // Colored off rawProgress rather than the committed step `progress`: the fill bar next to it is
 // already animated off rawProgress (see fillAnimatedStyle above), so this is what makes a tick flip
 // color at the exact instant the fill actually reaches it. Driving it from the committed step instead
-// used to leave an upcoming tick in its "unreached" color — a light tint meant to read against the
-// plain track — while the fill had already swept underneath it mid-drag, which washed the tick out
+// used to leave an upcoming tick in its "unreached" color - a light tint meant to read against the
+// plain track - while the fill had already swept underneath it mid-drag, which washed the tick out
 // against its own now-colored background well before the thumb actually got there.
 function SliderTick({ rawProgress, tickProgress, reachedColor, unreachedColor }: SliderTickProps) {
   const tickAnimatedStyle = useAnimatedStyle(() => ({
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
     borderRadius: TRACK_HEIGHT / 2,
     height: TRACK_HEIGHT,
     // Both edges set (not just `right`), with no explicit width, is what stretches this to the full
-    // track width — `filled` (below) already gets this for free since it sets its own left:0, but the
+    // track width - `filled` (below) already gets this for free since it sets its own left:0, but the
     // plain background layer never had one, so it was a zero-width sliver of nothing but border the
     // instant a border got added, and pure empty space before that.
     left: 0,

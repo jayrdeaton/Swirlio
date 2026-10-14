@@ -8,7 +8,7 @@ describe('withAlpha', () => {
 })
 
 describe('contrastColor', () => {
-  it('returns monochrome black for monochrome white and vice versa — the only pair the monochrome bridge ever actually passes in', () => {
+  it('returns monochrome black for monochrome white and vice versa - the only pair the monochrome bridge ever actually passes in', () => {
     expect(contrastColor(MONOCHROME_WHITE)).toBe(MONOCHROME_BLACK)
     expect(contrastColor(MONOCHROME_WHITE.toLowerCase())).toBe(MONOCHROME_BLACK)
     expect(contrastColor(MONOCHROME_BLACK)).toBe(MONOCHROME_WHITE)
@@ -27,29 +27,29 @@ describe('disabledFabTheme', () => {
 })
 
 describe('toggleFabIconColor/toggleFabBackgroundColor', () => {
-  it('active: fill is primary, icon is its contrast color — in light mode (primary = black)', () => {
+  it('active: fill is primary, icon is its contrast color - in light mode (primary = black)', () => {
     expect(toggleFabBackgroundColor(MONOCHROME_BLACK, true)).toBe(MONOCHROME_BLACK)
     expect(toggleFabIconColor(MONOCHROME_BLACK, true)).toBe(MONOCHROME_WHITE)
   })
 
-  it('active: fill is primary, icon is its contrast color — in dark mode (primary = white), the exact opposite of light mode', () => {
+  it('active: fill is primary, icon is its contrast color - in dark mode (primary = white), the exact opposite of light mode', () => {
     expect(toggleFabBackgroundColor(MONOCHROME_WHITE, true)).toBe(MONOCHROME_WHITE)
     expect(toggleFabIconColor(MONOCHROME_WHITE, true)).toBe(MONOCHROME_BLACK)
   })
 
-  it('inactive: exactly inverted from active — fill and icon swap roles, in light mode', () => {
+  it('inactive: exactly inverted from active - fill and icon swap roles, in light mode', () => {
     expect(toggleFabBackgroundColor(MONOCHROME_BLACK, false)).toBe(MONOCHROME_WHITE)
     expect(toggleFabIconColor(MONOCHROME_BLACK, false)).toBe(MONOCHROME_BLACK)
   })
 
-  it('inactive: exactly inverted from active — fill and icon swap roles, in dark mode (the opposite pairing of light mode)', () => {
+  it('inactive: exactly inverted from active - fill and icon swap roles, in dark mode (the opposite pairing of light mode)', () => {
     expect(toggleFabBackgroundColor(MONOCHROME_WHITE, false)).toBe(MONOCHROME_BLACK)
     expect(toggleFabIconColor(MONOCHROME_WHITE, false)).toBe(MONOCHROME_WHITE)
   })
 })
 
 describe('disabledOnCanvasFabTheme', () => {
-  it('leaves the fill fully transparent — the actual grey comes from a BlurView backdrop rendered behind the FAB instead (see OnScreenControls) — but tracks primary for the icon', () => {
+  it('leaves the fill fully transparent - the actual grey comes from a BlurView backdrop rendered behind the FAB instead (see OnScreenControls) - but tracks primary for the icon', () => {
     // Regression guard: the icon used to be fixed to MONOCHROME_BLACK regardless of mode, which went
     // low-contrast in dark mode against the (now-removed) fixed scrim this theme used to bake in
     // directly (see git history).

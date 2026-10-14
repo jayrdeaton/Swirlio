@@ -3,7 +3,7 @@ import React from 'react'
 
 import { EdgeRevealZones } from '@/components/EdgeRevealZones'
 
-// Every render below passes every callback prop, even the ones a given test doesn't assert on —
+// Every render below passes every callback prop, even the ones a given test doesn't assert on -
 // EdgeRevealZonesProps has no optional fields, so a partial object fails to typecheck the same way an
 // incomplete OnScreenControlsProps would.
 async function renderZones(overrides: Partial<React.ComponentProps<typeof EdgeRevealZones>> = {}) {
@@ -30,7 +30,7 @@ describe('EdgeRevealZones', () => {
     expect(queryByTestId('edge-reveal-top-right')).toBeNull()
   })
 
-  // Down to three corner/edge zones — deliberately NOT the full left/right edges, so an ordinary
+  // Down to three corner/edge zones - deliberately NOT the full left/right edges, so an ordinary
   // swipe/drag along the side of the canvas can't accidentally reveal the controls; only the two top
   // corners (where the dice FAB and the trigger stack actually render) and the bottom band do.
   it('renders all three zones while active', async () => {
@@ -54,7 +54,7 @@ describe('EdgeRevealZones', () => {
   })
 
   // The corner's own version of the pauseFab's tap/hold split (see OnScreenControls' onRecenterEverything
-  // comment) — a long hold recentres everything at once (without pausing — whatever's playing keeps
+  // comment) - a long hold recentres everything at once (without pausing - whatever's playing keeps
   // playing, just snapped back into place) but deliberately never reveals the real controls, so it stays
   // a way to reset the canvas back to a centred state without cluttering the screen with buttons.
   it('recentres everything on a top-left long press, without pausing or revealing', async () => {
@@ -80,7 +80,7 @@ describe('EdgeRevealZones', () => {
     expect(props.onExpandTriggerStack).toHaveBeenCalledTimes(1)
   })
 
-  // A press on an already-expanded stack is just a plain reveal — no redundant state write.
+  // A press on an already-expanded stack is just a plain reveal - no redundant state write.
   it('does not re-fire onExpandTriggerStack on a top-right press when already expanded', async () => {
     const { props, getByTestId } = await renderZones({ triggerStackExpanded: true })
 
@@ -103,10 +103,10 @@ describe('EdgeRevealZones', () => {
     expect(props.onReveal).not.toHaveBeenCalled()
   })
 
-  // onRandomizeEverything's own hold-repeat wrapping (see EdgeRevealZones' randomizeHold) — the
+  // onRandomizeEverything's own hold-repeat wrapping (see EdgeRevealZones' randomizeHold) - the
   // mechanism itself is already thoroughly covered by useHoldToRepeat.test.ts, so this just confirms
   // the top-right zone is actually wired to keep rerolling for as long as the hold continues, and stops
-  // the instant it's released — reachable here without the real controls (and OnScreenControls' own
+  // the instant it's released - reachable here without the real controls (and OnScreenControls' own
   // randomizeGroupHold) ever being on screen at all.
   describe('top-right long-press held down (repeat effect)', () => {
     beforeEach(() => {
@@ -141,10 +141,10 @@ describe('EdgeRevealZones', () => {
     })
   })
 
-  it('calls onReveal on hover for every zone, not just press — the only way a mouse user (or web preview) can bring the controls back without a touch', async () => {
+  it('calls onReveal on hover for every zone, not just press - the only way a mouse user (or web preview) can bring the controls back without a touch', async () => {
     const { props, getByTestId } = await renderZones()
 
-    // fireEvent is itself async (it awaits its own act() call internally) — firing three in a row
+    // fireEvent is itself async (it awaits its own act() call internally) - firing three in a row
     // without awaiting each one first left their act() scopes racing each other, which surfaced as
     // "overlapping act() calls" console errors under CI/CPU load even though the assertion below
     // still passed either way.
@@ -169,7 +169,7 @@ describe('EdgeRevealZones', () => {
   })
 
   // Same bonus as the top-left corner's own long press (see onRecenterEverything's own comment in
-  // EdgeRevealZones) — reachable from the bottom band too now, still without pausing or ever revealing
+  // EdgeRevealZones) - reachable from the bottom band too now, still without pausing or ever revealing
   // the real controls.
   it('recentres everything on a bottom-zone long press, without pausing or revealing', async () => {
     const { props, getByTestId } = await renderZones()
@@ -184,7 +184,7 @@ describe('EdgeRevealZones', () => {
   })
 
   // The top-right zone covers the trigger stack, whose own footprint shrinks to a single FAB once the
-  // user collapses it (OnScreenControls' siblingsVisible) — this zone needs to shrink with it instead of
+  // user collapses it (OnScreenControls' siblingsVisible) - this zone needs to shrink with it instead of
   // staying sized for six FABs that no longer render underneath it. Matched against the top-left zone's
   // own single-FAB height rather than a magic number, since that's exactly the footprint it now mirrors.
   it('shrinks the top-right zone to a single-FAB footprint when the trigger stack is collapsed', async () => {

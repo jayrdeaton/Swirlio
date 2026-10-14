@@ -1,6 +1,6 @@
 import { buildHeartPath, buildHeartPoints } from '@/constants/heartMath'
 
-// Mirrors the private sample-count/normalization math in heartMath.ts — not exported (the other
+// Mirrors the private sample-count/normalization math in heartMath.ts - not exported (the other
 // per-pattern math modules don't export their own private constants either, see flowerMath.test.ts's
 // own comment for the convention this follows). Spelled out here in full, not hand-simplified, so it
 // keeps tracking the real implementation if any of the base/reference/cap/sample-density constants
@@ -86,9 +86,9 @@ describe('buildHeartPoints', () => {
     expect(pts[0].y).toBeGreaterThan(0)
   })
 
-  // The cleft between the two lobes — not the lobes' own tips, which actually reach higher (see
+  // The cleft between the two lobes - not the lobes' own tips, which actually reach higher (see
   // heartMath.ts's own HEART_MAX_DISTANCE comment for why the cusp isn't the curve's farthest point
-  // either) — but still the one other geometrically meaningful landmark, directly opposite the cusp.
+  // either) - but still the one other geometrically meaningful landmark, directly opposite the cusp.
   it('has the notch between the two lobes directly above center, at the opposite sample from the cusp', () => {
     const pts = buildHeartPoints(100)
     const notch = point(Math.PI, 100)

@@ -18,7 +18,7 @@ type SpiralArmsProps = {
   // See useSwirlSettings' fixedSpacing field. referenceRadius is only read when it's on.
   fixedSpacing: boolean
   referenceRadius: number
-  // See PatternGeometry's own comment in Spiral.tsx — called once with this pattern's geometry
+  // See PatternGeometry's own comment in Spiral.tsx - called once with this pattern's geometry
   // instead of this component rendering a <Path> itself, so every kaleidoscope copy (Spiral's own
   // renderCopies) can reuse the exact same computed path/width/intervals.
   children: (geometry: PatternGeometry) => ReactNode
@@ -29,12 +29,12 @@ export function SpiralArms({ radius, tightness, strokeWidth, dashStyle, fixedSpa
   const turns = useDerivedValue(() => {
     const baseTurns = BASE_TURNS * tightness.value
     // fixedSpacing scales the turn count with how far radius currently is past referenceRadius, so
-    // armSpacing (below) cancels that growth back out — same coil spacing everywhere the epicentre
+    // armSpacing (below) cancels that growth back out - same coil spacing everywhere the epicentre
     // goes, rather than the coils spreading out as radius grows near a corner.
     return fixedSpacing ? baseTurns * (radius.value / referenceRadius) : baseTurns
   })
   // Every arm merged into one Path (its own contour per arm, via repeated addPoly) rather than each
-  // arm staying its own <Path> wrapped in its own rotating <Group> — a single merged path is what lets
+  // arm staying its own <Path> wrapped in its own rotating <Group> - a single merged path is what lets
   // every kaleidoscope copy share this same computed geometry (see PatternGeometry's own comment)
   // instead of each of up to 12 copies re-running this same trig/PathBuilder work independently. Each
   // arm's own spin is baked directly into its points (buildSpiralArmPoints' own rotationOffset) since

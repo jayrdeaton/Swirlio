@@ -16,16 +16,16 @@ type HeartPatternProps = {
   // See useSwirlSettings' fixedSpacing field. referenceRadius is only read when it's on.
   fixedSpacing: boolean
   referenceRadius: number
-  // See PatternGeometry's own comment in Spiral.tsx — called once with this pattern's geometry instead
+  // See PatternGeometry's own comment in Spiral.tsx - called once with this pattern's geometry instead
   // of this component rendering shapes itself, so every kaleidoscope copy (Spiral's own renderCopies)
   // can reuse the exact same computed path/width/intervals.
   children: (geometry: PatternGeometry) => ReactNode
 }
 
-// The ripple pool/path/width/dash math is shared with Flower/Polygon/Rings/Star — see
-// useRipplePatternGeometry's own comment — this component supplies only the one thing that's actually
+// The ripple pool/path/width/dash math is shared with Flower/Polygon/Rings/Star - see
+// useRipplePatternGeometry's own comment - this component supplies only the one thing that's actually
 // Heart-specific: a fixed heart outline (no side/point/petal count of its own, same as Rings' plain
-// circle — see hasPolygonSides) at each ripple's radius.
+// circle - see hasPolygonSides) at each ripple's radius.
 export function HeartPattern({ radius, pulse, tightness, reversed, strokeWidth, dashStyle, fixedSpacing, referenceRadius, children }: HeartPatternProps) {
   const geometry = useRipplePatternGeometry({
     radius,

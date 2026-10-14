@@ -21,6 +21,7 @@ type TestApi = {
   setCropRadius: (cropRadius: number) => void
   setCropShaped: (shaped: boolean) => void
   setDashStyle: (dashStyle: DashStyle) => void
+  setDeferBottomEdgeGestures: (enabled: boolean) => void
   setFixedSpacing: (enabled: boolean) => void
   setFollowSpeed: (speed: number) => void
   setForegroundColors: (colors: string[]) => void
@@ -60,11 +61,11 @@ function requireApi(value: TestApi | null): TestApi {
 }
 
 function Probe({ onUpdate }: { onUpdate: (api: TestApi) => void }) {
-  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings } = useSwirlSettings()
+  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings } = useSwirlSettings()
 
   useEffect(() => {
-    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings })
-  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings, settings])
+    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings })
+  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings, settings])
 
   return <Text testID='stroke'>{String(settings.strokeWidth)}</Text>
 }
@@ -100,6 +101,7 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.tiltEnabled).toBe(true)
     expect(getApi().settings.mirrorLines).toBe(0)
     expect(getApi().settings.showLabels).toBe(false)
+    expect(getApi().settings.deferBottomEdgeGestures).toBe(false)
   })
 
   it('hydrates persisted settings from storage', async () => {
@@ -111,6 +113,7 @@ describe('useSwirlSettings', () => {
         shakeEnabled: false,
         tiltEnabled: false,
         showLabels: true,
+        deferBottomEdgeGestures: true,
         foregroundColors: ['#111111', '#222222'],
         backgroundColors: ['#333333'],
         foregroundCycleSpeed: 2.5,
@@ -125,6 +128,7 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.shakeEnabled).toBe(false)
     expect(getApi().settings.tiltEnabled).toBe(false)
     expect(getApi().settings.showLabels).toBe(true)
+    expect(getApi().settings.deferBottomEdgeGestures).toBe(true)
     expect(getApi().settings.foregroundColors).toEqual(['#111111', '#222222'])
     expect(getApi().settings.backgroundColors).toEqual(['#333333'])
     expect(getApi().settings.foregroundCycleSpeed).toBe(2.5)
@@ -133,7 +137,7 @@ describe('useSwirlSettings', () => {
 
   // Regression: the hydration check once enumerated pattern literals by hand instead of checking
   // against PATTERN_ORDER, so any pattern added after that list was written failed validation on
-  // every hydration, silently reverted to the default, and then got re-persisted — permanently
+  // every hydration, silently reverted to the default, and then got re-persisted - permanently
   // overwriting a valid saved choice with 'spiral' the next time the app opened.
   it('round-trips every known pattern through hydration without reverting to the default', async () => {
     for (const pattern of PATTERN_ORDER) {
@@ -145,10 +149,10 @@ describe('useSwirlSettings', () => {
     }
   })
 
-  // General rather than a one-off: any pattern string not currently in PATTERN_ORDER — a typo,
-  // garbage, or one retired after shipping — falls through to defaultSettings. Other settings (like
+  // General rather than a one-off: any pattern string not currently in PATTERN_ORDER - a typo,
+  // garbage, or one retired after shipping - falls through to defaultSettings. Other settings (like
   // dashStyle) stay at their own defaults too, since a plain fallback has no way to know a retired
-  // pattern implied something else — that would need its own dedicated code, written if it's ever
+  // pattern implied something else - that would need its own dedicated code, written if it's ever
   // actually needed.
   it('falls back to the default pattern and settings for an unrecognized or missing value', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ pattern: 'not-a-real-pattern' }))
@@ -228,7 +232,7 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.dashStyle).toBe('solid')
   })
 
-  // dashed was a boolean before dash styles existed — true meant the one dash style that existed
+  // dashed was a boolean before dash styles existed - true meant the one dash style that existed
   // then, now named 'dots'. Only kicks in when the new dashStyle field isn't present at all.
   it('migrates a legacy boolean dashed value to the equivalent dashStyle', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ dashed: true }))
@@ -289,7 +293,7 @@ describe('useSwirlSettings', () => {
   })
 
   // cropRadius's old name, from when this was a soft gradient fade rather than a hard clip (see the
-  // field's comment in useSwirlSettings.tsx) — a pure key rename, so a returning user's already-dialed
+  // field's comment in useSwirlSettings.tsx) - a pure key rename, so a returning user's already-dialed
   // -in value should carry over exactly, not just fall back to the default.
   it('hydrates a persisted value under the old fadeRadius key', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeRadius: 0.4 }))
@@ -300,7 +304,7 @@ describe('useSwirlSettings', () => {
   })
 
   // Reverse migration for a since-reverted attempt to collapse fadeRadius (now cropRadius) into a
-  // single fadeEnabled boolean (see the field's comment in useSwirlSettings.tsx) — only relevant for
+  // single fadeEnabled boolean (see the field's comment in useSwirlSettings.tsx) - only relevant for
   // anyone who happened to have that version open long enough to persist it.
   it('migrates a legacy fadeEnabled boolean back to the equivalent cropRadius value', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ fadeEnabled: true }))
@@ -472,7 +476,7 @@ describe('useSwirlSettings', () => {
     await waitFor(() => expect(getApi().settings.mirrorLines).toBe(3))
   })
 
-  // mirrorLines replaces the old mirrorLeftRight/mirrorTopBottom booleans — a returning user's
+  // mirrorLines replaces the old mirrorLeftRight/mirrorTopBottom booleans - a returning user's
   // single-axis choice becomes 1 line (today's single-axis mirror look), both axes becomes 2 (the
   // old both-axes-together look). mirrorClipped has no equivalent to migrate: every kaleidoscope
   // wedge is always clipped now, so that setting simply stops existing rather than mapping to anything.
@@ -550,7 +554,7 @@ describe('useSwirlSettings', () => {
     await waitFor(() => expect(getApi().settings.mirrorGap).toBe(0.9))
   })
 
-  // Off by default is the important part here, unlike most other toggles on this screen — this is
+  // Off by default is the important part here, unlike most other toggles on this screen - this is
   // the one that triggers a real OS microphone permission prompt the first time it's turned on (see
   // useAudioReactive.ts), so it should never start on without the user deliberately reaching for it.
   it('defaults audioReactiveEnabled to off, and lets it be changed', async () => {
@@ -605,7 +609,7 @@ describe('useSwirlSettings', () => {
     await waitFor(() => expect(getApi().settings.bounceFriction).toBe(5))
   })
 
-  // A rate dial, the same shape as bounceFriction above, not a raw delay — see controlsAutoHideSpeed's
+  // A rate dial, the same shape as bounceFriction above, not a raw delay - see controlsAutoHideSpeed's
   // own comment in useSwirlSettings.tsx and controlsAutoHideDelayMs in swirlSettingsRanges.ts. Default
   // of 1 is chosen specifically to reproduce this app's original fixed 5-second idle-fade delay.
   it('defaults controlsAutoHideSpeed to 1 (reproducing the original fixed 5s idle-fade delay) and lets it be changed', async () => {
@@ -641,7 +645,7 @@ describe('useSwirlSettings', () => {
     await waitFor(() => expect(getApi().settings.controlsAutoHideSpeed).toBe(5))
   })
 
-  // 0 is the speed dial's own "off" extreme — controlsAutoHideDelayMs returns null rather than some
+  // 0 is the speed dial's own "off" extreme - controlsAutoHideDelayMs returns null rather than some
   // enormous finite number, which is what index.tsx's idle-fade effect actually checks to skip
   // scheduling the timer at all (see its own comment).
   it('controlsAutoHideDelayMs converts the speed dial to a delay, or null when off', () => {
@@ -671,7 +675,7 @@ describe('useSwirlSettings', () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
-    // Negative gravity is a valid repeller value now, not clamped away — only values past
+    // Negative gravity is a valid repeller value now, not clamped away - only values past
     // -MAX_GRAVITY get clamped.
     await act(async () => {
       getApi().setGravity(-1)
@@ -818,7 +822,7 @@ describe('useSwirlSettings', () => {
     })
   })
 
-  // rotationSpeed and zoomSpeed are bipolar — negative reverses, 0 stops — so both need to land
+  // rotationSpeed and zoomSpeed are bipolar - negative reverses, 0 stops - so both need to land
   // exactly on 0 and on negative values via the setter, not just clamp toward some positive floor.
   it('lets rotationSpeed and zoomSpeed go negative or land exactly on 0', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
@@ -860,7 +864,7 @@ describe('useSwirlSettings', () => {
     })
 
     await act(async () => {
-      // rotationSpeed is bipolar (-10..10) — -4 is a valid value now, not something to clamp, so this
+      // rotationSpeed is bipolar (-10..10) - -4 is a valid value now, not something to clamp, so this
       // checks the actual floor at -999 instead.
       getApi().setRotationSpeed(-999)
       getApi().setPolygonSides(1)
@@ -872,7 +876,7 @@ describe('useSwirlSettings', () => {
     })
   })
 
-  // Older persisted settings stored a single solid/cycle-seed colour rather than a list — a
+  // Older persisted settings stored a single solid/cycle-seed colour rather than a list - a
   // returning user's last choice should survive as a one-item list rather than resetting to the
   // default palette.
   it('migrates a pre-list settings blob, seeding a single colour per list', async () => {
@@ -892,7 +896,7 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.foregroundColors).toEqual(['#123456'])
   })
 
-  // Older persisted settings shared one cycleSpeed between both lists — a returning user's rate
+  // Older persisted settings shared one cycleSpeed between both lists - a returning user's rate
   // should seed both new independent knobs rather than resetting either to the default.
   it('migrates a pre-split cycleSpeed into both the foreground and background rates', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ cycleSpeed: 3.5 }))
@@ -992,7 +996,7 @@ describe('useSwirlSettings', () => {
     })
   })
 
-  // The Settings group's "Reset all" button (see ControlGroupTopSheetContent) — a flat replacement
+  // The Settings group's "Reset all" button (see ControlGroupTopSheetContent) - a flat replacement
   // covering every field at once, not a loop over the individual setters, so it can't drift out of
   // sync with whichever fields those setters happen to guard (e.g. the empty-list refusal on colors).
   it('resetSettings restores every field to its default, overwriting both hand-made changes and hydrated values', async () => {
@@ -1021,7 +1025,7 @@ describe('useSwirlSettings', () => {
     })
   })
 
-  // The one field resetSettings deliberately leaves alone — see its own comment in
+  // The one field resetSettings deliberately leaves alone - see its own comment in
   // useSwirlSettings.tsx. A live "is the mic actually feeding this right now" state, not a look/
   // tuning preference like everything else Reset all touches, so it shouldn't get silently cut off
   // out from under someone mid-session.
@@ -1042,18 +1046,19 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.audioReactiveEnabled).toBe(true)
   })
 
-  // shakeEnabled/tiltEnabled are opt-outs, not look/tuning knobs — someone who's turned off shake-to-
+  // shakeEnabled/tiltEnabled are opt-outs, not look/tuning knobs - someone who's turned off shake-to-
   // randomize or tilt warp shouldn't have Reset all silently switch them back on, mirroring
   // audioReactiveEnabled's carve-out above. showLabels, controlsAutoHideSpeed, and triggerStackExpanded
   // are chrome-density/interface preferences, not look/tuning knobs either. followSpeed is interaction
   // feel (how touch input eases), not the art itself. See resetSettings's own comment in
   // useSwirlSettings.tsx.
-  it('resetSettings leaves shakeEnabled, tiltEnabled, showLabels, controlsAutoHideSpeed, followSpeed, and triggerStackExpanded exactly as they were', async () => {
+  it('resetSettings leaves shakeEnabled, tiltEnabled, deferBottomEdgeGestures, showLabels, controlsAutoHideSpeed, followSpeed, and triggerStackExpanded exactly as they were', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
     await act(async () => {
       getApi().setShakeEnabled(false)
+      getApi().setDeferBottomEdgeGestures(true)
       getApi().setTiltEnabled(false)
       getApi().setShowLabels(true)
       getApi().setControlsAutoHideSpeed(4)
@@ -1069,13 +1074,33 @@ describe('useSwirlSettings', () => {
     await waitFor(() => expect(getApi().settings.strokeWidth).toBe(18.5))
     expect(getApi().settings.shakeEnabled).toBe(false)
     expect(getApi().settings.tiltEnabled).toBe(false)
+    expect(getApi().settings.deferBottomEdgeGestures).toBe(true)
     expect(getApi().settings.showLabels).toBe(true)
     expect(getApi().settings.controlsAutoHideSpeed).toBe(4)
     expect(getApi().settings.followSpeed).toBe(2)
     expect(getApi().settings.triggerStackExpanded).toBe(false)
   })
 
-  // gestureTarget is a tool mode (which point a drag targets), not a look/tuning knob either — same
+  // Edge Guard (see EdgeGuardBridge) is an iOS opt-in, off until the player turns it on, same as
+  // the fleet games' settings.deferBottomEdgeGestures.
+  it('toggles deferBottomEdgeGestures and ignores a non-boolean persisted value', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ deferBottomEdgeGestures: 'yes' }))
+    const { getApi } = await renderProbe()
+
+    expect(getApi().settings.deferBottomEdgeGestures).toBe(false)
+
+    await act(async () => {
+      getApi().setDeferBottomEdgeGestures(true)
+    })
+    await waitFor(() => expect(getApi().settings.deferBottomEdgeGestures).toBe(true))
+
+    await act(async () => {
+      getApi().setDeferBottomEdgeGestures(false)
+    })
+    await waitFor(() => expect(getApi().settings.deferBottomEdgeGestures).toBe(false))
+  })
+
+  // gestureTarget is a tool mode (which point a drag targets), not a look/tuning knob either - same
   // carve-out as shakeEnabled/tiltEnabled/showLabels above. See resetSettings's own comment in
   // useSwirlSettings.tsx.
   it('resetSettings leaves gestureTarget exactly as it was', async () => {
@@ -1172,7 +1197,7 @@ describe('useSwirlSettings', () => {
     await act(async () => {
       getApi().setParticleBorderColors([])
     })
-    // An empty list is refused outright, same as setParticleColors' own guard — there'd be nothing
+    // An empty list is refused outright, same as setParticleColors' own guard - there'd be nothing
     // left for a border to be drawn as. Still the black default, since nothing else changed it.
     expect(getApi().settings.particleBorderColors).toEqual(['#000000'])
   })
@@ -1217,7 +1242,7 @@ describe('useSwirlSettings', () => {
 
   it('round-trips every known particle shape through hydration without reverting to the default', async () => {
     for (const shape of ['circle', 'heart', 'star', 'polygon', 'flower'] as const) {
-      // Persisted as the legacy singular field — sanity-checks swirlSettingsMigration's own
+      // Persisted as the legacy singular field - sanity-checks swirlSettingsMigration's own
       // legacyParticleShape fallback still lifts an old single value into the new list shape.
       ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ particleShape: shape }))
 
@@ -1235,11 +1260,11 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.particleShapes).toEqual(['circle'])
   })
 
-  // Same look/tuning carve-out reasoning as every other field resetSettings touches — particles are a
+  // Same look/tuning carve-out reasoning as every other field resetSettings touches - particles are a
   // new visual layer, not device-capability/interface/interaction-feel state, so Reset all resets
   // every one of these four fields to its default, unlike gestureTarget/shakeEnabled/etc. above.
-  // particleCount's own default (0) is what turns beads back off — see swirlSettingsRanges.ts's own
-  // MIN_PARTICLE_COUNT comment — the same way DEFAULT_MIRROR_LINES already turns mirroring back off.
+  // particleCount's own default (0) is what turns beads back off - see swirlSettingsRanges.ts's own
+  // MIN_PARTICLE_COUNT comment - the same way DEFAULT_MIRROR_LINES already turns mirroring back off.
   it('resetSettings restores every particle field to its default', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()

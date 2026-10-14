@@ -20,13 +20,13 @@ describe('useSwirlReset', () => {
     expect(resetGravity).toHaveBeenCalledTimes(1)
   })
 
-  // The actual SharedValues only exist once SwirlScreen has mounted and registered — a reset button
+  // The actual SharedValues only exist once SwirlScreen has mounted and registered - a reset button
   // pressed before that (or after SwirlScreen unmounts) has nothing to call, and shouldn't throw just
   // because nobody's listening yet.
   it('is a harmless no-op when nothing has registered', async () => {
     const { result } = await renderHook(() => useSwirlReset(), { wrapper: SwirlResetProvider })
 
-    // If either call threw, this test would fail with an unhandled error — nothing further to assert.
+    // If either call threw, this test would fail with an unhandled error - nothing further to assert.
     await act(async () => {
       result.current.resetPattern()
       result.current.resetMirror()

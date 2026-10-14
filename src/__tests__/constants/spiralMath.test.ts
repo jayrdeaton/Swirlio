@@ -42,7 +42,7 @@ describe('buildSpiralArmPath', () => {
 
 describe('buildSpiralArmPoints', () => {
   // Same geometry as buildSpiralArmPath (see its own tests above), just handed back as raw points
-  // instead of an SVG string — SpiralArms feeds these straight into Skia's PathBuilder.
+  // instead of an SVG string - SpiralArms feeds these straight into Skia's PathBuilder.
   it('returns points + 1 points, tracing the same curve buildSpiralArmPath does', () => {
     const points = 10
     const pts = buildSpiralArmPoints(3, 120, points)
@@ -53,7 +53,7 @@ describe('buildSpiralArmPoints', () => {
     expect(pts[points].y).toBeCloseTo(0)
   })
 
-  // rotationOffset bakes an arm's own spin into its points directly — SpiralArms merges every arm
+  // rotationOffset bakes an arm's own spin into its points directly - SpiralArms merges every arm
   // into one Path (see its own comment), so this replaces what used to be a per-arm wrapping
   // transform. A half-turn offset should point the last vertex the opposite direction.
   it('bakes rotationOffset directly into every point, same as rotating the whole curve', () => {

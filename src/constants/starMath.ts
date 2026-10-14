@@ -1,12 +1,12 @@
 import type { SkPoint } from '@shopify/react-native-skia'
 
-// How deep the star's notches cut in, as a fraction of the outer radius. Not user-configurable —
+// How deep the star's notches cut in, as a fraction of the outer radius. Not user-configurable -
 // this is a toy, and one fixed ratio reads as "a star" clearly enough without needing its own
 // slider. 0.5 keeps the points readable at both 3 (a triangle-ish throwing star) and 8 (dense,
 // almost gear-like) rather than looking needle-thin or barely notched at either end.
 const STAR_INNER_RATIO = 0.5
 
-// A closed star centred on the origin with `points` outer vertices, one pointing straight up —
+// A closed star centred on the origin with `points` outer vertices, one pointing straight up -
 // same convention as buildPolygonPath, so switching between Polygon and Star doesn't reorient the
 // shape. Alternates outer/inner radius every vertex, twice as many total as `points`.
 export function buildStarPath(points: number, radius: number): string {
@@ -26,7 +26,7 @@ export function buildStarPath(points: number, radius: number): string {
   return `${d}Z`
 }
 
-// Same geometry as buildStarPath, as raw vertices rather than an SVG string — StarPattern feeds this
+// Same geometry as buildStarPath, as raw vertices rather than an SVG string - StarPattern feeds this
 // straight into Skia's PathBuilder.addPoly(points, true) (see its own comment) instead of building a
 // string every frame only to have Skia immediately re-parse it back into the same points. points * 2
 // vertices, not + 1: addPoly's own `close` flag draws the final closing edge, so there's no need for

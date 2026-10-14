@@ -58,7 +58,7 @@ describe('dashArrayFor', () => {
     expect(dashLength).toBeLessThan(0.1)
   })
 
-  // Dashes are real segments, not beads — this is what distinguishes them from dots, which are
+  // Dashes are real segments, not beads - this is what distinguishes them from dots, which are
   // deliberately near-zero-length so the round linecap dominates and renders a circle instead.
   it('gives dashes a real, stroke-proportional length rather than a near-zero one', () => {
     const [dashLength] = dashArrayFor('dashes', 6)!

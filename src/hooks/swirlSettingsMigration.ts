@@ -11,7 +11,7 @@ import type { SwirlSettings } from './useSwirlSettings'
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
 
 // Re-exported for useSwirlSettings.tsx's own Provider setters, which need the exact same NaN-guarded
-// clamp — kept here (rather than duplicated there, or the other way around) since mergePersistedSettings
+// clamp - kept here (rather than duplicated there, or the other way around) since mergePersistedSettings
 // below already needs it and this file has no reason to import back from the hook file for it.
 export function clamp(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min
@@ -20,7 +20,7 @@ export function clamp(value: number, min: number, max: number) {
 
 // Rounding after clamping (not before) is what keeps the result in [min, max]: clamp bounds the
 // value to real numbers within range first, and rounding a bounded value can only move it to the
-// nearest integer that's still in range — polygon side counts (and mirror line counts) are
+// nearest integer that's still in range - polygon side counts (and mirror line counts) are
 // meaningless as fractions.
 export function clampInt(value: number, min: number, max: number) {
   return Math.round(clamp(value, min, max))
@@ -33,10 +33,10 @@ function sanitizeColorList(value: unknown, fallback: string[]): string[] {
 }
 
 // Same shape as sanitizeColorList above, checked against PARTICLE_SHAPE_ORDER instead of a hex pattern
-// — a retired shape (or garbage) is simply dropped rather than falling the whole list back to default,
+// - a retired shape (or garbage) is simply dropped rather than falling the whole list back to default,
 // same as any other per-item validation in this file. Deduped (a plain toggle-list UI, unlike
-// particleColors' own positional swatches, can never itself produce a repeated entry — see
-// usePreviewOptionToggleFabs's own comment — so a duplicate here could only come from a hand-edited or
+// particleColors' own positional swatches, can never itself produce a repeated entry - see
+// usePreviewOptionToggleFabs's own comment - so a duplicate here could only come from a hand-edited or
 // otherwise corrupted storage blob, not a real interaction worth preserving).
 function sanitizeShapeList(value: unknown, fallback: ParticleShape[]): ParticleShape[] {
   if (!Array.isArray(value)) return fallback
@@ -61,10 +61,10 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       cycleSpeed?: unknown
       dashed?: unknown
       // Briefly persisted during a since-reverted attempt to collapse fadeRadius (now cropRadius) into
-      // a single boolean — kept as a migration target so anyone who had that version open for even a
+      // a single boolean - kept as a migration target so anyone who had that version open for even a
       // moment doesn't lose their crop setting on the next load.
       fadeEnabled?: unknown
-      // cropRadius's old name, from when this was a soft gradient fade rather than a hard clip — the
+      // cropRadius's old name, from when this was a soft gradient fade rather than a hard clip - the
       // stored number means exactly the same thing under either name (same range, same "how far in
       // does it cut off" semantics), so this is a pure key rename, not a value migration.
       fadeRadius?: unknown
@@ -72,7 +72,7 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       mirrorLeftRight?: unknown
       mirrorTopBottom?: unknown
       // particleShapes' own old name, from when a bead field only ever had one shape active at a time
-      // instead of a list to randomly pick from — see legacyParticleShape's own comment below.
+      // instead of a list to randomly pick from - see legacyParticleShape's own comment below.
       particleShape?: unknown
       solidColor?: unknown
     }
@@ -80,19 +80,19 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
     const legacyForeground = typeof persisted.cycleSeedColor === 'string' && persisted.colorMode === 'cycle' ? [persisted.cycleSeedColor] : typeof persisted.solidColor === 'string' ? [persisted.solidColor] : null
     const legacyBackground = typeof persisted.backgroundColor === 'string' ? [persisted.backgroundColor] : null
     const legacyCycleSpeed = typeof persisted.cycleSpeed === 'number' ? clamp(persisted.cycleSpeed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) : null
-    // dashed was a boolean before dash styles existed — true meant the one dash style that existed
+    // dashed was a boolean before dash styles existed - true meant the one dash style that existed
     // then, now named 'dots'.
     const legacyDashStyle = persisted.dashed === true ? 'dots' : persisted.dashed === false ? 'solid' : null
-    // mirrorLines replaces the old mirrorLeftRight/mirrorTopBottom/mirrorClipped booleans — a
+    // mirrorLines replaces the old mirrorLeftRight/mirrorTopBottom/mirrorClipped booleans - a
     // returning user's old single-axis choice becomes 1 line, both-axes becomes 2 (matching exactly
     // what those looked like: see the mirror-lines-to-copies table this was designed against), and
     // mirrorClipped has no equivalent at all anymore (every kaleidoscope wedge is always clipped).
     const legacyMirrorLines = typeof persisted.mirrorLeftRight === 'boolean' || typeof persisted.mirrorTopBottom === 'boolean' ? (persisted.mirrorLeftRight ? 1 : 0) + (persisted.mirrorTopBottom ? 1 : 0) : null
-    // Reverse migration for the brief fadeEnabled boolean attempt (see the field comment above) —
+    // Reverse migration for the brief fadeEnabled boolean attempt (see the field comment above) -
     // maps back to the same fixed radius that boolean's "on" state used to render as, only relevant
     // for anyone who happened to have that version open.
     const legacyCropRadiusFromFadeEnabled = typeof persisted.fadeEnabled === 'boolean' ? (persisted.fadeEnabled ? 0.15 : 1) : null
-    // particleShapes replaces the old single particleShape field — a returning user's own one choice
+    // particleShapes replaces the old single particleShape field - a returning user's own one choice
     // becomes a one-item list, which looks and behaves identically (a single shape enabled) until they
     // actually turn a second one on.
     const legacyParticleShape = typeof persisted.particleShape === 'string' && PARTICLE_SHAPE_ORDER.includes(persisted.particleShape as ParticleShape) ? [persisted.particleShape as ParticleShape] : null
@@ -106,7 +106,7 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.bounceFriction === 'number' ? { bounceFriction: clamp(persisted.bounceFriction, MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION) } : null),
       ...(typeof persisted.controlsAutoHideSpeed === 'number' ? { controlsAutoHideSpeed: clamp(persisted.controlsAutoHideSpeed, MIN_CONTROLS_AUTO_HIDE_SPEED, MAX_CONTROLS_AUTO_HIDE_SPEED) } : null),
       // Checked against GESTURE_TARGET_ORDER, same general-fallback approach as pattern/dashStyle
-      // below — a retired target (or garbage) falls through to defaultSettings.gestureTarget ('pattern')
+      // below - a retired target (or garbage) falls through to defaultSettings.gestureTarget ('pattern')
       // instead of needing its own migration.
       ...(typeof persisted.gestureTarget === 'string' && GESTURE_TARGET_ORDER.includes(persisted.gestureTarget) ? { gestureTarget: persisted.gestureTarget } : null),
       ...(typeof persisted.gravity === 'number' ? { gravity: clamp(persisted.gravity, MIN_GRAVITY, MAX_GRAVITY) } : null),
@@ -114,10 +114,10 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.hapticsEnabled === 'boolean' ? { hapticsEnabled: persisted.hapticsEnabled } : null),
       ...(typeof persisted.holeRadius === 'number' ? { holeRadius: clamp(persisted.holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : null),
       // Checked against PATTERN_ORDER itself rather than an enumerated list of literals: this is
-      // what makes retiring a pattern safe later, not just adding one. Whatever's persisted — a
-      // pattern that was removed after shipping, a typo, garbage from a future version — either
+      // what makes retiring a pattern safe later, not just adding one. Whatever's persisted - a
+      // pattern that was removed after shipping, a typo, garbage from a future version - either
       // matches something currently valid or falls through to defaultSettings.pattern ('spiral').
-      // If a retirement should ALSO change some other setting, that needs its own dedicated code —
+      // If a retirement should ALSO change some other setting, that needs its own dedicated code -
       // a plain fallback here has no way to know what a since-removed pattern used to imply.
       ...(typeof persisted.pattern === 'string' && PATTERN_ORDER.includes(persisted.pattern) ? { pattern: persisted.pattern } : null),
       ...(typeof persisted.patternVisible === 'boolean' ? { patternVisible: persisted.patternVisible } : null),
@@ -127,6 +127,7 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.dashStyle === 'string' && DASH_STYLE_ORDER.includes(persisted.dashStyle) ? { dashStyle: persisted.dashStyle } : legacyDashStyle ? { dashStyle: legacyDashStyle } : null),
       ...(typeof persisted.cropRadius === 'number' ? { cropRadius: clamp(persisted.cropRadius, MIN_CROP_RADIUS, MAX_CROP_RADIUS) } : typeof persisted.fadeRadius === 'number' ? { cropRadius: clamp(persisted.fadeRadius, MIN_CROP_RADIUS, MAX_CROP_RADIUS) } : legacyCropRadiusFromFadeEnabled != null ? { cropRadius: legacyCropRadiusFromFadeEnabled } : null),
       ...(typeof persisted.cropShaped === 'boolean' ? { cropShaped: persisted.cropShaped } : null),
+      ...(typeof persisted.deferBottomEdgeGestures === 'boolean' ? { deferBottomEdgeGestures: persisted.deferBottomEdgeGestures } : null),
       ...(typeof persisted.holeShaped === 'boolean' ? { holeShaped: persisted.holeShaped } : null),
       ...(typeof persisted.fixedSpacing === 'boolean' ? { fixedSpacing: persisted.fixedSpacing } : null),
       ...(typeof persisted.followSpeed === 'number' ? { followSpeed: clamp(persisted.followSpeed, MIN_FOLLOW_SPEED, MAX_FOLLOW_SPEED) } : null),
@@ -143,8 +144,8 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(persisted.particleShapes !== undefined ? { particleShapes: sanitizeShapeList(persisted.particleShapes, defaultSettings.particleShapes) } : legacyParticleShape ? { particleShapes: legacyParticleShape } : null),
       ...(typeof persisted.particleSize === 'number' ? { particleSize: clamp(persisted.particleSize, MIN_PARTICLE_SIZE, MAX_PARTICLE_SIZE) } : null),
       ...(typeof persisted.polygonSides === 'number' ? { polygonSides: clampInt(persisted.polygonSides, MIN_POLYGON_SIDES, MAX_POLYGON_SIDES) } : null),
-      // The old boolean `reversed` field is gone — direction now lives in rotationSpeed/zoomSpeed's
-      // own sign (see their declarations above) — so a persisted true/false here just falls through
+      // The old boolean `reversed` field is gone - direction now lives in rotationSpeed/zoomSpeed's
+      // own sign (see their declarations above) - so a persisted true/false here just falls through
       // unused, the same as any other field a returning user's version predates.
       ...(typeof persisted.rotationSpeed === 'number' ? { rotationSpeed: clamp(persisted.rotationSpeed, MIN_ROTATION_SPEED, MAX_ROTATION_SPEED) } : null),
       ...(typeof persisted.shakeEnabled === 'boolean' ? { shakeEnabled: persisted.shakeEnabled } : null),
@@ -155,7 +156,7 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.tiltEnabled === 'boolean' ? { tiltEnabled: persisted.tiltEnabled } : null),
       ...(typeof persisted.triggerStackExpanded === 'boolean' ? { triggerStackExpanded: persisted.triggerStackExpanded } : null),
       // Renamed from the old `speed` field (which secretly meant "rotation speed" for spiral/
-      // starburst and "zoom speed" for everything else) — a persisted blob from before this split
+      // starburst and "zoom speed" for everything else) - a persisted blob from before this split
       // simply has no `zoomSpeed` key, so it falls through to defaultSettings.zoomSpeed like any
       // other field a returning user's version predates, no dedicated migration needed.
       ...(typeof persisted.zoomSpeed === 'number' ? { zoomSpeed: clamp(persisted.zoomSpeed, MIN_ZOOM_SPEED, MAX_ZOOM_SPEED) } : null)

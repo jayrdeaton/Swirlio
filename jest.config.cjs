@@ -1,5 +1,5 @@
 // testTimeout: the /expo preset doesn't default this the way /node and /react-native do (10000ms
-// there, see @infinitetoken/jest-config's own README) — CI runners are consistently slower than a
+// there, see @infinitetoken/jest-config's own README) - CI runners are consistently slower than a
 // dev machine for this app's heavier component tests (src/__tests__/swirlScreen.gesture.test.tsx in
 // particular: 224 tests exercising real gesture handlers, fake timers, and act()-wrapped state
 // updates), and the stock 5000ms budget was tight enough that individual tests intermittently

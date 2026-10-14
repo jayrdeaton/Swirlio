@@ -1,9 +1,9 @@
 import { buildFlowerPath, buildFlowerPoints } from '@/constants/flowerMath'
 
-// Matches the private flowerSamplesPerPetal/FLOWER_INNER_RATIO in flowerMath.ts — not exported
+// Matches the private flowerSamplesPerPetal/FLOWER_INNER_RATIO in flowerMath.ts - not exported
 // (polygonMath/starMath don't export their own per-vertex constants either), so both are spelled
 // out here. samplesPerPetal mirrors flowerSamplesPerPetal's own radius scaling exactly (see its
-// comment for why the scale factor is floored at 1 rather than left to range below it) — every test
+// comment for why the scale factor is floored at 1 rather than left to range below it) - every test
 // radius below stays under FLOWER_REFERENCE_RADIUS (480, also spelled out here), so today they all
 // still resolve to exactly SAMPLES_PER_PETAL_BASE, same as before this became radius-aware; the
 // formula is still spelled out in full, not just hardcoded back to 24, so it keeps tracking the real
@@ -33,10 +33,10 @@ describe('buildFlowerPath', () => {
     expect(path.endsWith('Z')).toBe(true)
   })
 
-  // The tip-vs-notch alternation is what makes it read as a flower rather than a circle — this locks
+  // The tip-vs-notch alternation is what makes it read as a flower rather than a circle - this locks
   // in that every petal tip actually reaches the full radius, and every notch between two petals
   // comes back in only to FLOWER_INNER_RATIO * radius, for both an even and an odd petal count.
-  // Not all the way to the center — see FLOWER_INNER_RATIO's own comment for why a plain rose curve
+  // Not all the way to the center - see FLOWER_INNER_RATIO's own comment for why a plain rose curve
   // (notches at 0) reads as a mess of spikes stabbing the epicenter once this is rippled as a pool
   // of instances, rather than drawn once.
   it.each([3, 4, 5, 8])('traces %i petal tips at full radius and %i notches short of the center', (petals) => {
@@ -78,7 +78,7 @@ describe('buildFlowerPath', () => {
 
 describe('buildFlowerPoints', () => {
   // Same geometry as buildFlowerPath (see its own tests above), just handed back as raw points
-  // instead of an SVG string, and without the repeated closing point — FlowerPattern feeds these
+  // instead of an SVG string, and without the repeated closing point - FlowerPattern feeds these
   // straight into Skia's PathBuilder.addPoly(points, true), whose own `close` flag draws that edge.
   it('returns petals * samples-per-petal points', () => {
     const pts = buildFlowerPoints(5, 50)

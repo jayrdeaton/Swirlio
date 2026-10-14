@@ -17,6 +17,7 @@ import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-c
 
 import { ControlGroupBottomSheetContent } from '@/components/ControlGroupBottomSheetContent'
 import { ControlGroupTopSheetContent } from '@/components/ControlGroupTopSheetContent'
+import { EdgeGuardBridge } from '@/components/EdgeGuardBridge'
 import { PhotosensitivityWarning } from '@/components/PhotosensitivityWarning'
 import { MONOCHROME_BLACK, MONOCHROME_WHITE } from '@/constants/fabTheme'
 import { ControlGroupBottomSheetProvider, ControlGroupProvider, ControlGroupTopSheetProvider } from '@/hooks/controlGroups'
@@ -27,13 +28,13 @@ import { SwirlResetProvider } from '@/hooks/swirlReset'
 import { useShutterSound, useTypewriterSound } from '@/hooks/useMechanicalSounds'
 import { SwirlSettingsProvider, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
-// Held open until every named gate in splashGate.ts reports ready — saved settings hydrating from
+// Held open until every named gate in splashGate.ts reports ready - saved settings hydrating from
 // AsyncStorage (see useSwirlSettings' 'persistence' gate) and the MaterialCommunityIcons font every
-// on-screen icon renders through (see FontsGate below) — so the first frame we ever paint is the
+// on-screen icon renders through (see FontsGate below) - so the first frame we ever paint is the
 // real one instead of defaults-then-a-sudden-jump, or icons popping in a moment late.
 SplashScreen.preventAutoHideAsync()
 
-// Monochrome to match the swirl itself (black/white by default) rather than a stock accent hue —
+// Monochrome to match the swirl itself (black/white by default) rather than a stock accent hue -
 // black on the light background, white on the dark one, so the controls always read clearly instead
 // of risking a black-on-near-black (or white-on-near-white) FAB. The theme package's "seed color"
 // only sets the accent once; it doesn't itself react to a live OS appearance change (only the base
@@ -43,7 +44,7 @@ SplashScreen.preventAutoHideAsync()
 // Keyed on the settings' own resolved appearance, not the raw OS scheme directly: once the user can
 // override appearance to 'light' or 'dark' regardless of the device's own setting (see
 // SettingsDrawerContent's AppearancePicker), trusting scheme alone here would force the *wrong*
-// monochrome accent whenever that override disagrees with the OS — e.g. an explicit 'dark' pick on a
+// monochrome accent whenever that override disagrees with the OS - e.g. an explicit 'dark' pick on a
 // light-mode device would still compute black (from scheme), landing black-on-black against the
 // resulting dark background. 'system' is the only case where the OS scheme is what actually decides.
 function MonochromeThemeBridge() {
@@ -59,7 +60,7 @@ function MonochromeThemeBridge() {
 }
 
 // Loads the icon font every MdIcon (and every react-native-paper icon) renders through, and reports
-// into the shared splash gate once it resolves — without this, MaterialCommunityIcons has
+// into the shared splash gate once it resolves - without this, MaterialCommunityIcons has
 // historically been loaded lazily on first use, letting the splash hide before the font is ready and
 // icons pop in blank-then-glyph a moment later. Rendered outside SwirlSettingsProvider (nothing here
 // depends on it) so the font load can run in parallel with settings hydration rather than after it.
@@ -69,7 +70,7 @@ function FontsGate() {
   return null
 }
 
-// Bridges the persisted hapticsEnabled setting into @rific/feedback-press's own runtime context —
+// Bridges the persisted hapticsEnabled setting into @rific/feedback-press's own runtime context -
 // every haptic call site in the app (manual useVibration() calls and every auto-haptic FAB/button)
 // already gates on HapticSettingsContext.settings.vibrate, so this is the only place the toggle
 // needs to be wired in. Same shape as MonochromeThemeBridge above: read one context, push into
@@ -86,14 +87,14 @@ function HapticsSettingsBridge() {
 }
 
 // Wraps FeedbackPressProvider (rather than a HapticsSettingsBridge-style child pushing into a
-// settable context) because SoundContext has no such setter — FeedbackPressProvider's own `sound`
+// settable context) because SoundContext has no such setter - FeedbackPressProvider's own `sound`
 // prop is a plain, always-live React prop (see its SoundContext.Provider value={sound ?? EMPTY_SOUND}),
 // unlike `initialValue`, which only ever seeds vibrate once. That means whatever computes `sound`
 // has to sit above FeedbackPressProvider in the tree, which in turn has to sit below
-// SwirlSettingsProvider to read useSwirlSettings() — hence this wrapper taking over
+// SwirlSettingsProvider to read useSwirlSettings() - hence this wrapper taking over
 // FeedbackPressProvider's own spot in RootLayout below, one level further in than before.
 // playTypewriter/playShutter self-gate on settings.soundEnabled already (see
-// useMechanicalSounds.ts) — same "caller doesn't check the setting" shape medium()/selection() give
+// useMechanicalSounds.ts) - same "caller doesn't check the setting" shape medium()/selection() give
 // HapticsSettingsBridge above, so this never needs its own soundEnabled branch the way
 // Expo-Starter's own FeedbackBridge does.
 function FeedbackSoundBridge({ children }: { children: React.ReactNode }) {
@@ -114,7 +115,7 @@ export default function RootLayout() {
     LogBox.ignoreLogs(['Animated: `useNativeDriver` is not supported because the native animated module is missing.'])
   }
 
-  // A plain (non-reactive) read here, not the useColorScheme hook — this only seeds the very first
+  // A plain (non-reactive) read here, not the useColorScheme hook - this only seeds the very first
   // paint, avoiding a flash of the old accent color before MonochromeThemeBridge's effect runs; the
   // provider's initialValue is a one-time lazy-init and ignores prop changes after that, so live
   // updates already have to go through the bridge above regardless.
@@ -123,7 +124,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
       {/* initialMetrics seeds the very first paint with the native module's synchronously-cached
-      frame/insets instead of {top:0,...} — react-native-safe-area-context's own documented fix for
+      frame/insets instead of {top:0,...} - react-native-safe-area-context's own documented fix for
       the first-render-zero-insets race. Without it, anything reading insets.top/insets.bottom on
       mount (ControlGroupTopSheetContent's paddingTop, OnScreenControls' trigger-stack/dice-FAB
       top offset, both sheets' contentSize height measurement) can measure/position itself against a
@@ -135,15 +136,16 @@ export default function RootLayout() {
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <FontsGate />
         <SwirlSettingsProvider>
-          {/* Wraps AutoPaperProvider (not the reverse — see git history), rather than nested inside
+          <EdgeGuardBridge />
+          {/* Wraps AutoPaperProvider (not the reverse - see git history), rather than nested inside
           it: AutoPaperProvider renders react-native-paper's own Provider internally, which mounts a
-          PortalHost near its own root — react-native-paper's Portal (used by OnScreenControls' trigger
+          PortalHost near its own root - react-native-paper's Portal (used by OnScreenControls' trigger
           stack while a sheet is open, and by @rific/auto-paper's own Dialog) renders its content as a
           child of THAT PortalHost in the fiber tree, not as a child of wherever <Portal> was written.
           With FeedbackPressProvider nested inside AutoPaperProvider, portaled content sat outside
           FeedbackPressProvider's own subtree entirely, so useFeedbackPressPaper() saw no injected `paper`
           there and every feedback-press Paper wrapper (FAB, etc.) silently rendered its bare-RN
-          fallback — letters instead of icons — the instant its content got portaled. Hoisting
+          fallback - letters instead of icons - the instant its content got portaled. Hoisting
           FeedbackPressProvider above AutoPaperProvider makes it an ancestor of PortalHost too, so
           portaled content stays inside its context regardless of where react-native-paper decides to
           mount the host. FeedbackPressProvider itself has no dependency on AutoPaperProvider being an
@@ -157,12 +159,12 @@ export default function RootLayout() {
                   <SwirlRandomizeProvider>
                     <ControlGroupProvider>
                       {/* SwirlScreen (the Stack's own screen) and ControlGroupBottomSheetContent are siblings
-                      here, not ancestor/descendant — see speedRateBridge.tsx's own comment for why the 6 speed
+                      here, not ancestor/descendant - see speedRateBridge.tsx's own comment for why the 6 speed
                       sliders living in the latter need this bridge to reach rate SharedValues owned by the
                       former. */}
                       <SpeedRateBridgeProvider>
                         {/* enabled={false} on both: these two sheets only ever open via their own trigger FABs
-                        (see OnScreenControls' openGroup) — @rific/drawer's own edge-swipe-to-open gesture isn't a
+                        (see OnScreenControls' openGroup) - @rific/drawer's own edge-swipe-to-open gesture isn't a
                         feature this app uses. enabled only gates DrawerEdgeSwipe itself (see createDrawer.tsx),
                         so open()/close() (and every trigger FAB that calls them) are completely unaffected; this
                         just removes the swipe gesture's own always-on 24px hit-band along the true top/bottom

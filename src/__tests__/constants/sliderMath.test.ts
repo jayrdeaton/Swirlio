@@ -20,7 +20,7 @@ describe('positionToValue', () => {
 
   // This is the regression that mattered: the previous slider sized its interactive track from an
   // onLayout measurement that never arrived, so every touch landed on a 0px track and was reported
-  // as minimumValue — pinning all three sliders to the floor and wedging them there.
+  // as minimumValue - pinning all three sliders to the floor and wedging them there.
   it('reports nothing for an unmeasured track instead of the minimum', () => {
     expect(positionToValue(120, 0, 1, 30, 0.5)).toBeNull()
     expect(positionToValue(120, -1, 1, 30, 0.5)).toBeNull()
@@ -37,7 +37,7 @@ describe('positionToValue', () => {
     expect(positionToValue(140, 280, 0, 10, 0)).toBeCloseTo(5, 10)
   })
 
-  // -10..10 across a 280px track puts 0's own position at x=140 (the midpoint) — see
+  // -10..10 across a 280px track puts 0's own position at x=140 (the midpoint) - see
   // SettingSlider's own snapToZero prop for why this exists: a slider that's otherwise entirely free
   // (step 0) but still wants exactly one magnetic stop, at 0, easy to land on by feel.
   describe('snapToZero', () => {
@@ -59,7 +59,7 @@ describe('positionToValue', () => {
     })
 
     it('does nothing when the range never actually crosses 0', () => {
-      // minimumValue 1..30 never straddles 0, so the magnet has nothing to pull toward — same
+      // minimumValue 1..30 never straddles 0, so the magnet has nothing to pull toward - same
       // result with the flag on or off.
       expect(positionToValue(140, 280, 1, 30, 0, true)).toBe(positionToValue(140, 280, 1, 30, 0, false))
     })

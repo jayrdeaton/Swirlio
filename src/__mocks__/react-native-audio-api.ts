@@ -15,7 +15,7 @@ module.exports = {
   AudioRecorder: jest.fn().mockImplementation(() => ({
     connect: jest.fn(),
     // start() reports failure through this Result object, not a rejected promise (see
-    // useAudioReactive.ts's own comment on why it now checks `status`) — defaulting to 'success'
+    // useAudioReactive.ts's own comment on why it now checks `status`) - defaulting to 'success'
     // here keeps every existing test exercising the working path without each one needing to know
     // that shape; the dedicated error-status test below overrides this per-case.
     start: jest.fn().mockResolvedValue({ status: 'success' }),

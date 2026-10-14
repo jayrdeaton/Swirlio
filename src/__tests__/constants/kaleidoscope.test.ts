@@ -37,7 +37,7 @@ describe('mirrorLinesFromSigned', () => {
       for (const mirrorAlternateColors of [false, true]) {
         expect(mirrorLinesFromSigned(signedMirrorLines(mirrorLines, mirrorAlternateColors))).toEqual({
           mirrorLines,
-          // 0 lines always round-trips to alternate colors off, regardless of the sign fed in — see
+          // 0 lines always round-trips to alternate colors off, regardless of the sign fed in - see
           // signedMirrorLines' own 0/-0 test above.
           mirrorAlternateColors: mirrorLines === 0 ? false : mirrorAlternateColors
         })
@@ -55,7 +55,7 @@ describe('wedgeAngleDegrees', () => {
 })
 
 // Parses a `M cx cy L x1 y1 A r r 0 flag 1 x2 y2 Z` path string into its numeric parts for assertions.
-// The exponent group matters here — cos/sin of a right angle isn't exactly 0 in floating point, JS
+// The exponent group matters here - cos/sin of a right angle isn't exactly 0 in floating point, JS
 // renders that as scientific notation (e.g. 6.12e-17), and dropping the exponent would silently turn
 // a negligible epsilon into a value around 6, corrupting every assertion downstream.
 const NUMBER_PATTERN = /-?\d+(\.\d+)?(e[+-]?\d+)?/gi
@@ -102,7 +102,7 @@ describe('wedgeClipPath', () => {
     expect(wedgeClipPath(0, 0, 10, 0, 60, 0)).toBe(wedgePath(0, 0, 10, 0, 60))
   })
 
-  it('defaults overlapDeg to 0 — every caller above already relies on exact gapFraction-only tiling', () => {
+  it('defaults overlapDeg to 0 - every caller above already relies on exact gapFraction-only tiling', () => {
     expect(wedgeClipPath(50, 50, 1000, 2, 90, 0.2)).toBe(wedgeClipPath(50, 50, 1000, 2, 90, 0.2, 0))
   })
 
@@ -114,7 +114,7 @@ describe('wedgeClipPath', () => {
     expect(clip).toBe(expected)
   })
 
-  it('overlapDeg is subtracted after gapFraction — a real gap only shrinks by that fixed amount, not to zero', () => {
+  it('overlapDeg is subtracted after gapFraction - a real gap only shrinks by that fixed amount, not to zero', () => {
     // wedgeAngle 90, gapFraction 0.2 -> insetDeg 9 (see the gapFraction-only test above); overlapDeg 3
     // brings the effective inset to 6, still a real, smaller gap rather than an overlap.
     const clip = wedgeClipPath(50, 50, 1000, 2, 90, 0.2, 3)
@@ -149,7 +149,7 @@ describe('reflectionMatrix', () => {
     expect(result.y).toBeCloseTo(onAxis.y)
   })
 
-  it('is its own inverse — reflecting twice returns the original point', () => {
+  it('is its own inverse - reflecting twice returns the original point', () => {
     const matrix = reflectionMatrix(5, -5, 72)
     const once = applyMatrix(matrix, 20, 3)
     const twice = applyMatrix(matrix, once.x, once.y)
@@ -177,9 +177,9 @@ describe('wedgeContentTransform', () => {
     expect(transform).toEqual(reflectionMatrix(50, 50, 90))
   })
 
-  it('is fixed — the same wedge index and angle always produce the same transform, independent of any live rotation', () => {
+  it('is fixed - the same wedge index and angle always produce the same transform, independent of any live rotation', () => {
     // Regression: this used to also take a live rotation value, added straight to a direct copy's
-    // angle but only half as much to a reflected copy's own reflection angle — which meant a
+    // angle but only half as much to a reflected copy's own reflection angle - which meant a
     // reflected copy's contribution from the pattern's *own* independent spin exactly cancelled out
     // algebraically, freezing it while direct copies span at double rate. Wedges are fixed now.
     const wedgeAngle = 60
@@ -218,7 +218,7 @@ describe('inverseWedgeVector', () => {
     expect(dy).toBeCloseTo(-4)
   })
 
-  it("undoes a mirrored copy's reflection by reflecting the vector again — reflections are self-inverse", () => {
+  it("undoes a mirrored copy's reflection by reflecting the vector again - reflections are self-inverse", () => {
     const forward = inverseWedgeVector(10, 4, 1, 90)
     const roundTrip = inverseWedgeVector(forward.dx, forward.dy, 1, 90)
     expect(roundTrip.dx).toBeCloseTo(10)
@@ -226,7 +226,7 @@ describe('inverseWedgeVector', () => {
   })
 
   // The actual point of this function: dragging any visual copy should move the underlying epicentre
-  // the same amount, once corrected back into the primary copy's own space — checked here by applying
+  // the same amount, once corrected back into the primary copy's own space - checked here by applying
   // a copy's own forward wedge transform to a point, then confirming inverseWedgeVector on the
   // resulting *delta* undoes exactly that.
   it('round-trips through the forward wedge transform for both a direct and a mirrored copy', () => {
@@ -252,7 +252,7 @@ describe('wedgeVector', () => {
     expect(dy).toBeCloseTo(-4)
   })
 
-  it('is inverseWedgeVector itself for a mirrored copy — reflections are self-inverse either direction', () => {
+  it('is inverseWedgeVector itself for a mirrored copy - reflections are self-inverse either direction', () => {
     expect(wedgeVector(10, 4, 1, 90)).toEqual(inverseWedgeVector(10, 4, 1, 90))
   })
 
@@ -265,7 +265,7 @@ describe('wedgeVector', () => {
     }
   })
 
-  it("matches wedgeContentTransform's own linear part — the same placement the rendering side draws that copy with", () => {
+  it("matches wedgeContentTransform's own linear part - the same placement the rendering side draws that copy with", () => {
     for (const copyIndex of [0, 1, 2, 3]) {
       const [a, c, , b, d] = wedgeContentTransform(0, 0, copyIndex, 90)
       const expected = { dx: a * 10 + c * 4, dy: b * 10 + d * 4 }
@@ -282,11 +282,11 @@ describe('farthestCornerDistance', () => {
   })
 
   it('picks whichever corner is actually furthest once the point is off-centre', () => {
-    // Point near the top-left — the bottom-right corner is the furthest one.
+    // Point near the top-left - the bottom-right corner is the furthest one.
     expect(farthestCornerDistance(10, 10, 100, 100)).toBeCloseTo(Math.hypot(90, 90))
   })
 
-  it('is symmetric — the furthest corner from a point near any single corner is always the opposite one', () => {
+  it('is symmetric - the furthest corner from a point near any single corner is always the opposite one', () => {
     expect(farthestCornerDistance(95, 5, 100, 100)).toBeCloseTo(Math.hypot(95, 95))
   })
 })

@@ -10,24 +10,24 @@ const gestureTestUtils = (gestureHandlerModule as typeof gestureHandlerModule & 
   reset: () => void
 }
 
-// jest.mock factories can't close over module-scope imports — require() inside the factory is the
+// jest.mock factories can't close over module-scope imports - require() inside the factory is the
 // standard escape hatch (see colorListEditor.test.tsx for the same pattern).
 jest.mock('react-native-paper', () => {
   const RN = require('react-native')
   return {
     // A real pass-through (not the usual `() => null`) so the showLabels tests below can assert on
-    // rendered text — nothing else in this file inspects Text output, so this is safe to widen.
+    // rendered text - nothing else in this file inspects Text output, so this is safe to widen.
     Text: ({ children, ...props }: any) => <RN.Text {...props}>{children}</RN.Text>,
     useTheme: () => ({ colors: { onSurfaceVariant: '#49454f', outlineVariant: '#cac4d0', primary: '#6750a4', surfaceVariant: '#e7e0ec' } })
   }
 })
 
 // SettingSlider's thumb no longer renders its icon through react-native-paper's Icon (which pairs a
-// glyph with a lineHeight that's been confirmed, on a real device, to render it off-center — see
-// MdIcon's own comment) — it renders MaterialCommunityIcons directly via MdIcon instead. The global
+// glyph with a lineHeight that's been confirmed, on a real device, to render it off-center - see
+// MdIcon's own comment) - it renders MaterialCommunityIcons directly via MdIcon instead. The global
 // '@expo/vector-icons' mock in jest.setup.ts covers the bare package specifier (used by
 // react-native-paper's own icon renderer elsewhere), but MdIcon imports the MaterialCommunityIcons
-// subpath directly, and that mock only echoes back `children` — MdIcon never passes any, so it'd
+// subpath directly, and that mock only echoes back `children` - MdIcon never passes any, so it'd
 // render nothing to assert against. This local, more specific mock stands in for it here instead.
 jest.mock('@expo/vector-icons/MaterialCommunityIcons', () => {
   const RN = require('react-native')
@@ -98,7 +98,7 @@ describe('SettingSlider', () => {
   })
 
   // The bug this component replaced: the old slider's interactive track was sized from an onLayout
-  // measurement that never arrived, so touches on a 0px track were reported as minimumValue —
+  // measurement that never arrived, so touches on a 0px track were reported as minimumValue -
   // every slider dropped to the floor on first touch and then refused to move.
   it('ignores touches while the track is unmeasured rather than dropping to the minimum', async () => {
     const seen: number[] = []
@@ -160,7 +160,7 @@ describe('SettingSlider', () => {
     expect(seen).toEqual([])
   })
 
-  // aria-valuemin/max/now rather than the legacy accessibilityValue={{min,max,now}} object — the
+  // aria-valuemin/max/now rather than the legacy accessibilityValue={{min,max,now}} object - the
   // web build in use here (react-native-web's createDOMProps) only reads the flat aria-* props;
   // accessibilityValue is silently dropped and never reaches the DOM as aria-valuenow etc.
   it('exposes the live value to assistive tech', async () => {
@@ -173,7 +173,7 @@ describe('SettingSlider', () => {
     expect(track.props['aria-valuenow']).toBe(6)
   })
 
-  // Used to disable a colour list's cycle-speed slider while that list only holds one colour —
+  // Used to disable a colour list's cycle-speed slider while that list only holds one colour -
   // there's nothing to cycle, so nothing for the slider to do.
   it('ignores drags and taps while disabled', async () => {
     const seen: number[] = []
@@ -195,7 +195,7 @@ describe('SettingSlider', () => {
   })
 
   // onLiveValue (see its own prop comment) is a low-latency fast path a caller can pass alongside
-  // onChange — used by the speed sliders to write straight to a UI-thread rate SharedValue, but from
+  // onChange - used by the speed sliders to write straight to a UI-thread rate SharedValue, but from
   // this component's own perspective it's just "another thing commitFromX calls, same gate as onChange."
   it('calls onLiveValue alongside onChange on every committed drag update', async () => {
     const seen: number[] = []
@@ -233,7 +233,7 @@ describe('SettingSlider', () => {
     const screen = await render(<Host initial={6} onLive={(v) => live.push(v)} />)
     await layout(screen)
 
-    // 6 is already exactly where a start at x=0...TRACK_WIDTH*(6-1)/(30-1) would land — commit at that
+    // 6 is already exactly where a start at x=0...TRACK_WIDTH*(6-1)/(30-1) would land - commit at that
     // same position twice, the second landing on the identical value commitFromX already holds.
     const startX = (TRACK_WIDTH * (6 - 1)) / (30 - 1)
     const pan = gestureTestUtils.getLastGesture('Pan')
@@ -256,7 +256,7 @@ describe('SettingSlider', () => {
     expect(flatten(track.props.style).opacity).toBeLessThan(1)
   })
 
-  // Matches the on-screen edge slider for the same setting, where one exists — see EdgeSlider.
+  // Matches the on-screen edge slider for the same setting, where one exists - see EdgeSlider.
   it('draws the given icon next to the label', async () => {
     const screen = await render(<Host initial={6} icon='format-line-weight' />)
 
@@ -275,7 +275,7 @@ describe('SettingSlider', () => {
     expect(screen.queryAllByTestId('setting-slider-tick')).toHaveLength(0)
   })
 
-  // Mirror lines (0..6 step 1) and polygon sides (3..8 step 1) are the two sliders that opt in —
+  // Mirror lines (0..6 step 1) and polygon sides (3..8 step 1) are the two sliders that opt in -
   // one tick per reachable stop, so the user can see exactly where to press to land on a given value.
   it('draws one tick per step when showTicks is set', async () => {
     const screen = await render(<Host initial={3} min={0} max={6} step={1} showTicks />)
@@ -289,7 +289,7 @@ describe('SettingSlider', () => {
   })
 
   // Friction/gravity (0..5 step 0.1) want landmark ticks at every whole number without giving
-  // up fine-grained dragging in between — one tick per 0.1 step would be 51 ticks, the tick-soup case
+  // up fine-grained dragging in between - one tick per 0.1 step would be 51 ticks, the tick-soup case
   // showTicks' own default-off exists to avoid. tickStep lets the ticks land on a coarser interval
   // than the actual drag/snap step.
   it('spaces ticks at tickStep instead of step when the two differ', async () => {
@@ -300,7 +300,7 @@ describe('SettingSlider', () => {
   })
 
   // The three ±speed sliders (Rotation/Zoom/Mirror rotation): entirely free (step 0, no showTicks),
-  // but still draw exactly one landmark — at 0, where snapToZero's own magnet pulls toward — not the
+  // but still draw exactly one landmark - at 0, where snapToZero's own magnet pulls toward - not the
   // whole-range tick ladder showTicks would give a stepped slider.
   it('draws a single tick at 0 when snapToZero is set, independent of showTicks', async () => {
     const screen = await render(<Host initial={0} min={-10} max={10} step={0} snapToZero />)
@@ -335,7 +335,7 @@ describe('SettingSlider', () => {
 
     const pan = gestureTestUtils.getLastGesture('Pan')
     await act(async () => {
-      // 20% along the track — nowhere near either reachable step (0 or 5, at step=5 over 0..10).
+      // 20% along the track - nowhere near either reachable step (0 or 5, at step=5 over 0..10).
       pan.__handlers.start?.({ x: TRACK_WIDTH * 0.2 })
     })
     await screen.rerender(<Host initial={0} min={0} max={10} step={5} />)
@@ -362,7 +362,7 @@ describe('SettingSlider', () => {
     })
     await screen.rerender(<Host initial={0} min={0} max={10} step={5} />)
 
-    // 20% rounds down to the 0 step, not part-way to 5 — the thumb should land back on it, not stay
+    // 20% rounds down to the 0 step, not part-way to 5 - the thumb should land back on it, not stay
     // wherever the raw drag left off.
     expect(flatten(thumb.props.style).left).toBe('0%')
   })
@@ -383,11 +383,11 @@ describe('SettingSlider', () => {
     expect(flatten(thumb.props.style).left).toBe('100%')
   })
 
-  // -10..10 puts 0's own position at 50% of the track — see sliderMath.test.ts's own snapToZero
+  // -10..10 puts 0's own position at 50% of the track - see sliderMath.test.ts's own snapToZero
   // suite for the underlying magnet-distance math this exercises through the full component.
   it('commits exactly 0 once a free (step 0) drag lands near its own magnet, snapping mid-drag not just on release', async () => {
     const seen: number[] = []
-    // Starts away from 0 (5, not 0) so landing back on it via the drag is an actual reported change —
+    // Starts away from 0 (5, not 0) so landing back on it via the drag is an actual reported change -
     // commitFromX only calls onChange when the next value differs from the current one.
     const screen = await render(<Host initial={5} min={-10} max={10} step={0} snapToZero onEach={(v) => seen.push(v)} />)
     await layout(screen)
@@ -414,24 +414,24 @@ describe('SettingSlider', () => {
   })
 
   // The bug: a tick's "reached" color used to be driven off the committed step, which rounds to the
-  // *nearest* stop — so dragging past the halfway point between two stops flips the upcoming tick to
+  // *nearest* stop - so dragging past the halfway point between two stops flips the upcoming tick to
   // its reached (light) color well before the raw drag, and the fill bar next to it, actually get
   // there. A light tick on the still-unfilled (light) track reads as having vanished. Driving it off
-  // rawProgress instead — the same value the fill bar itself uses — keeps the two in lockstep.
+  // rawProgress instead - the same value the fill bar itself uses - keeps the two in lockstep.
   it('keeps an upcoming tick in its unreached color until the raw drag actually reaches it', async () => {
     const screen = await render(<Host initial={0} min={0} max={100} step={50} showTicks />)
     await layout(screen)
 
     const pan = gestureTestUtils.getLastGesture('Pan')
     await act(async () => {
-      // 30% of the track — past the 25% rounding midpoint (so the committed value already jumps to
+      // 30% of the track - past the 25% rounding midpoint (so the committed value already jumps to
       // the 50% stop) but well short of the 50% tick itself.
       pan.__handlers.start?.({ x: TRACK_WIDTH * 0.3 })
     })
 
     const ticks = screen.getAllByTestId('setting-slider-tick')
     const flatten = (style: unknown) => (Array.isArray(style) ? Object.assign({}, ...style) : style)
-    // ticks are rendered in order: 0%, 50%, 100% — unreached ticks are colors.primary itself (see
+    // ticks are rendered in order: 0%, 50%, 100% - unreached ticks are colors.primary itself (see
     // SettingSlider's own comment for why, not colors.outlineVariant, which react-native-paper never
     // adapts to this app's forced monochrome seed).
     expect(flatten(ticks[1].props.style).backgroundColor).toBe('#6750a4')

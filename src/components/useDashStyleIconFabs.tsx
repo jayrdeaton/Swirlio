@@ -11,7 +11,7 @@ const DASH_STYLE_OPTIONS: PreviewOption<DashStyle>[] = DASH_STYLE_ORDER.map((das
   renderIcon: ({ color, size }) => <DashStyleIcon dashStyle={dashStyle} color={color} size={size} />
 }))
 
-// Same usePreviewOptionFabs shape as useAppearanceIconFabs — a hook, not a component, so
+// Same usePreviewOptionFabs shape as useAppearanceIconFabs - a hook, not a component, so
 // ControlGroupTopSheetContent's own FabRow sees every FAB as a real flat sibling instead of one
 // opaque child (see usePreviewOptionFabs's own comment for why).
 export function useDashStyleIconFabs(value: DashStyle, onChange: (dashStyle: DashStyle) => void): React.ReactNode[] {

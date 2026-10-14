@@ -18,7 +18,7 @@ Swirlio is an interactive kaleidoscope toy for iOS, Android, and web. There's no
 - **Audio Reactive:** turn on the mic and the swirl moves to the room: bass drives stroke width, and mids, treble, and overall loudness drive zoom, rotation, and color cycling, with a Mic Sensitivity slider.
 - **Randomize and undo:** every control group has Randomize and Reset (long-press a group's button to randomize it on the spot), Shake to Randomize rerolls the whole look, the forward button tweaks one random thing (hold it to keep tweaking), and the back button steps back through your last 100 looks, saved between launches.
 - **Out of the way:** play/pause freezes the motion, the controls fade out after a configurable Auto-Hide Delay, and touching a top corner or the bottom edge brings them back. A photosensitivity warning shows once on first launch.
-- **Settings:** Appearance (System, Light, Dark), Blur, Labels, Haptics, Sound, Shake to Randomize, Audio Reactive with Mic Sensitivity, Auto-Hide Delay, Reset All, and a manual update check. On web, a trackpad pinch or scroll wheel stands in for pinch, and Haptics, Shake to Randomize, Audio Reactive, Tilt Control, and the update check are hidden.
+- **Settings:** Appearance (System, Light, Dark), Blur, Labels, Haptics, Sound, Shake to Randomize, Edge Guard (an iOS option that makes system edge gestures need a second swipe, so a drag that starts near the top or bottom edge stays on the canvas), Audio Reactive with Mic Sensitivity, Auto-Hide Delay, Reset All, and a manual update check. On web, a trackpad pinch or scroll wheel stands in for pinch, and Haptics, Shake to Randomize, Audio Reactive, Tilt Control, Edge Guard, and the update check are hidden.
 
 ## Under the hood
 
@@ -27,7 +27,7 @@ Swirlio is an interactive kaleidoscope toy for iOS, Android, and web. There's no
 - **Skia kaleidoscope.** Pattern geometry is built in worklets and drawn with React Native Skia. `n` mirror lines produce `2n` wedge copies, each clipped to its own wedge with alternating copies reflected, plus a tiny angular overlap that hides the seam between neighbors. Bead colors are merged into at most 8 paths per copy so the draw-call count stays bounded however long the palette gets. The gravity well marker comes from `@tastic/sprites`. On web, `SpiralHost.web.tsx` lazy-loads the canvas only after CanvasKit (Skia's WASM build) is ready.
 - **Sensors and microphone.** Tilt reads `expo-sensors` DeviceMotion every 100 ms with a small deadzone so a phone lying still doesn't drift, and Shake to Randomize watches the accelerometer with a threshold and a one-second debounce. Audio Reactive records raw PCM through `react-native-audio-api`, splits it into bass, mid, and treble bands with one-pole filters, and normalizes each to a decibel window. Bass updates stroke width on every buffer without a re-render, while the other bands are throttled. The mic permission is only requested when Audio Reactive is turned on.
 - **Settings and history.** Settings live in a React context persisted to AsyncStorage with a debounced writer, and saved data is validated and clamped field by field on load. Look history is stored separately and only restores the fields a randomize or tweak can touch, so stepping back never reverts a speed slider you set by hand. `@rific/splash-gate` holds the splash screen until settings have loaded and the icon font is ready. Over-the-air updates ship through `expo-updates` and `@rific/updater`.
-- **Tests.** 664 Jest tests across 32 suites (642 passing, plus one 22-test block that is currently skipped) cover pattern geometry, kaleidoscope wedge math, particle and gravity-well math, audio mapping, color blending, line dash and spacing, slider math, tilt orientation, settings, randomize and reset, the control sheets, and a gesture-level suite that drives the main screen through a Gesture Handler test double. CI runs `npm run verify` on pushes and pull requests to `main`.
+- **Tests.** 668 Jest tests across 33 suites (646 passing, plus one 22-test block that is currently skipped) cover pattern geometry, kaleidoscope wedge math, particle and gravity-well math, audio mapping, color blending, line dash and spacing, slider math, tilt orientation, settings, randomize and reset, the control sheets, and a gesture-level suite that drives the main screen through a Gesture Handler test double. CI runs `npm run verify` on pushes and pull requests to `main`.
 
 ## Built on
 
@@ -35,6 +35,7 @@ Swirlio is an interactive kaleidoscope toy for iOS, Android, and web. There's no
 | --- | --- |
 | [`@tastic/sprites`](https://www.npmjs.com/package/@tastic/sprites) | Skia gravity well marker |
 | [`@tastic/core`](https://github.com/jayrdeaton/React-Native-Game-Core) | Peer dependency of `@tastic/sprites` |
+| [`@tastic/edge-guard`](https://www.npmjs.com/package/@tastic/edge-guard) | Optional guard against iOS edge system gestures during play |
 | [`@rific/auto-paper`](https://www.npmjs.com/package/@rific/auto-paper) | React Native Paper theming, light/dark appearance, blur, color dialogs and swatches |
 | [`@rific/drawer`](https://www.npmjs.com/package/@rific/drawer) | The top and bottom control sheets |
 | [`@rific/feedback-press`](https://www.npmjs.com/package/@rific/feedback-press) | Buttons with haptic and sound feedback, hold-to-repeat, vibration, sound playback |
@@ -49,7 +50,7 @@ npm install
 npm run ios        # or: npm run android / npm start (web)
 ```
 
-The app uses native code that Expo Go doesn't include (`react-native-audio-api` and its config plugin), so iOS and Android run as a development build (`expo-dev-client`). `npm run ios` and `npm run android` build it locally, and once a dev client is installed, `npm run client` starts Metro for it. `npm install` also runs `setup-skia-web`, which copies Skia's `canvaskit.wasm` into `public/` for the web target.
+The app uses native code that Expo Go doesn't include (`react-native-audio-api` and its config plugin, plus the `@tastic/edge-guard` config plugin), so iOS and Android run as a development build (`expo-dev-client`). `npm run ios` and `npm run android` build it locally, and once a dev client is installed, `npm run client` starts Metro for it. `npm install` also runs `setup-skia-web`, which copies Skia's `canvaskit.wasm` into `public/` for the web target.
 
 ### Checks
 

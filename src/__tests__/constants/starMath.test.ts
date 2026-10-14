@@ -17,7 +17,7 @@ describe('buildStarPath', () => {
     expect(path.endsWith('Z')).toBe(true)
   })
 
-  // The inner vertices are what make it read as a star rather than a polygon — this locks in that
+  // The inner vertices are what make it read as a star rather than a polygon - this locks in that
   // they're actually closer to the center than the outer ones, not just alternating in name only.
   it('places inner vertices strictly closer to the center than outer vertices', () => {
     const path = buildStarPath(5, 100)
@@ -41,7 +41,7 @@ describe('buildStarPath', () => {
 
 describe('buildStarPoints', () => {
   // Same geometry as buildStarPath (see its own tests above), just handed back as raw vertices
-  // instead of an SVG string, and without the repeated closing vertex — StarPattern feeds these
+  // instead of an SVG string, and without the repeated closing vertex - StarPattern feeds these
   // straight into Skia's PathBuilder.addPoly(points, true), whose own `close` flag draws that edge.
   it('returns points * 2 vertices, alternating outer and inner radius', () => {
     const pts = buildStarPoints(5, 100)

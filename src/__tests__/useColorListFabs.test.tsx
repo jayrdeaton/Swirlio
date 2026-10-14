@@ -3,7 +3,7 @@ import { act, fireEvent, render } from '@testing-library/react-native'
 import { useColorListFabs } from '@/components/useColorListFabs'
 
 // jest.mock factories can't close over module-scope imports (only jest's own globals and
-// "mock"-prefixed bindings) — require() inside the factory is the standard escape hatch.
+// "mock"-prefixed bindings) - require() inside the factory is the standard escape hatch.
 jest.mock('react-native-paper', () => {
   const RN = require('react-native')
   return {
@@ -16,14 +16,14 @@ jest.mock('react-native-paper', () => {
 })
 
 // FAB/Button/TouchableOpacity now come from @rific/feedback-press rather than react-native-paper/
-// react-native (see useColorListFabs.tsx/LabeledFab.tsx/ActionFab.tsx) — mocked the same shallow way
+// react-native (see useColorListFabs.tsx/LabeledFab.tsx/ActionFab.tsx) - mocked the same shallow way
 // as the react-native-paper mock above, still without pulling in the real haptic-wiring chain.
-// useHoldToRepeat (spread in via ...actual, not mocked) is left as its real implementation — same
+// useHoldToRepeat (spread in via ...actual, not mocked) is left as its real implementation - same
 // reasoning as onScreenControls.test.tsx's own identical spread: it's a pure, dependency-light hook
 // already covered by that package's own test suite, and this file's own "+ long-press grows the list"
 // tests below are testing useColorListFabs' *wiring* to it, not reinventing hook-level coverage. Its
 // own internal useVibration() call is a relative import inside that package, unaffected by this mock
-// only replacing the package's own top-level Button/FAB/TouchableOpacity exports — it hits the real
+// only replacing the package's own top-level Button/FAB/TouchableOpacity exports - it hits the real
 // one, backed by jest-expo's own built-in expo-haptics mock.
 jest.mock('@rific/feedback-press', () => {
   const RN = require('react-native')
@@ -37,7 +37,7 @@ jest.mock('@rific/feedback-press', () => {
         <RN.Text>{children}</RN.Text>
       </RN.Pressable>
     ),
-    // Real LabeledFab/ActionFab (not mocked — this test cares that they receive the right props, e.g.
+    // Real LabeledFab/ActionFab (not mocked - this test cares that they receive the right props, e.g.
     // backgroundColor set to the swatch's own hex) render down to this FAB, so it needs to forward the
     // testID that's the actual thing under test here. onLongPress/onPressOut forwarded too, now that
     // the + button's own growColorsHold (useColorListFabs.tsx) wires them up.
@@ -50,7 +50,7 @@ jest.mock('@rific/feedback-press', () => {
   }
 })
 
-// LabeledFab/ActionFab (real, not mocked) read settings.showLabels — a plain stub is enough, no
+// LabeledFab/ActionFab (real, not mocked) read settings.showLabels - a plain stub is enough, no
 // provider needed, since only the swatch/add-button testIDs and press behavior are under test here.
 jest.mock('@/hooks/useSwirlSettings', () => ({
   useSwirlSettings: () => ({ settings: { showLabels: false } })
@@ -66,14 +66,14 @@ jest.mock('@rific/auto-paper', () => {
   MockDialog.Content = MockDialogContent
   return {
     Dialog: MockDialog,
-    // useToggleFabAppearance (LabeledFab, real/not mocked here) reads this unconditionally — rules
-    // of hooks — even though every LabeledFab actually rendered in this suite is either a swatch
+    // useToggleFabAppearance (LabeledFab, real/not mocked here) reads this unconditionally - rules
+    // of hooks - even though every LabeledFab actually rendered in this suite is either a swatch
     // (colorOverride, which never mounts a blur backdrop at all) or an always-active ActionFab
     // ("Reset"/"Add"), so BlurView itself is never actually rendered here; stubbed only so the
     // import doesn't resolve to undefined.
     useBlur: () => true,
     BlurView: ({ children }: any) => children ?? null,
-    // colorSwatches.ts spreads this in behind Black/White — a couple of representative entries are
+    // colorSwatches.ts spreads this in behind Black/White - a couple of representative entries are
     // enough for the swatch grid to render without depending on the library's full palette.
     defaultColors: [
       { label: 'Red', value: '#f44336' },
@@ -83,7 +83,7 @@ jest.mock('@rific/auto-paper', () => {
     // needs black and white to actually resolve to different contrast colours.
     isDarkColor: mockIsDarkColor,
     // Mirrors the real package's own getContrastColor, which is just isDarkColor gating between the
-    // two extremes — kept in terms of the mock above instead of duplicating the luminance math again.
+    // two extremes - kept in terms of the mock above instead of duplicating the luminance math again.
     getContrastColor: (hex: string) => (mockIsDarkColor(hex) ? '#ffffff' : '#000000')
   }
 })
@@ -101,7 +101,7 @@ function flattenStyle(style: unknown): Record<string, unknown> {
 }
 
 // useColorListFabs returns a flat fabs array (for spreading into a shared FabRow) plus a separate
-// dialog node — this stands in for that FabRow, rendering both exactly as ControlGroupSheetContent
+// dialog node - this stands in for that FabRow, rendering both exactly as ControlGroupSheetContent
 // does, so the hook can be exercised the same way the deleted ColorListEditor component was.
 function Host({ label, colors, onChange, maxColors = 20 }: { label: string; colors: string[]; onChange: (colors: string[]) => void; maxColors?: number }) {
   const { fabs, dialog } = useColorListFabs(label, colors, onChange, maxColors)
@@ -139,7 +139,7 @@ describe('useColorListFabs', () => {
     expect(screen.getByTestId('color-list-add-Background')).toBeTruthy()
   })
 
-  // The + button has to lead the row, not trail it — see useColorListFabs.tsx's own comment: while +
+  // The + button has to lead the row, not trail it - see useColorListFabs.tsx's own comment: while +
   // is held for its own hold-to-grow action, each newly-appended swatch has to land after wherever +
   // already sits, never push + itself out from under the still-holding finger.
   it('renders the add button before every colour dot, not after', async () => {
@@ -165,7 +165,7 @@ describe('useColorListFabs', () => {
   })
 
   // Same "nothing left to add, so this must be a genuine no-op" cap every other hold-to-grow action in
-  // this app already has (see index.tsx's own growForeground/growParticleColors) — passed in as
+  // this app already has (see index.tsx's own growForeground/growParticleColors) - passed in as
   // maxColors here rather than hardcoded, since foreground/background and particles/border each need a
   // different cap (see ControlGroupTopSheetContent.tsx's own call sites).
   it('stops growing once the list is already at maxColors', async () => {
@@ -257,7 +257,7 @@ describe('useColorListFabs', () => {
 
   // Reproduces, for this component's own swatch grid, the exact contrast fix already applied to
   // @rific/auto-paper's ColorPicker/PalettePicker: a selected swatch's ring must contrast against
-  // its own fill, not blend into it — otherwise a selected white swatch shows no selection at all.
+  // its own fill, not blend into it - otherwise a selected white swatch shows no selection at all.
   it('rings the slot-under-edit colour with a thicker, higher-contrast border than the rest', async () => {
     const screen = await render(<Host label='Foreground' colors={['#000000', '#FFFFFF']} onChange={jest.fn()} />)
 
@@ -272,7 +272,7 @@ describe('useColorListFabs', () => {
   })
 
   // Selection in the grid tracks the specific slot being edited, not "is this hex anywhere in the
-  // list" — editing a black dot shouldn't ring black just because a *different* slot is also black.
+  // list" - editing a black dot shouldn't ring black just because a *different* slot is also black.
   it('rings only the colour of the slot actually being edited, not every matching slot elsewhere', async () => {
     const screen = await render(<Host label='Foreground' colors={['#000000', '#FFFFFF']} onChange={jest.fn()} />)
 

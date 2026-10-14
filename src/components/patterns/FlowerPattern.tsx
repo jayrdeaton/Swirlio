@@ -17,14 +17,14 @@ type FlowerPatternProps = {
   // See useSwirlSettings' fixedSpacing field. referenceRadius is only read when it's on.
   fixedSpacing: boolean
   referenceRadius: number
-  // See PatternGeometry's own comment in Spiral.tsx — called once with this pattern's geometry instead
+  // See PatternGeometry's own comment in Spiral.tsx - called once with this pattern's geometry instead
   // of this component rendering a <Path> itself, so every kaleidoscope copy (Spiral's own
   // renderCopies) can reuse the exact same computed path/width/intervals.
   children: (geometry: PatternGeometry) => ReactNode
 }
 
-// The ripple pool/path/width/dash math is shared with Polygon/Rings/Star — see
-// useRipplePatternGeometry's own comment — this component supplies only the one thing that's actually
+// The ripple pool/path/width/dash math is shared with Polygon/Rings/Star - see
+// useRipplePatternGeometry's own comment - this component supplies only the one thing that's actually
 // Flower-specific: which shape addShape draws into the pool at each ripple's radius.
 export function FlowerPattern({ radius, pulse, tightness, sides, reversed, strokeWidth, dashStyle, fixedSpacing, referenceRadius, children }: FlowerPatternProps) {
   const geometry = useRipplePatternGeometry({
@@ -36,7 +36,7 @@ export function FlowerPattern({ radius, pulse, tightness, sides, reversed, strok
     dashStyle,
     fixedSpacing,
     referenceRadius,
-    // Reuses the same slider as Polygon's side count and Star's point count — the drawer labels it
+    // Reuses the same slider as Polygon's side count and Star's point count - the drawer labels it
     // "Petals" while Flower is selected, but it's the same underlying setting either way.
     addShape: (builder, radiusAtProgress) => {
       'worklet'

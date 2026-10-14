@@ -7,7 +7,7 @@
       "@/components/*": ["./src/components/*"],
       "@/constants/*": ["./src/constants/*"],
       "@/hooks/*": ["./src/hooks/*"],
-      // @shopify/react-native-skia has no "exports" map — a classic top-level "react-native"
+      // @shopify/react-native-skia has no "exports" map - a classic top-level "react-native"
       // field points bare imports at raw, untranspiled src/index.ts, which customConditions:
       // ["react-native"] (inherited from the shared preset, matching Metro's real resolution)
       // correctly follows. That pulls the package's own web/WithSkiaWeb.tsx into the typecheck

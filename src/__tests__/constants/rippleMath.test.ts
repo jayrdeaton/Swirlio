@@ -34,7 +34,7 @@ describe('rippleProgress', () => {
   })
 
   // Reverse zoom is implemented by negating pulse before it reaches rippleProgress, rather than
-  // any dedicated "direction" parameter — this locks in that the existing negative-pulse guard is
+  // any dedicated "direction" parameter - this locks in that the existing negative-pulse guard is
   // what makes that trick work, not an accident of the specific values exercised elsewhere.
   it('runs backwards from a negated pulse, shrinking toward the epicenter instead of growing out of it', () => {
     const spacing = rippleSpacing(6, 1)
@@ -56,7 +56,7 @@ describe('rippleProgress', () => {
   })
 
   // RingsPattern/PolygonPattern always pass rippleModulus(spacing) as the modulus, so ripples wrap
-  // well past the screen edge rather than right at it — modulus 1 stays the default for callers that
+  // well past the screen edge rather than right at it - modulus 1 stays the default for callers that
   // don't need the extra off-screen room.
   it('wraps at a custom modulus instead of 1 when one is given', () => {
     const spacing = rippleSpacing(6, 1)
@@ -72,7 +72,7 @@ describe('rippleProgress', () => {
   })
 
   // A raw (pulse + index * spacing) that's already under 1 needs no wrapping at either modulus, so
-  // it lands at the exact same position regardless of how wide the modulus is — widening it only
+  // it lands at the exact same position regardless of how wide the modulus is - widening it only
   // adds new positions beyond 1, it never moves the ones already on screen. This is what makes it
   // safe for the app to always use rippleModulus(spacing) as the modulus: on-screen density and
   // position never depend on it, only how far past the edge the wrap happens.
@@ -100,8 +100,8 @@ describe('rippleModulus', () => {
   })
 
   // Regression: an earlier version used a fixed physical-distance margin (spacing-independent), which
-  // is an exact multiple of spacing only by coincidence. Everywhere else it leaves a "seam" — one gap
-  // between ripples slightly narrower or wider than the rest — and since which pool index sits at the
+  // is an exact multiple of spacing only by coincidence. Everywhere else it leaves a "seam" - one gap
+  // between ripples slightly narrower or wider than the rest - and since which pool index sits at the
   // seam changes every lap, that reads as a jitter sweeping through the ring stack rather than a
   // static flaw. Defining the wrap in ripple-widths instead of a fixed distance is what guarantees
   // this never happens, at any tightness.
@@ -111,7 +111,7 @@ describe('rippleModulus', () => {
     expect((modulus - 1) / spacing).toBeCloseTo(RIPPLE_OFFSCREEN_COUNT, 8)
   })
 
-  // laps defaults to 1 — every pre-existing call site (RingsPattern/PolygonPattern/StarPattern with
+  // laps defaults to 1 - every pre-existing call site (RingsPattern/PolygonPattern/StarPattern with
   // fixedSpacing off, and index.tsx's own pulse-duration calculation) relies on that default without
   // passing the argument explicitly.
   it('defaults laps to 1, matching an explicit call with laps=1', () => {
@@ -120,7 +120,7 @@ describe('rippleModulus', () => {
   })
 
   // fixedSpacing (see useSwirlSettings) needs ripples to already reach MAX_RADIUS_TO_REFERENCE_RATIO
-  // radius-lengths out, not just 1, before the same off-screen buffer applies — this is what the
+  // radius-lengths out, not just 1, before the same off-screen buffer applies - this is what the
   // ripple pool's own bigger size (FIXED_SPACING_RING_POOL etc.) has to line up with exactly.
   it('extends further out at a bigger laps value, while staying an exact multiple of spacing', () => {
     for (const tightness of [0.4, 1, 1.4, 1.7, 2.5]) {
@@ -130,7 +130,7 @@ describe('rippleModulus', () => {
       expect(ratio).toBeCloseTo(Math.round(ratio), 8)
       expect(modulus).toBeGreaterThan(rippleModulus(spacing, 1))
       // At least RIPPLE_OFFSCREEN_COUNT ripple-widths past 2 laps, same "at least" guarantee as the
-      // laps=1 case above — ceil(laps / spacing) only lands exactly on RIPPLE_OFFSCREEN_COUNT past 2
+      // laps=1 case above - ceil(laps / spacing) only lands exactly on RIPPLE_OFFSCREEN_COUNT past 2
       // when 2 / spacing happens to be a whole number; otherwise the ceil rounds up by less than one
       // full spacing unit, so the true margin is always in [RIPPLE_OFFSCREEN_COUNT,
       // RIPPLE_OFFSCREEN_COUNT + 1).
@@ -142,12 +142,12 @@ describe('rippleModulus', () => {
 })
 
 // End-to-end: the same worklet logic RingsPattern/PolygonPattern run, exercised directly against a
-// pool sized for the tightest setting — this is what actually locks in that a pool this oversized, at
+// pool sized for the tightest setting - this is what actually locks in that a pool this oversized, at
 // a tightness far looser than its worst case, still shows the right number of ripples, each exactly
 // `spacing` apart from its neighbor with no seam, rather than the drifting duplicates a fixed-margin
 // modulus produced.
 describe('ripple pool visible count', () => {
-  // A pool this size renders far more members than one ramp needs at looser tightness — the extras
+  // A pool this size renders far more members than one ramp needs at looser tightness - the extras
   // now land EXACTLY on an earlier one's position (rippleModulus is always an exact multiple of
   // spacing), so "how many ripples does the user see" is the count of DISTINCT positions, not the
   // raw pool size.
@@ -176,7 +176,7 @@ describe('ripple pool visible count', () => {
     const positions = visiblePositions(0.37, spacing, modulus, poolSize).sort((a, b) => a - b)
     for (let i = 1; i < positions.length; i++) {
       // Precision 6, not the usual 10: visiblePositions rounds to dedupe exact-overlap positions
-      // from the pool's spares, which loses a little precision of its own (~1e-8) — well within a
+      // from the pool's spares, which loses a little precision of its own (~1e-8) - well within a
       // real seam's magnitude (a difference of a full spacing unit), but tighter than 10 digits.
       expect(positions[i] - positions[i - 1]).toBeCloseTo(spacing, 6)
     }
@@ -191,7 +191,7 @@ describe('ripple pool visible count', () => {
     const positions = visiblePositions(0.61, spacing, modulus, poolSize).sort((a, b) => a - b)
     for (let i = 1; i < positions.length; i++) {
       // Precision 6, not the usual 10: visiblePositions rounds to dedupe exact-overlap positions
-      // from the pool's spares, which loses a little precision of its own (~1e-8) — well within a
+      // from the pool's spares, which loses a little precision of its own (~1e-8) - well within a
       // real seam's magnitude (a difference of a full spacing unit), but tighter than 10 digits.
       expect(positions[i] - positions[i - 1]).toBeCloseTo(spacing, 6)
     }

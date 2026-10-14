@@ -16,7 +16,7 @@ const PREVIEW_BOUNDS = PREVIEW_RADIUS + PREVIEW_PAD
 const PREVIEW_STROKE_WIDTH = 2.5
 
 // Fewer arms/turns/rays than the live defaults (SpiralArms' ARM_COUNT=3/BASE_TURNS=3.5,
-// StarburstPattern's BASE_RAY_COUNT=16) — the real counts blur into a smudge at icon size, these are
+// StarburstPattern's BASE_RAY_COUNT=16) - the real counts blur into a smudge at icon size, these are
 // just enough of each to still read as "the same shape" at a glance.
 const SPIRAL_ARM_COUNT = 3
 const SPIRAL_TURNS = 1.6
@@ -27,11 +27,11 @@ const STAR_POINTS = 5
 const FLOWER_PETALS = 5
 
 // The spiral preview's three arms have exact 3-fold rotational symmetry about the origin, so their
-// combined centroid does sit at (0,0) — but a 3-fold-symmetric shape's axis-aligned *bounding box*
+// combined centroid does sit at (0,0) - but a 3-fold-symmetric shape's axis-aligned *bounding box*
 // isn't centered on its centroid (the same reason an equilateral triangle's bounding box isn't square
 // around its own center: extremes at 120° apart don't cancel out on both axes the way an even-fold
 // shape's would). At icon size that reads as a visibly off-center glyph, more so than any of the other
-// patterns here — rings/polygon land back on (0,0) exactly, star/flower drift only vertically — even
+// patterns here - rings/polygon land back on (0,0) exactly, star/flower drift only vertically - even
 // though the underlying math is already perfectly balanced. Computed once from the same sample points
 // buildSpiralArmPath draws (not measured via SVG layout, which isn't available cross-platform), then
 // applied as a corrective translate so the rendered icon's visual bounding box, not just its centroid,
@@ -61,11 +61,11 @@ type PatternIconProps = {
 
 // A small static preview of each pattern, built from the same path math the live patterns animate
 // (buildSpiralArmPath, buildStarPath, buildPolygonPath, buildStarburstPath) rather than a hand-drawn
-// stand-in glyph — so picking one shows you what you're actually about to get, not just a generic icon.
+// stand-in glyph - so picking one shows you what you're actually about to get, not just a generic icon.
 export function PatternIcon({ pattern, color, size = 32 }: PatternIconProps) {
   return (
     // translateX/Y: the same flat, on-device-calibrated nudge MdIcon applies to every font-glyph
-    // icon in the app (see its own comment) — this is a custom SVG shape rather than a font glyph, so
+    // icon in the app (see its own comment) - this is a custom SVG shape rather than a font glyph, so
     // it doesn't go through MdIcon itself, but it sits in the same FAB slots as ones that do and needs
     // the same correction to read as consistently centered next to them.
     <Svg width={size} height={size} viewBox={`${-PREVIEW_BOUNDS} ${-PREVIEW_BOUNDS} ${PREVIEW_BOUNDS * 2} ${PREVIEW_BOUNDS * 2}`} style={{ transform: [{ translateX: GLOBAL_NUDGE_X }, { translateY: GLOBAL_NUDGE_Y }] }}>

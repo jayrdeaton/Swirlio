@@ -4,7 +4,7 @@ import * as reanimatedModule from 'react-native-reanimated'
 import { useLoopingProgress } from '@/hooks/useLoopingProgress'
 
 // The app-wide mock in jest.setup.ts already gives useSharedValue a persistent { value } (via a ref)
-// and a registry-backed useFrameCallback — exactly what this hook needs to be tested for real, the
+// and a registry-backed useFrameCallback - exactly what this hook needs to be tested for real, the
 // same way the bounce physics in useDragPointPhysics.ts is driven in swirlScreen.gesture.test.tsx: grab
 // the registered callback and invoke it with a fabricated FrameInfo instead of racing a real clock.
 type FrameCallbackHandle = { callback: (frameInfo: { timestamp: number; timeSincePreviousFrame: number | null; timeSinceFirstFrame: number }) => void }
@@ -48,7 +48,7 @@ describe('useLoopingProgress', () => {
   })
 
   // Colour cycle speed is the one caller that ever passes a negative speed straight through (see this
-  // hook's own rate comment) — Math.floor rounds toward -Infinity, so `next - Math.floor(next)` wraps a
+  // hook's own rate comment) - Math.floor rounds toward -Infinity, so `next - Math.floor(next)` wraps a
   // negative accumulation into [0,1) exactly the same way it wraps a positive one past 1.
   it('accumulates backward and wraps into the top of the range for a negative speed', async () => {
     const { result } = await renderHook(() => useLoopingProgress(6000, -2, false))
@@ -76,7 +76,7 @@ describe('useLoopingProgress', () => {
   })
 
   // The property this hook exists for: a speed change mid-lap takes effect immediately, from
-  // wherever progress already sits, at whatever rate is now current — no restarted animation, so
+  // wherever progress already sits, at whatever rate is now current - no restarted animation, so
   // there's nothing to snap or stutter on when it changes.
   it('applies a new speed immediately from wherever progress already sits, with no jump', async () => {
     const { result, rerender } = await renderHook(({ speed }: { speed: number }) => useLoopingProgress(6000, speed, false), { initialProps: { speed: 1 } })
@@ -84,7 +84,7 @@ describe('useLoopingProgress', () => {
     step(1500) // a quarter of the way through a 6000ms lap at speed 1
     expect(result.current.progress.value).toBeCloseTo(0.25, 5)
 
-    await rerender({ speed: 3 }) // now a 2000ms lap; no jump — progress stays exactly where it was
+    await rerender({ speed: 3 }) // now a 2000ms lap; no jump - progress stays exactly where it was
     expect(result.current.progress.value).toBeCloseTo(0.25, 5)
 
     step(500) // a quarter of a 2000ms lap at the new speed
