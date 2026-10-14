@@ -13,7 +13,7 @@ An interactive kaleidoscope toy driven by touch, tilt, and gravity physics (Expo
 ```bash
 npm run lint          # expo lint .
 npm run fix            # expo lint . --fix
-npm test               # Jest (32 suites, 690 tests)
+npm test               # Jest (32 suites, 664 tests: 642 run, 22 skipped)
 npm run test:watch     # Jest --watchAll
 npm run typecheck      # tsc
 npm run verify         # lint + test + typecheck
@@ -66,7 +66,7 @@ These flagged several genuinely correct patterns this codebase already relies on
 
 **2026-09-19 — dependency catch-up onto the latest published `@rific` and `@infinitetoken` versions, no source changes beyond one deleted mock.** `@rific/core` `^0.1.1` -> `^0.2.1`, `@rific/auto-paper` `^0.11.0` -> `^0.12.0`, `@rific/feedback-press` `^0.11.1` -> `^0.12.0`, `@infinitetoken/jest-config` `^0.2.3` -> `^0.4.0`, `@infinitetoken/tsconfig` `^0.4.1` -> `^0.5.0` (a 0.x caret range never picks up a new minor, so each needed an explicit range bump). Confirmed by an audit of the fleet's new shared extractions (`safeBack`, `useQuitConfirmation`, `ProfilesScreen`, `useThemedRootBackground`, `useFeedbackBridgeProps`, etc.) that none apply to this app: it is a single-screen app with no Redux, profiles, achievements, toasts or navigation stack to speak of, and its `FeedbackSoundBridge` never passes an `onChange`, so the `@rific/core` settings-context render-purity fix never fired here either — this bump is just staying current.
 - `src/__mocks__/@react-native-async-storage/async-storage.ts` was deleted: it was a one-line re-export of the package's own official Jest mock, which `@infinitetoken/jest-config@0.4.0`'s `asyncStorageMock` option now maps in by default via `moduleNameMapper`. Behavior is identical; one fewer file to maintain.
-- `@tastic/core` stays at `^0.3.0` on purpose: nothing in `src/` imports it, it is declared only because `@tastic/sprites` lists it as a peer (`>=0.1.0`). Bumping it to 0.8.x would additionally require adding `@tastic/edge-guard` as a peer for no benefit.
+- `@tastic/core` (now `^0.13.0`) is declared only because `@tastic/sprites` lists it as a peer; nothing in `src/` imports it. `@tastic/edge-guard` is still in `dependencies` from when older `@tastic/core` versions peered it, but core 0.13 no longer does and nothing imports it, so it's a removal candidate.
 - `tsconfig.json`'s inline `@shopify/react-native-skia` redirect is byte-for-byte what `@infinitetoken/tsconfig@0.5.0`'s new `skia-paths` fragment ships, so it was left as-is (a plain-JSON tsconfig can't `require()` the fragment anyway; see that package's README).
 - `npm run verify` before and after: identical (32 suites, 642 passed, 22 skipped — the CI-quarantined "on-screen controls visibility" block — 0 lint warnings, clean typecheck).
 
