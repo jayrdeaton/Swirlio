@@ -41,6 +41,7 @@
     "@shopify/react-native-skia": "2.6.2",
     "@tastic/core": "^0.13.0",
     "@tastic/edge-guard": "^0.1.4",
+    "@tastic/hud": "^0.14.2",
     "@tastic/sprites": "^0.2.0",
     "eslint-plugin-package-json": "^1.7.1",
     "expo": "~57.0.28",

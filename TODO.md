@@ -37,16 +37,8 @@ Other:
 
 The README already writes these in Title Case (Shake to Randomize, Auto-Hide Delay, Dash-Dot, and so on), so it should not need changes once the UI matches. "Edge Guard" is already Title Case.
 
-## First-run onboarding screen
+## Onboarding follow-ups
 
-Jay wants a first-run onboarding screen that explains the gestures and features. Not built yet. It should cover:
+The first-run guide is built (see CLAUDE.md, "How-to-play guide"). It was kept to five cards, so these items from the original wish list are not in it: Audio Reactive and its mic prompt, randomize and undo (per-group Randomize, the forward tweak, back through look history), the two-finger long press (stop and snap), throwing, and Edge Guard. Add a card only if one of these turns out to need teaching; a new card alone is not a reason to bump `GUIDE_VERSION`.
 
-- What each canvas gesture does: drag (glide to finger), throw (bounce off edges), drag farther out (spin and zoom), tap (swap colors), two-finger tap (next pattern), two-finger long press (stop spin and snap), pinch and twist.
-- Gesture targets (Pattern, Crop, Particles, Mirror, Gravity) and how drag, pinch, and twist change meaning per target.
-- Tilt and gravity: tilting rolls the swirl, the gravity well pulls or pushes.
-- Audio Reactive: the mic drives the swirl (and the permission prompt it triggers).
-- Randomize and undo: per-group Randomize, Shake to Randomize, the forward tweak button, and back through look history.
-- Auto-hiding controls: they fade after the Auto-Hide Delay, and touching a top corner or the bottom edge brings them back.
-- Edge Guard (iOS): an opt-in for when an edge swipe keeps leaving the app.
-
-Likely pattern: the fleet games' how-to-play guide from `@tastic/hud/guide`. See LightCycles and AirHockey: `src/constants/guide.ts` (`GUIDE_VERSION`), `src/constants/guideSteps.tsx` (the cards), `src/redux/guideSlice.ts` (`createGuideSlice`, persisted "seen this version" flag), `src/components/GuideHost.tsx`, plus `guideSlice.test.ts` and `guideSteps.test.tsx`. Swirlio has no Redux or `@tastic/hud` today, so this means either adopting both or persisting a "seen" version in its own AsyncStorage key the way `PhotosensitivityWarning` does (`photosensitivity-warning-acknowledged`). Decide how it should sequence with the photosensitivity warning on first launch, and add a way to replay it from the Settings group.
+The "How to play" FAB label is sentence case to match the rest of the Settings sheet; it becomes "How to Play" in the Title Case pass above.

@@ -18,7 +18,7 @@ import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-c
 import { ControlGroupBottomSheetContent } from '@/components/ControlGroupBottomSheetContent'
 import { ControlGroupTopSheetContent } from '@/components/ControlGroupTopSheetContent'
 import { EdgeGuardBridge } from '@/components/EdgeGuardBridge'
-import { PhotosensitivityWarning } from '@/components/PhotosensitivityWarning'
+import { GuideHost } from '@/components/GuideHost'
 import { MONOCHROME_BLACK, MONOCHROME_WHITE } from '@/constants/fabTheme'
 import { ControlGroupBottomSheetProvider, ControlGroupProvider, ControlGroupTopSheetProvider } from '@/hooks/controlGroups'
 import { SpeedRateBridgeProvider } from '@/hooks/speedRateBridge'
@@ -169,12 +169,17 @@ export default function RootLayout() {
                         so open()/close() (and every trigger FAB that calls them) are completely unaffected; this
                         just removes the swipe gesture's own always-on 24px hit-band along the true top/bottom
                         edges, which otherwise sits above (and steals touches from) any FAB placed within it. */}
-                        <ControlGroupTopSheetProvider content={<ControlGroupTopSheetContent />} enabled={false}>
-                          <ControlGroupBottomSheetProvider content={<ControlGroupBottomSheetContent />} enabled={false}>
-                            <Stack screenOptions={{ headerShown: false }} />
-                            <PhotosensitivityWarning />
-                          </ControlGroupBottomSheetProvider>
-                        </ControlGroupTopSheetProvider>
+                        {/* GuideHost also mounts the first-launch PhotosensitivityWarning, so it can hold the
+                        how-to-play guide back until that's cleared. Wraps both sheet providers, not just the
+                        Stack: the Settings sheet's "How to play" FAB renders inside the top sheet's own
+                        provider, which would otherwise sit outside GuideProvider's context. */}
+                        <GuideHost>
+                          <ControlGroupTopSheetProvider content={<ControlGroupTopSheetContent />} enabled={false}>
+                            <ControlGroupBottomSheetProvider content={<ControlGroupBottomSheetContent />} enabled={false}>
+                              <Stack screenOptions={{ headerShown: false }} />
+                            </ControlGroupBottomSheetProvider>
+                          </ControlGroupTopSheetProvider>
+                        </GuideHost>
                       </SpeedRateBridgeProvider>
                     </ControlGroupProvider>
                   </SwirlRandomizeProvider>

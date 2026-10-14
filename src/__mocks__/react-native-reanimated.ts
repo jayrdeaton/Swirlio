@@ -97,6 +97,9 @@ const Animated = {
   withRepeat: (value: unknown) => value,
   withSequence: passthroughLast,
   useFrameCallback,
+  // @tastic/hud's guide card and SwipeHint, and this app's own GuideArt, all read it to decide whether
+  // to animate at all.
+  useReducedMotion: () => false,
   cancelAnimation: jest.fn(),
   interpolate: passthrough,
   interpolateColor: () => '#000000',

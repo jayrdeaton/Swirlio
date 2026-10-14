@@ -13,7 +13,7 @@ An interactive kaleidoscope toy driven by touch, tilt, and gravity physics (Expo
 ```bash
 npm run lint          # expo lint .
 npm run fix            # expo lint . --fix
-npm test               # Jest (33 suites, 668 tests: 646 run, 22 skipped)
+npm test               # Jest (35 suites, 682 tests: 660 run, 22 skipped)
 npm run test:watch     # Jest --watchAll
 npm run typecheck      # tsc
 npm run verify         # lint + test + typecheck
@@ -81,6 +81,15 @@ These flagged several genuinely correct patterns this codebase already relies on
 - `src/components/EdgeGuardBridge.tsx` is the one `useEdgeGestureGuard` call, mounted once in `_layout.tsx` as a null-rendering sibling inside `SwirlSettingsProvider` (same shape as `HapticsSettingsBridge`). Unlike the games' bridge, there's no `liveplay.activelyPlaying` to AND with: the whole screen is the touch canvas for as long as the app is open.
 - The toggle is a `SettingToggleFab` labeled "Edge Guard" (shield icon) in the Settings group's top sheet, iOS-only (`isIOS`, hidden on Android and web). The games' "Requires a second swipe" description has no slot in a FAB, so it lives in the README and the toggle's own comment.
 - Tests: `src/__tests__/components/EdgeGuardBridge.test.tsx` (bridge passes the setting through, follows live toggles) and `useSwirlSettings.test.tsx` (default off, hydration, non-boolean rejected, setter, reset carve-out).
+
+## How-to-play guide
+
+The first-run onboarding is the fleet games' shared one, `@tastic/hud/guide` (`GuideProvider` + `HowToPlayDialog`), imported only through that entry point (it's built to stay free of the package's optional peers, so nothing else from `@tastic/hud` is needed). Wired like the games' own guides, adapted to having no Redux and one screen:
+
+- `src/components/GuideHost.tsx` wraps both control-group sheet providers in `_layout.tsx` (not just the Stack: the top sheet's content renders inside its own provider, and the Settings "How to play" FAB there needs `useGuide()`). The seen version lives under its own AsyncStorage key (`constants/guide.ts`), not in `useSwirlSettings`, so Reset All never re-shows it.
+- GuideHost also mounts `PhotosensitivityWarning` and holds auto-show until that's cleared (its `onCleared`) and the stored version has loaded, so the two never stack on a fresh install.
+- Cards are `constants/guideSteps.tsx` (pure, varies by touch vs. desktop and native vs. web; its own comment records the code each sentence was checked against), illustrated by `components/GuideArt.tsx` (Views, icons and Reanimated only, no Skia).
+- Bump `GUIDE_VERSION` only when a gesture change makes a card wrong; a bump re-shows the guide to everyone.
 
 ## Testing
 

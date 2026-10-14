@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Button } from '@rific/feedback-press'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { Portal, Text, useTheme } from 'react-native-paper'
 import Animated, { Easing, useAnimatedStyle, withTiming } from 'react-native-reanimated'
@@ -12,22 +12,38 @@ import { MdIcon } from './MdIcon'
 const STORAGE_KEY = 'photosensitivity-warning-acknowledged'
 const FADE_DURATION_MS = 250
 
+type Props = {
+  // Fires once the warning is out of the way: right after the storage check finds it already
+  // acknowledged, or when the player taps "I understand". GuideHost holds the first-run guide back
+  // until then, so the two never stack on a fresh install.
+  onCleared?: () => void
+}
+
 // Shown once, ever, on first launch - the swirl's rapid color cycling and audio-reactive pulsing are
 // exactly the kind of flashing content that can trigger seizures in people with photosensitive
 // epilepsy. A storage read failure (rare, but AsyncStorage can throw) errs toward showing the warning
 // rather than silently skipping it, since the cost of an extra tap is far lower than the cost of
 // skipping a safety notice.
-export function PhotosensitivityWarning() {
+export function PhotosensitivityWarning({ onCleared }: Props) {
   const { colors } = useTheme()
   const [visible, setVisible] = useState(false)
   const [checked, setChecked] = useState(false)
+
+  // A ref so the one-shot storage check below never re-runs just because a caller passed a fresh
+  // inline callback on a later render.
+  const onClearedRef = useRef(onCleared)
+  useEffect(() => {
+    onClearedRef.current = onCleared
+  }, [onCleared])
 
   useEffect(() => {
     let isMounted = true
 
     AsyncStorage.getItem(STORAGE_KEY)
       .then((value) => {
-        if (isMounted && value !== 'true') setVisible(true)
+        if (!isMounted) return
+        if (value === 'true') onClearedRef.current?.()
+        else setVisible(true)
       })
       .catch(() => {
         if (isMounted) setVisible(true)
@@ -47,6 +63,7 @@ export function PhotosensitivityWarning() {
 
   function acknowledge() {
     setVisible(false)
+    onCleared?.()
     AsyncStorage.setItem(STORAGE_KEY, 'true').catch(() => {
       // ignore persistence errors - worst case the warning reappears next launch
     })

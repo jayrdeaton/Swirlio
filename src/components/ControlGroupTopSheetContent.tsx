@@ -1,5 +1,6 @@
 import { useThemeSettings } from '@rific/auto-paper'
 import { useUpdater } from '@rific/updater'
+import { useGuide } from '@tastic/hud/guide'
 import { Platform, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
@@ -52,6 +53,10 @@ export function ControlGroupTopSheetContent() {
   // ThemeSettingsContext instead of useSwirlSettings - see _layout.tsx's MonochromeThemeBridge for
   // how `appearance` feeds back into the forced black/white accent.
   const { settings: themeSettings, set: setThemeSettings } = useThemeSettings()
+  // Replays the how-to-play cards (see GuideHost), the fleet games' Settings "How to Play" row. The
+  // sheet is left open underneath: the card's backdrop covers it, and Ready lands the player back
+  // where they were.
+  const { open: openGuide } = useGuide()
 
   // Renders whatever the sheet was last opened to even while it's animating closed, rather than
   // going blank - same reasoning as ControlGroupProvider not resetting activeGroup on close.
@@ -366,6 +371,7 @@ export function ControlGroupTopSheetContent() {
               uses. Hidden on web for the same reason Shake/Audio reactive/Haptics are: expo-updates has
               no web target, so useUpdater's own check() just shows an "unsupported on web" Alert
               instead of ever actually checking - nothing here for the button to do. */}
+              <ActionFab icon='help-circle-outline' label='How to play' onPress={openGuide} />
               {!isWeb && <ActionFab icon={checkingForUpdate ? 'progress-download' : 'download'} label={`Update v${release.otaVersion}`} disabled={checkingForUpdate} onPress={checkForUpdate} />}
             </FabRow>
           </>
