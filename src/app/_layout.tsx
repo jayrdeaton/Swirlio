@@ -6,8 +6,10 @@ import { Provider as AutoPaperProvider, useThemeSettings } from '@rific/auto-pap
 import { DrawerProvider } from '@rific/drawer'
 import { FeedbackPressProvider, useHapticSettings } from '@rific/feedback-press'
 import * as ExpoBlur from 'expo-blur'
+import Constants from 'expo-constants'
 import { useFonts } from 'expo-font'
 import { Stack } from 'expo-router'
+import Head from 'expo-router/head'
 import * as SplashScreen from 'expo-splash-screen'
 import React, { useEffect, useMemo } from 'react'
 import { Appearance, LogBox, Platform, StyleSheet, useColorScheme } from 'react-native'
@@ -123,6 +125,10 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={styles.root}>
+      {/* The web tab title, ahead of every gate so the static export's HTML has it too */}
+      <Head>
+        <title>{Constants.expoConfig?.name}</title>
+      </Head>
       {/* initialMetrics seeds the very first paint with the native module's synchronously-cached
       frame/insets instead of {top:0,...} - react-native-safe-area-context's own documented fix for
       the first-render-zero-insets race. Without it, anything reading insets.top/insets.bottom on

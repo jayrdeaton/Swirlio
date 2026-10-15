@@ -76,7 +76,8 @@
         }
       ],
       "expo-asset",
-      "@tastic/edge-guard"
+      "@tastic/edge-guard",
+      "./plugins/withSceneDelegate"
     ],
     "runtimeVersion": {
       "policy": "fingerprint"
