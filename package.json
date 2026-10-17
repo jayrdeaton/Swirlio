@@ -33,7 +33,7 @@
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/slider": "5.2.0",
     "@rific/auto-paper": "^0.13.2",
-    "@rific/core": "^0.3.1",
+    "@rific/core": "^0.4.1",
     "@rific/drawer": "^0.7.1",
     "@rific/feedback-press": "^0.13.0",
     "@rific/splash-gate": "^0.2.3",
