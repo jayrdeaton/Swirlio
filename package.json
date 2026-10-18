@@ -34,7 +34,7 @@
     "@react-native-community/slider": "5.2.1",
     "@rific/auto-paper": "^0.13.3",
     "@rific/core": "^0.5.0",
-    "@rific/drawer": "^0.8.1",
+    "@rific/drawer": "^0.8.2",
     "@rific/feedback-press": "^0.13.1",
     "@rific/splash-gate": "^0.2.3",
     "@rific/updater": "^0.7.1",
