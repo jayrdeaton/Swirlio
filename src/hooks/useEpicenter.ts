@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useWindowDimensions } from 'react-native'
-import { Gesture, LongPressGesture, PanGesture } from 'react-native-gesture-handler'
+import { Gesture, type LegacyLongPressGesture, type LegacyPanGesture } from 'react-native-gesture-handler'
 import { runOnJS, SharedValue, useDerivedValue, useSharedValue } from 'react-native-reanimated'
 
 import { clamp } from '@/constants/clamp'
@@ -87,10 +87,10 @@ export type Epicenter = {
   // transient-debug-visibility signal (see Spiral.tsx's gravity marker) - the physics itself never
   // reads this back.
   gravityActive: SharedValue<boolean>
-  panGesture: PanGesture
+  panGesture: LegacyPanGesture
   // The one-finger, held-still counterpart to panGesture - see its own comment further down for why
   // this is a second gesture rather than a config tweak on panGesture itself.
-  longPressGesture: LongPressGesture
+  longPressGesture: LegacyLongPressGesture
   // Always the pattern's own epicentre, regardless of which targets are currently active - used by
   // the tap-to-recenter gesture in index.tsx, which detects "near the epicentre" by the pattern's
   // position specifically.

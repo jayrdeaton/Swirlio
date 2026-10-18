@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { isDarkColor } from '@rific/auto-paper'
 import { useVibration } from '@rific/feedback-press'
+import Constants from 'expo-constants'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
@@ -297,6 +298,13 @@ const GROUP_GESTURE_TARGET: Partial<Record<ControlGroup, GestureTarget>> = {
   mirror: 'mirror',
   particles: 'particles',
   pattern: 'pattern'
+}
+
+// The web tab title, in the static export's HTML. Since SDK 58, expo-router/head's <Head> only sets it
+// after hydration, so the page showed its URL until the JS loaded. Route-level metadata is rendered into
+// the HTML itself; this is the app's only page.
+export function generateMetadata() {
+  return { title: Constants.expoConfig?.name }
 }
 
 export default function SwirlScreen() {

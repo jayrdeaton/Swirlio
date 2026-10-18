@@ -1,5 +1,5 @@
 import type { SkPoint } from '@shopify/react-native-skia'
-import { Gesture, LongPressGesture, PanGesture } from 'react-native-gesture-handler'
+import { Gesture, type LegacyLongPressGesture, type LegacyPanGesture } from 'react-native-gesture-handler'
 import { SharedValue, useFrameCallback, useSharedValue } from 'react-native-reanimated'
 
 import { buildFlowerPoints } from '@/constants/flowerMath'
@@ -128,8 +128,8 @@ export type ParticleField = {
   shapeIndex: SharedValue<Float32Array>
   borderColorIndex: SharedValue<Float32Array>
   particleFrameTick: SharedValue<number>
-  particlePanGesture: PanGesture
-  particleGatherGesture: LongPressGesture
+  particlePanGesture: LegacyPanGesture
+  particleGatherGesture: LegacyLongPressGesture
 }
 
 // The shared base point list for whichever particleShape is currently active, centred on the origin -

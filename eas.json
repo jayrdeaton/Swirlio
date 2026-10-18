@@ -16,18 +16,12 @@
       "environment": "preview",
       "android": {
         "buildType": "apk"
-      },
-      "ios": {
-        "image": "macos-tahoe-26.5-xcode-26.6"
       }
     },
     "production": {
       "autoIncrement": true,
       "channel": "production",
-      "environment": "production",
-      "ios": {
-        "image": "macos-tahoe-26.5-xcode-26.6"
-      }
+      "environment": "production"
     }
   },
   "submit": {

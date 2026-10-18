@@ -6,7 +6,7 @@ This file provides guidance to Claude Code when working in this repository.
 
 An interactive kaleidoscope toy driven by touch, tilt, and gravity physics (Expo/React Native, Skia-rendered). Part of the `@rific`/InfiniteToken app ecosystem - depends on `@rific/auto-paper`, `@rific/drawer`, `@rific/feedback-press`, `@rific/splash-gate`, `@rific/updater`, `@tastic/edge-guard`, `@tastic/sprites`.
 
-**Expo has changed.** Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code - don't rely on general Expo knowledge, this app is on SDK 57 specifically.
+**Expo has changed.** Read the exact versioned docs at https://docs.expo.dev/versions/v58.0.0/ before writing any code - don't rely on general Expo knowledge, this app is on SDK 58 specifically.
 
 ## Commands
 
@@ -29,7 +29,7 @@ Always run `npm run lint` before finishing any task. This is an app (`"private":
 
 An earlier pass implemented this via a separate `npm` `pre<script>` hook per target (`"prebuild:development": "npm run verify"` sitting before `"build:development"`, mirroring how npm library packages gate `npm version` behind `preversion`) and was deliberately reverted. The hook mechanism exists to intercept *builtin* npm commands you don't control the invocation of - `npm version` isn't a script you write, so `preversion` is the only way to gate it. `build:development` and `update` are scripts we author ourselves; there's no builtin invocation to intercept, so wrapping them in a same-named hook is pure indirection (3 build targets + `update` = 4 extra hook scripts doing nothing a direct `&&` prefix doesn't already do). Inline chaining is the correct form here - reserve the `pre<script>`/`post<script>` mechanism for actual npm lifecycle commands.
 
-**iOS 27 / Xcode 27:** see "Xcode 26 image pin" at the end of this file. `pod install` from a non-UTF-8 shell fails with a Unicode normalization error: set `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`.
+**iOS 27 / Xcode 27:** SDK 58 builds with Xcode 27 as-is (see "Expo SDK 58" at the end of this file). `pod install` from a non-UTF-8 shell fails with a Unicode normalization error: set `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`.
 
 ## Tooling
 
@@ -116,6 +116,11 @@ src/
 
 `.github/workflows/ci.yml` uses the shared reusable workflow (`infinitetoken/Workflows/.github/workflows/npm-ci.yml@v1`, defaults to `npm run verify`) - previously a hand-rolled workflow running `npm ci && npm run ci`. The `ci` npm script was renamed to `verify` to match.
 
-## Xcode 26 image pin (remove on Expo SDK 58)
+## Expo SDK 58 (2026-10-18)
 
-`eas.json` pins the `preview` and `production` iOS builds to `macos-tahoe-26.5-xcode-26.6` (set fleet-wide 2026-10-14). An app linked against the iOS 27 SDK aborts at launch on iOS 27 ("UIScene life cycle is required for apps built with this SDK") unless it adopts the UIScene life cycle, which SDK 57's native template doesn't do and SDK 58's does. A build made with Xcode 26 runs fine on iOS 27. **When this app moves to Expo SDK 58, remove both `ios.image` pins and this section**, so builds go back to EAS's default image for the SDK. Local builds (`eas build --local`, `expo run:ios`) ignore the pin and use this Mac's Xcode 27; `plugins/withSceneDelegate.js` (listed in `app.json`, added fleet-wide 2026-10-15) makes them run on iOS 27 by wiring SDK 57's own `ExpoAppSceneDelegate` the way SDK 58's template does: `AppDelegate` conforms to `ExpoReactNativeFactoryProvider` and stops creating the window and overriding the Linking methods, `Info.plist` gets the scene manifest, and `SceneDelegate.swift` joins the app target. It edits `AppDelegate.swift` last (a finalized mod, whatever the `app.json` order), keeps any lines other plugins add after `startReactNative` (`@tastic/edge-guard`'s `_ = tastic_edgeGuardSwizzle`), throws on anything else unexpected rather than half-apply, and does nothing on SDK 58+. **On SDK 58, also delete the plugin and its `app.json` entry.** Solitaire's CLAUDE.md records how it was verified.
+Moved from SDK 57 (React Native 0.88, React 19.3, Reanimated 4.7, gesture-handler 3.3, Skia 2.14), following Solitaire and Snake. SDK 58's native template adopts the UIScene life cycle that apps linked against the iOS 27 SDK need, so the SDK 57 workarounds are gone: `plugins/withSceneDelegate.js` (and its `app.json` entry) and the `macos-tahoe-26.5-xcode-26.6` image pins in `eas.json`. Builds use EAS's default image for SDK 58 and, locally, this Mac's Xcode 27. An iOS prebuild generates `SceneDelegate.swift` and the scene manifest itself, and `@tastic/edge-guard`'s `_ = tastic_edgeGuardSwizzle` still lands in the new `AppDelegate.swift`. `npx expo install --fix` also added `expo-status-bar` to `app.json`'s plugins (it has a config plugin now; with no options it writes nothing).
+
+- **gesture-handler 3:** `Gesture.Pan()`/`Gesture.LongPress()` etc. still work but are deprecated in favor of hooks (`usePanGesture`), and the bare `PanGesture`/`LongPressGesture` type names now mean the hook API's types. The builder results are typed with `LegacyPanGesture`/`LegacyLongPressGesture` (`useEpicenter.ts`, `useParticleField.ts`). Moving to the hook API is not done (see TODO.md).
+- **Web tab title:** since SDK 58, `expo-router/head`'s `<Head>` only sets the title after hydration, so the static export's HTML had none. `src/app/index.tsx` exports `generateMetadata()` (route-level metadata, rendered into the HTML), and the `<Head>` in `_layout.tsx` is gone. It only covers `index.html`; the generated `+not-found`/`_sitemap` pages have no title.
+- **Tests:** need `@react-native/jest-preset` `^0.88.0` installed (jest-expo 58's peer; the fleet's `legacy-peer-deps` means npm never adds it). `npx expo install --fix` moved Jest to 30 (`jest` `~30.5.2`, `@types/jest` `30.0.0`), which jest-expo 58 itself depends on; same suite counts as on SDK 57.
+- **React Native 0.88 strict types** are deferred fleet-wide through `@infinitetoken/tsconfig` 0.6 (see TODO.md).
