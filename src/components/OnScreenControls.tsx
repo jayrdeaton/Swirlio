@@ -1,4 +1,5 @@
 import { BlurView, useBlur } from '@rific/auto-paper'
+import { callWorkletCallback, useWorkletCallback } from '@rific/core'
 import { FAB, useHoldToRepeat, useHoldToRepeatByKey, useVibration } from '@rific/feedback-press'
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
@@ -610,6 +611,12 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     if (!gestureFanOpen) clearFanDwell()
   }, [clearFanDwell, gestureFanOpen])
 
+  // The fan gesture is rebuilt every render, so it reaches JS only through these keys: react-native-worklets pins every
+  // runOnJS target for as long as the calling worklet's copy lives, which would keep this component alive forever.
+  const fanBeginKey = useWorkletCallback(handleFanBegin)
+  const fanZoneChangedKey = useWorkletCallback(handleFanZoneChanged)
+  const fanFinalizeKey = useWorkletCallback(handleFanFinalize)
+
   // maxPointers(1): a second finger landing mid-drag (e.g. reaching for a group trigger with the other
   // hand) shouldn't also feed into this gesture's own hit-testing. onStart/onEnd are deliberately unused
   // - onBegin already does everything "the gesture started" needs (see handleFanBegin), and onFinalize
@@ -618,19 +625,11 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // activate" case to handle the way useEpicenter.ts's own panGesture/longPressGesture pair does.
   const fanGesture = Gesture.Pan()
     .maxPointers(1)
-    // react-hooks/refs flags runOnJS(handleFanBegin/handleFanZoneChanged/handleFanFinalize) below as
-    // "may read a ref during render" - a false positive for this whole chain: runOnJS just wraps each
-    // callback for the UI thread to invoke later, off an actual gesture event, so the refs those
-    // callbacks close over are never touched while this chain itself is being built during render, the
-    // same class of known-false-positive this codebase already disables react-hooks/immutability for
-    // elsewhere (see index.tsx's resetRotation comment).
-    // eslint-disable-next-line react-hooks/refs
     .onBegin(() => {
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       fanZone.value = -1
-      runOnJS(handleFanBegin)()
+      runOnJS(callWorkletCallback)(fanBeginKey)
     })
-    // eslint-disable-next-line react-hooks/refs
     .onUpdate((event) => {
       let nearestIndex = -1
       let nearestDistance = Infinity
@@ -648,12 +647,11 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
       if (nextZone !== fanZone.value) {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
         fanZone.value = nextZone
-        runOnJS(handleFanZoneChanged)(nextZone)
+        runOnJS(callWorkletCallback)(fanZoneChangedKey, nextZone)
       }
     })
-    // eslint-disable-next-line react-hooks/refs
     .onFinalize(() => {
-      runOnJS(handleFanFinalize)()
+      runOnJS(callWorkletCallback)(fanFinalizeKey)
     })
 
   const animatedStyle = useAnimatedStyle(() => ({

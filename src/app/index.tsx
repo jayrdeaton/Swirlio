@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { isDarkColor } from '@rific/auto-paper'
+import { callWorkletCallback, useWorkletCallback } from '@rific/core'
 import { useVibration } from '@rific/feedback-press'
 import Constants from 'expo-constants'
 import { StatusBar } from 'expo-status-bar'
@@ -1986,6 +1987,49 @@ export default function SwirlScreen() {
   // which are separate elements outside this subtree. Matches where pinchGesture itself is scoped.
   const canvasRef = useRef<View>(null)
 
+  // The gestures below are rebuilt every render and call back to JS only through this one key: react-native-worklets
+  // keeps a native strong reference to every runOnJS target for as long as the calling worklet's copy lives, so
+  // handing it this component's own callbacks would pin the component forever (see @rific/core's useWorkletCallback).
+  type JsBridgeCall = 'hideControls' | 'selection' | 'setTightness' | 'setMirrorGap' | 'setGravity' | 'setCropRadius' | 'setParticleSize' | 'setMirrorAlternateColors' | 'medium' | 'setMirrorLines' | 'setParticleCount' | 'setStrokeWidth' | 'setBounceFriction' | 'setHoleRadius' | 'handleCanvasTap' | 'stopAndSnapGesture' | 'nextPattern'
+  const jsBridge = useWorkletCallback((name: JsBridgeCall, value?: number | boolean) => {
+    switch (name) {
+      case 'hideControls':
+        return hideControls()
+      case 'selection':
+        return selection()
+      case 'medium':
+        return medium()
+      case 'handleCanvasTap':
+        return handleCanvasTap()
+      case 'stopAndSnapGesture':
+        return stopAndSnapGesture()
+      case 'nextPattern':
+        return nextPattern()
+      case 'setTightness':
+        return setTightness(value as number)
+      case 'setMirrorGap':
+        return setMirrorGap(value as number)
+      case 'setGravity':
+        return setGravity(value as number)
+      case 'setCropRadius':
+        return setCropRadius(value as number)
+      case 'setParticleSize':
+        return setParticleSize(value as number)
+      case 'setMirrorAlternateColors':
+        return setMirrorAlternateColors(value as boolean)
+      case 'setMirrorLines':
+        return setMirrorLines(value as number)
+      case 'setParticleCount':
+        return setParticleCount(value as number)
+      case 'setStrokeWidth':
+        return setStrokeWidth(value as number)
+      case 'setBounceFriction':
+        return setBounceFriction(value as number)
+      case 'setHoleRadius':
+        return setHoleRadius(value as number)
+    }
+  })
+
   const pinchGesture = Gesture.Pinch()
     .onStart(() => {
       startMirrorGap.value = mirrorGap.value
@@ -1995,7 +2039,7 @@ export default function SwirlScreen() {
       startCropRadius.value = cropRadius.value
       startParticleSize.value = particleSize.value
       gravityStuckAtZero.value = Math.abs(gravity.value) <= GRAVITY_ZERO_STICKY_ZONE
-      runOnJS(hideControls)()
+      runOnJS(callWorkletCallback)(jsBridge, 'hideControls')
     })
     .onUpdate((event) => {
       // Live 1:1 tracking while the fingers move - the mirror-side counterpart to rotationGesture's
@@ -2041,7 +2085,7 @@ export default function SwirlScreen() {
         // Fires once, right on arrival - not on every frame spent held inside the zone, and not again
         // on the way back out (leaving is silent; see GRAVITY_ZERO_STICKY_ZONE's own comment for why
         // landing here is the moment worth confirming, the same as reverseGravity's own tap).
-        if (stuckAtZero && !gravityStuckAtZero.value) runOnJS(selection)()
+        if (stuckAtZero && !gravityStuckAtZero.value) runOnJS(callWorkletCallback)(jsBridge, 'selection')
         gravityStuckAtZero.value = stuckAtZero
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         gravity.value = stuckAtZero ? 0 : clamp(rawGravity, MIN_GRAVITY, MAX_GRAVITY)
@@ -2082,7 +2126,7 @@ export default function SwirlScreen() {
         const nextTightness = clamp(startTightness.value + (event.scale - 1) * PINCH_SCALE_TO_TIGHTNESS_SCALE, MIN_TIGHTNESS, MAX_TIGHTNESS)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         tightness.value = nextTightness
-        runOnJS(setTightness)(nextTightness)
+        runOnJS(callWorkletCallback)(jsBridge, 'setTightness', nextTightness)
       }
       if (targetsMirrorPinch) {
         // Recomputed from event.scale with the same formula as onUpdate above, rather than trusting
@@ -2095,7 +2139,7 @@ export default function SwirlScreen() {
         const nextMirrorGap = clamp(startMirrorGap.value + (event.scale - 1) * PINCH_SCALE_TO_MIRROR_GAP_SCALE, MIN_MIRROR_GAP, MAX_MIRROR_GAP)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         mirrorGap.value = nextMirrorGap
-        runOnJS(setMirrorGap)(nextMirrorGap)
+        runOnJS(callWorkletCallback)(jsBridge, 'setMirrorGap', nextMirrorGap)
       }
       if (targetsGravityPinch) {
         // Recomputed from event.scale rather than trusting gravity.value already landed here from the
@@ -2106,12 +2150,12 @@ export default function SwirlScreen() {
         // to commit the right value here).
         const rawGravity = startGravity.value - (event.scale - 1) * PINCH_SCALE_TO_GRAVITY_SCALE
         const stuckAtZero = Math.abs(rawGravity) <= GRAVITY_ZERO_STICKY_ZONE
-        if (stuckAtZero && !gravityStuckAtZero.value) runOnJS(selection)()
+        if (stuckAtZero && !gravityStuckAtZero.value) runOnJS(callWorkletCallback)(jsBridge, 'selection')
         gravityStuckAtZero.value = stuckAtZero
         const nextGravity = stuckAtZero ? 0 : clamp(rawGravity, MIN_GRAVITY, MAX_GRAVITY)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         gravity.value = nextGravity
-        runOnJS(setGravity)(nextGravity)
+        runOnJS(callWorkletCallback)(jsBridge, 'setGravity', nextGravity)
       }
       if (targetsCropPinch) {
         // Recomputed from event.scale rather than trusting cropRadius.value already landed here from
@@ -2120,7 +2164,7 @@ export default function SwirlScreen() {
         const nextCropRadius = clamp(startCropRadius.value + (event.scale - 1) * PINCH_SCALE_TO_CROP_RADIUS_SCALE, MIN_CROP_RADIUS, MAX_CROP_RADIUS)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         cropRadius.value = nextCropRadius
-        runOnJS(setCropRadius)(nextCropRadius)
+        runOnJS(callWorkletCallback)(jsBridge, 'setCropRadius', nextCropRadius)
       }
       if (targetsParticlesPinch) {
         // Recomputed from event.scale rather than trusting particleSize.value already landed here
@@ -2129,12 +2173,12 @@ export default function SwirlScreen() {
         const nextParticleSize = clamp(startParticleSize.value + (event.scale - 1) * PINCH_SCALE_TO_PARTICLE_SIZE_SCALE, MIN_PARTICLE_SIZE, MAX_PARTICLE_SIZE)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         particleSize.value = nextParticleSize
-        runOnJS(setParticleSize)(nextParticleSize)
+        runOnJS(callWorkletCallback)(jsBridge, 'setParticleSize', nextParticleSize)
       }
       // Fired again on release (not just on start) so the on-screen controls get a full,
       // uninterrupted hide window measured from the end of the pinch - same reasoning as the
       // epicenter's onDragChange in useEpicenter.ts.
-      runOnJS(hideControls)()
+      runOnJS(callWorkletCallback)(jsBridge, 'hideControls')
     })
 
   // The web-only equivalent of pinchGesture above - see WHEEL_PINCH_DELTA_TO_SCALE's own comment
@@ -2252,7 +2296,7 @@ export default function SwirlScreen() {
       mirrorAlternateColorsLive.value = settings.mirrorAlternateColors
       startParticleCount.value = settings.particleCount
       particleCountLive.value = settings.particleCount
-      runOnJS(hideControls)()
+      runOnJS(callWorkletCallback)(jsBridge, 'hideControls')
     })
     .onUpdate((event) => {
       const degrees = (event.rotation * 180) / Math.PI
@@ -2303,8 +2347,8 @@ export default function SwirlScreen() {
         if (belowZero !== mirrorLinesBelowZero.value) {
           mirrorLinesBelowZero.value = belowZero
           mirrorAlternateColorsLive.value = !mirrorAlternateColorsLive.value
-          runOnJS(setMirrorAlternateColors)(mirrorAlternateColorsLive.value)
-          runOnJS(medium)()
+          runOnJS(callWorkletCallback)(jsBridge, 'setMirrorAlternateColors', mirrorAlternateColorsLive.value)
+          runOnJS(callWorkletCallback)(jsBridge, 'medium')
         }
         // Past 0, the count itself keeps climbing again from 0 (abs), same rate and step size as the
         // positive side - "focusing out" past the minimum doesn't dead-end, it rolls into counting
@@ -2312,8 +2356,8 @@ export default function SwirlScreen() {
         const nextMirrorLines = clamp(Math.abs(rawSteps), MIN_MIRROR_LINES, MAX_MIRROR_LINES)
         if (nextMirrorLines !== mirrorLinesLive.value) {
           mirrorLinesLive.value = nextMirrorLines
-          runOnJS(setMirrorLines)(nextMirrorLines)
-          runOnJS(selection)()
+          runOnJS(callWorkletCallback)(jsBridge, 'setMirrorLines', nextMirrorLines)
+          runOnJS(callWorkletCallback)(jsBridge, 'selection')
         }
       }
       // The particles target's own Focus job: particleCount, dialed the same click-stop way
@@ -2325,8 +2369,8 @@ export default function SwirlScreen() {
         const nextParticleCount = clamp(startParticleCount.value + Math.round(degrees / ROTATION_DEGREES_PER_PARTICLE_COUNT_STEP) * PARTICLE_COUNT_STEP, MIN_PARTICLE_COUNT, MAX_PARTICLE_COUNT)
         if (nextParticleCount !== particleCountLive.value) {
           particleCountLive.value = nextParticleCount
-          runOnJS(setParticleCount)(nextParticleCount)
-          runOnJS(selection)()
+          runOnJS(callWorkletCallback)(jsBridge, 'setParticleCount', nextParticleCount)
+          runOnJS(callWorkletCallback)(jsBridge, 'selection')
         }
       }
     })
@@ -2339,7 +2383,7 @@ export default function SwirlScreen() {
         const nextStrokeWidth = clamp(startStrokeWidth.value + degrees * ROTATION_DEGREES_TO_STROKE_WIDTH_SCALE, MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         strokeWidth.value = nextStrokeWidth
-        runOnJS(setStrokeWidth)(nextStrokeWidth)
+        runOnJS(callWorkletCallback)(jsBridge, 'setStrokeWidth', nextStrokeWidth)
       }
       if (targetsGravityRotation) {
         // Recomputed from event.rotation rather than trusting bounceFriction.value already landed
@@ -2349,7 +2393,7 @@ export default function SwirlScreen() {
         const nextBounceFriction = clamp(startBounceFriction.value + degrees * ROTATION_DEGREES_TO_FRICTION_SCALE, MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         bounceFriction.value = nextBounceFriction
-        runOnJS(setBounceFriction)(nextBounceFriction)
+        runOnJS(callWorkletCallback)(jsBridge, 'setBounceFriction', nextBounceFriction)
       }
       if (targetsCropRotation) {
         // Recomputed from event.rotation rather than trusting holeRadius.value already landed here
@@ -2359,11 +2403,11 @@ export default function SwirlScreen() {
         const nextHoleRadius = clamp(startHoleRadius.value + degrees * ROTATION_DEGREES_TO_HOLE_RADIUS_SCALE, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS)
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment above
         holeRadius.value = nextHoleRadius
-        runOnJS(setHoleRadius)(nextHoleRadius)
+        runOnJS(callWorkletCallback)(jsBridge, 'setHoleRadius', nextHoleRadius)
       }
       // mirrorLines/particleCount have nothing left to commit here - every step already went through
       // setMirrorLines/setParticleCount live, in onUpdate, the instant it crossed each threshold.
-      runOnJS(hideControls)()
+      runOnJS(callWorkletCallback)(jsBridge, 'hideControls')
     })
 
   // maxDistance matters a lot more here than it looks: RNGH's Tap gesture has NO distance limit by
@@ -2382,7 +2426,7 @@ export default function SwirlScreen() {
     .maxDistance(TAP_MAX_DISTANCE)
     .onEnd((_event, success) => {
       if (!success) return
-      runOnJS(handleCanvasTap)()
+      runOnJS(callWorkletCallback)(jsBridge, 'handleCanvasTap')
     })
 
   const twoFingerLongPressGesture = Gesture.LongPress()
@@ -2390,8 +2434,8 @@ export default function SwirlScreen() {
     .minDuration(LONG_PRESS_MS)
     .onStart(() => {
       // stopAndSnapGesture already fires its own medium() haptic internally, so nothing extra is needed here.
-      runOnJS(stopAndSnapGesture)()
-      runOnJS(hideControls)()
+      runOnJS(callWorkletCallback)(jsBridge, 'stopAndSnapGesture')
+      runOnJS(callWorkletCallback)(jsBridge, 'hideControls')
     })
 
   const twoFingerTapGesture = Gesture.Tap()
@@ -2399,10 +2443,10 @@ export default function SwirlScreen() {
     .maxDistance(TAP_MAX_DISTANCE)
     .onEnd((_event, success) => {
       if (!success) return
-      runOnJS(nextPattern)()
+      runOnJS(callWorkletCallback)(jsBridge, 'nextPattern')
       // Same reasoning as the freeze long-press above: kept separate from nextPattern so the
       // next-pattern FAB (which calls nextPattern directly) doesn't also hide the controls.
-      runOnJS(hideControls)()
+      runOnJS(callWorkletCallback)(jsBridge, 'hideControls')
     })
 
   // The canvas's own one-finger long press (useEpicenter.ts's longPressGesture - pulls whichever

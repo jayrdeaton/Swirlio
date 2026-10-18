@@ -1,3 +1,4 @@
+import { callWorkletCallback, useWorkletCallback } from '@rific/core'
 import { useEffect } from 'react'
 import { useWindowDimensions } from 'react-native'
 import { Gesture, type LegacyLongPressGesture, type LegacyPanGesture } from 'react-native-gesture-handler'
@@ -220,6 +221,15 @@ export function useEpicenter(
   tiltY: SharedValue<number>,
   tiltEnabled: SharedValue<boolean>
 ): Epicenter {
+  // The gestures and worklets below reach these callbacks only through keys: react-native-worklets pins every runOnJS
+  // target for as long as the calling worklet's copy lives, which would keep the caller's component alive forever.
+  const snapToCenterKey = useWorkletCallback(onSnapToCenter)
+  const dragChangeKey = useWorkletCallback(onDragChange)
+  const grabKey = useWorkletCallback(onGrab)
+  const mirrorRotationReleaseKey = useWorkletCallback(onMirrorRotationRelease)
+  const patternRotationReleaseKey = useWorkletCallback(onPatternRotationRelease)
+  const patternZoomReleaseKey = useWorkletCallback(onPatternZoomRelease)
+  const mirrorCycleReleaseKey = useWorkletCallback(onMirrorCycleRelease)
   const { height, width } = useWindowDimensions()
   const centerX = width / 2
   const centerY = height / 2
@@ -563,7 +573,7 @@ export function useEpicenter(
     }
 
     if (anySnapped) {
-      runOnJS(onSnapToCenter)()
+      runOnJS(callWorkletCallback)(snapToCenterKey)
     }
   }
 
@@ -679,7 +689,7 @@ export function useEpicenter(
             // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
             basePulsePaused.value = true
           }
-          runOnJS(onDragChange)()
+          runOnJS(callWorkletCallback)(dragChangeKey)
           return
         }
       }
@@ -688,10 +698,10 @@ export function useEpicenter(
       // already a deliberate grab. Live 1:1 tracking (see onUpdate below) takes over the moment you
       // actually move, interrupting this if it's still mid-flight.
       glideTargetsTo(event.x, event.y)
-      runOnJS(onDragChange)()
+      runOnJS(callWorkletCallback)(dragChangeKey)
       if (!grabFired.value) {
         grabFired.value = true
-        runOnJS(onGrab)()
+        runOnJS(callWorkletCallback)(grabKey)
       }
     })
     .onUpdate((event) => {
@@ -801,7 +811,7 @@ export function useEpicenter(
       // full, uninterrupted hide window measured from the END of a drag, rather than one that (for
       // a drag longer than the hide window) could run out and reveal the controls while a finger is
       // still on the screen.
-      runOnJS(onDragChange)()
+      runOnJS(callWorkletCallback)(dragChangeKey)
       if (outerFieldActive.value) {
         // "Let go while spinning" hands off to that exact angular rate as the new sustained
         // rotationSpeed/mirrorRotationSpeed (see index.tsx's own onPatternRotationRelease/
@@ -843,12 +853,12 @@ export function useEpicenter(
           const tangentialVelocityPxPerSec = ((angularVelocityDegPerSec * Math.PI) / 180) * distance
           const { snapTangential, snapRadial } = dominantAxisSnap(tangentialVelocityPxPerSec, filteredRadialVelocityPxPerSec)
           if (targetsMirror) {
-            runOnJS(onMirrorRotationRelease)(angularVelocityDegPerSec)
+            runOnJS(callWorkletCallback)(mirrorRotationReleaseKey, angularVelocityDegPerSec)
           } else if (targetsPattern) {
-            runOnJS(onPatternRotationRelease)(snapTangential ? 0 : angularVelocityDegPerSec)
+            runOnJS(callWorkletCallback)(patternRotationReleaseKey, snapTangential ? 0 : angularVelocityDegPerSec)
           }
           if (rawTargetsPattern) {
-            runOnJS(onPatternZoomRelease)((snapRadial ? 0 : filteredRadialVelocityPxPerSec) * RADIAL_PIXELS_TO_PULSE_SCALE)
+            runOnJS(callWorkletCallback)(patternZoomReleaseKey, (snapRadial ? 0 : filteredRadialVelocityPxPerSec) * RADIAL_PIXELS_TO_PULSE_SCALE)
           }
         } else {
           // No valid angle at this exact release point (see the ω formula's own comment above), so
@@ -880,7 +890,7 @@ export function useEpicenter(
           // own commit, is what avoids a stale-rate flash the instant this JS round-trip lands). Uses
           // rawTargetsMirror, not targetsMirror - this axis never redirects to pattern, see this file's
           // own targetsPattern/targetsMirror comment.
-          runOnJS(onMirrorCycleRelease)(foregroundCycleRate.value)
+          runOnJS(callWorkletCallback)(mirrorCycleReleaseKey, foregroundCycleRate.value)
         }
         if (rawTargetsPattern) {
           const foldedPulse = basePulse.value + manualPulseOffset.value
@@ -949,10 +959,10 @@ export function useEpicenter(
     .minDuration(LONG_PRESS_MS)
     .onStart((event) => {
       glideTargetsTo(event.x, event.y)
-      runOnJS(onDragChange)()
+      runOnJS(callWorkletCallback)(dragChangeKey)
       if (!grabFired.value) {
         grabFired.value = true
-        runOnJS(onGrab)()
+        runOnJS(callWorkletCallback)(grabKey)
       }
     })
     .onEnd(() => {

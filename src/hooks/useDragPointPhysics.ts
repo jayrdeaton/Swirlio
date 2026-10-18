@@ -1,3 +1,4 @@
+import { callWorkletCallback, useWorkletCallback } from '@rific/core'
 import { runOnJS, SharedValue, useAnimatedReaction, useFrameCallback, useSharedValue, withSpring } from 'react-native-reanimated'
 
 import { clamp } from '@/constants/clamp'
@@ -273,6 +274,10 @@ export type DragPointPhysics = {
 // handle's own call today) means always-on; it has no visibility/wedge-count concept of its own to be
 // inactive by.
 export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity: SharedValue<number>, followSpeed: SharedValue<number>, onBounce?: () => void, clamp: DragClamp = defaultClamp, bounceBoundary: BounceBoundary = defaultBounceBoundary, gravityCenterX?: SharedValue<number>, gravityCenterY?: SharedValue<number>, tiltStrength?: SharedValue<number>, tiltCenterX?: SharedValue<number>, tiltCenterY?: SharedValue<number>, active?: SharedValue<boolean>): DragPointPhysics {
+  // The frame callback below reaches onBounce only through this key (and a plain boolean): react-native-worklets pins
+  // every runOnJS target for as long as the worklet's copy lives, which would keep the caller's component alive.
+  const onBounceKey = useWorkletCallback(() => onBounce?.())
+  const hasOnBounce = onBounce !== undefined
   const x = useSharedValue(0)
   const y = useSharedValue(0)
   // The bounce's own live velocity, independent of the gesture's (which only exists mid-drag) -
@@ -352,9 +357,9 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
     bounceVelocityY.value = bounded.velocityY
 
     timeSinceBounceHaptic.value += deltaSeconds
-    if (bounded.bounced && onBounce && timeSinceBounceHaptic.value >= BOUNCE_HAPTIC_MIN_INTERVAL) {
+    if (bounded.bounced && hasOnBounce && timeSinceBounceHaptic.value >= BOUNCE_HAPTIC_MIN_INTERVAL) {
       timeSinceBounceHaptic.value = 0
-      runOnJS(onBounce)()
+      runOnJS(callWorkletCallback)(onBounceKey)
     }
 
     // With gravity (or tilt) active, velocity crosses zero momentarily at the top of every swing -
