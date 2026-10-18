@@ -5,8 +5,9 @@ import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Portal, useTheme } from 'react-native-paper'
-import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { scheduleOnRN } from 'react-native-worklets'
 
 import { contrastColor, DISABLED_ON_CANVAS_SCRIM_COLOR, disabledOnCanvasFabTheme, TOGGLE_OFF_BLUR_TINT_OPACITY, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
 import { RANDOMIZE_HOLD_REPEAT_MS } from '@/constants/holdToRepeat'
@@ -412,7 +413,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   }, [hapticNotification, playShutter])
   // Which "zone" the drag is currently sitting in, mirrored on the UI thread so fanGesture's own
   // onUpdate can tell whether anything's actually changed since the last frame without crossing to JS
-  // every single frame - only an actual zone change below ever calls runOnJS. -2 is the dead zone
+  // every single frame - only an actual zone change below ever calls scheduleOnRN. -2 is the dead zone
   // between wedges (drifted away from center without landing on any one wedge - no dwell timer runs
   // here at all, same as releasing there does nothing); -1 is "still basically on the primary FAB
   // itself" (dwell-eligible for onRecenter, the same recenter a plain long-press on this FAB always
@@ -612,7 +613,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   }, [clearFanDwell, gestureFanOpen])
 
   // The fan gesture is rebuilt every render, so it reaches JS only through these keys: react-native-worklets pins every
-  // runOnJS target for as long as the calling worklet's copy lives, which would keep this component alive forever.
+  // scheduleOnRN target for as long as the calling worklet's copy lives, which would keep this component alive forever.
   const fanBeginKey = useWorkletCallback(handleFanBegin)
   const fanZoneChangedKey = useWorkletCallback(handleFanZoneChanged)
   const fanFinalizeKey = useWorkletCallback(handleFanFinalize)
@@ -628,7 +629,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     .onBegin(() => {
       // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
       fanZone.value = -1
-      runOnJS(callWorkletCallback)(fanBeginKey)
+      scheduleOnRN(callWorkletCallback, fanBeginKey)
     })
     .onUpdate((event) => {
       let nearestIndex = -1
@@ -647,11 +648,11 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
       if (nextZone !== fanZone.value) {
         // eslint-disable-next-line react-hooks/immutability -- SharedValue, see resetRotation's comment in index.tsx
         fanZone.value = nextZone
-        runOnJS(callWorkletCallback)(fanZoneChangedKey, nextZone)
+        scheduleOnRN(callWorkletCallback, fanZoneChangedKey, nextZone)
       }
     })
     .onFinalize(() => {
-      runOnJS(callWorkletCallback)(fanFinalizeKey)
+      scheduleOnRN(callWorkletCallback, fanFinalizeKey)
     })
 
   const animatedStyle = useAnimatedStyle(() => ({

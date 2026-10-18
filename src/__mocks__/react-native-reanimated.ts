@@ -71,7 +71,7 @@ const Animated = {
   FlatList: RN.FlatList,
   createAnimatedComponent: (Component: unknown) => Component,
   // Real reanimated hands back the same object across a component's whole lifetime - a ref is
-  // what makes that true here too, so a re-render triggered mid-gesture (e.g. a runOnJS callback
+  // what makes that true here too, so a re-render triggered mid-gesture (e.g. a scheduleOnRN callback
   // setting other React state) doesn't silently reset every shared value to its initial prop.
   useSharedValue: <T>(value: T) => {
     const ref = useRef<{ value: T } | null>(null)
@@ -103,7 +103,6 @@ const Animated = {
   cancelAnimation: jest.fn(),
   interpolate: passthrough,
   interpolateColor: () => '#000000',
-  runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
   runOnUI: (fn: (...args: unknown[]) => unknown) => fn,
   Easing: {
     linear: passthrough,

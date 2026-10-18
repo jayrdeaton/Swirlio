@@ -1,5 +1,6 @@
 import { callWorkletCallback, useWorkletCallback } from '@rific/core'
-import { runOnJS, SharedValue, useAnimatedReaction, useFrameCallback, useSharedValue, withSpring } from 'react-native-reanimated'
+import { SharedValue, useAnimatedReaction, useFrameCallback, useSharedValue, withSpring } from 'react-native-reanimated'
+import { scheduleOnRN } from 'react-native-worklets'
 
 import { clamp } from '@/constants/clamp'
 
@@ -275,7 +276,7 @@ export type DragPointPhysics = {
 // inactive by.
 export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity: SharedValue<number>, followSpeed: SharedValue<number>, onBounce?: () => void, clamp: DragClamp = defaultClamp, bounceBoundary: BounceBoundary = defaultBounceBoundary, gravityCenterX?: SharedValue<number>, gravityCenterY?: SharedValue<number>, tiltStrength?: SharedValue<number>, tiltCenterX?: SharedValue<number>, tiltCenterY?: SharedValue<number>, active?: SharedValue<boolean>): DragPointPhysics {
   // The frame callback below reaches onBounce only through this key (and a plain boolean): react-native-worklets pins
-  // every runOnJS target for as long as the worklet's copy lives, which would keep the caller's component alive.
+  // every scheduleOnRN target for as long as the worklet's copy lives, which would keep the caller's component alive.
   const onBounceKey = useWorkletCallback(() => onBounce?.())
   const hasOnBounce = onBounce !== undefined
   const x = useSharedValue(0)
@@ -359,7 +360,7 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
     timeSinceBounceHaptic.value += deltaSeconds
     if (bounded.bounced && hasOnBounce && timeSinceBounceHaptic.value >= BOUNCE_HAPTIC_MIN_INTERVAL) {
       timeSinceBounceHaptic.value = 0
-      runOnJS(callWorkletCallback)(onBounceKey)
+      scheduleOnRN(callWorkletCallback, onBounceKey)
     }
 
     // With gravity (or tilt) active, velocity crosses zero momentarily at the top of every swing -
@@ -422,7 +423,7 @@ export function useDragPointPhysics(bounceFriction: SharedValue<number>, gravity
   // above) - a known false positive for Reanimated (SharedValues are always safe to mutate outside
   // React's render/commit model), not a real bug. Each helper is marked 'worklet' so it can be called
   // directly from within the pan gesture's own onStart/onUpdate/onEnd worklets (see useEpicenter.ts)
-  // with no runOnJS hop, the same way wedgeClipPath and friends already are.
+  // with no scheduleOnRN hop, the same way wedgeClipPath and friends already are.
   const glideTo = (targetX: number, targetY: number) => {
     'worklet'
     // eslint-disable-next-line react-hooks/immutability
