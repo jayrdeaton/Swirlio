@@ -160,7 +160,6 @@ const defaultProps = {
   onSelectGestureTarget: jest.fn(),
   onRandomizeGestureTarget: jest.fn(),
   onReveal: jest.fn(),
-  onRecenter: jest.fn(),
   onGoBack: jest.fn(),
   onResetAllSettings: jest.fn(),
   onGoForward: jest.fn(),
@@ -423,9 +422,8 @@ describe('OnScreenControls', () => {
     expect(frozen.queryByTestId('fab-pause')).toBeNull()
   })
 
-  // Recentres AND reorients every point at once (pattern, mirror, gravity), unconditionally - unlike
-  // the primary FAB's own onRecenter long press (tested separately further down), which only touches
-  // whichever gesture target(s) activeTargets currently holds.
+  // Recentres AND reorients every point at once (pattern, mirror, gravity), unconditionally,
+  // regardless of which gesture target is active.
   it('wires a long-press on the corner FAB to onRecenterEverything, independent of onToggleFrozen', async () => {
     const onToggleFrozen = jest.fn()
     const onRecenterEverything = jest.fn()
@@ -463,7 +461,7 @@ describe('OnScreenControls', () => {
     const pattern = await renderControls({ activeTargets: new Set(['pattern']) })
     const patternFab = pattern.getByTestId('fab-target')
     expect(typeof patternFab.props.icon).toBe('function')
-    expect(patternFab.props.icon({ size: 24, color: '#000000' }).props.pattern).toBe('spiral')
+    expect(patternFab.props.icon({ size: 24, color: '#000000' }).props.children.props.pattern).toBe('spiral')
     await pattern.unmount()
 
     // 'mirror'/'gravity' are plain glyph names in GESTURE_TARGET_ICONS, but the FAB now receives
@@ -471,11 +469,11 @@ describe('OnScreenControls', () => {
     // the 'pattern' case above, so it's asserted the same way: call the icon function and check what
     // it renders (MdIcon, with the glyph name as its own `name` prop) rather than comparing a string.
     const mirror = await renderControls({ activeTargets: new Set(['mirror']) })
-    expect(mirror.getByTestId('fab-target').props.icon({ size: 24, color: '#000000' }).props.name).toBe('mirror')
+    expect(mirror.getByTestId('fab-target').props.icon({ size: 24, color: '#000000' }).props.children.props.name).toBe('mirror')
     await mirror.unmount()
 
     const gravity = await renderControls({ activeTargets: new Set(['gravity']) })
-    expect(gravity.getByTestId('fab-target').props.icon({ size: 24, color: '#000000' }).props.name).toBe('magnet')
+    expect(gravity.getByTestId('fab-target').props.icon({ size: 24, color: '#000000' }).props.children.props.name).toBe('magnet')
   })
 
   // GestureFanItem's own Animated.View style is an array (static position + animated opacity/
@@ -937,11 +935,11 @@ describe('OnScreenControls', () => {
 
       const cycleShapeFab = screen.getByTestId('fab-cycle-shape')
       expect(typeof cycleShapeFab.props.icon).toBe('function')
-      expect(cycleShapeFab.props.icon({ size: 24, color: '#000000' }).props.pattern).toBe('rings')
+      expect(cycleShapeFab.props.icon({ size: 24, color: '#000000' }).props.children.props.pattern).toBe('rings')
 
       const cycleLineTypeFab = screen.getByTestId('fab-cycle-line-type')
       expect(typeof cycleLineTypeFab.props.icon).toBe('function')
-      expect(cycleLineTypeFab.props.icon({ size: 24, color: '#000000' }).props.dashStyle).toBe('dashDot')
+      expect(cycleLineTypeFab.props.icon({ size: 24, color: '#000000' }).props.children.props.dashStyle).toBe('dashDot')
     })
 
     // Regression: react-native-paper's FAB cross-fades its icon whenever the `icon` prop's own
@@ -1046,13 +1044,12 @@ describe('OnScreenControls', () => {
     })
   })
 
-  // The primary FAB's own long-press-equivalent - see its own comment in OnScreenControls.tsx for why
-  // recentring moved here from the canvas's one-finger long press in the first place (it fought the new
-  // touch-tracking glide), and for why it's now a dwell inside the drag itself (fanGesture) rather than
-  // a separate onLongPress: RNGH's own LongPress gesture fails outright once a touch has moved more
-  // than its own small built-in tolerance, so it could never fire for "moved to a wedge, then held
-  // still there" (see the wedge case below) - only for "held still from the very start."
-  describe('primary FAB held down (recenter / randomize dwell)', () => {
+  // The primary FAB's own long-press-equivalent - a dwell inside the drag itself (fanGesture) rather
+  // than a separate onLongPress: RNGH's own LongPress gesture fails outright once a touch has moved more
+  // than its own small built-in tolerance, so it could never fire for "moved to a wedge, then held still
+  // there" (see the wedge case below) - only for "held still from the very start." Holding still on the
+  // primary FAB itself randomizes whichever target is already active.
+  describe('primary FAB held down (randomize dwell)', () => {
     beforeEach(() => {
       jest.useFakeTimers()
     })
@@ -1061,13 +1058,13 @@ describe('OnScreenControls', () => {
       jest.useRealTimers()
     })
 
-    // TRANSPORT_LONG_PRESS_MS is OnScreenControls' own private constant, duplicated here as a literal
+    // TRANSPORT_LONG_PRESS_MS (400) and RANDOMIZE_HOLD_REPEAT_MS (1000) are duplicated here as literals
     // like every other timing constant this file references (see the "randomize long-press held down"
     // describe block further down for the same convention).
-    it('recentres after holding still on the primary FAB past TRANSPORT_LONG_PRESS_MS, and closes the fan', async () => {
-      const onRecenter = jest.fn()
+    it('randomizes the active target after holding still on the primary FAB past TRANSPORT_LONG_PRESS_MS, and closes the fan', async () => {
+      const onRandomizeGestureTarget = jest.fn()
       const onSelectGestureTarget = jest.fn()
-      const screen = await renderControls({ onRecenter, onSelectGestureTarget })
+      const screen = await renderControls({ activeTargets: new Set<GestureTarget>(['mirror']), onRandomizeGestureTarget, onSelectGestureTarget })
 
       await fanBegin()
       expect(fanItemOpacity(screen, 'mirror')).toBeGreaterThan(0)
@@ -1076,64 +1073,50 @@ describe('OnScreenControls', () => {
         await jest.advanceTimersByTimeAsync(400)
       })
 
-      expect(onRecenter).toHaveBeenCalledTimes(1)
+      expect(onRandomizeGestureTarget).toHaveBeenCalledTimes(1)
+      expect(onRandomizeGestureTarget).toHaveBeenCalledWith('mirror')
       expect(onSelectGestureTarget).not.toHaveBeenCalled()
       expect(fanItemOpacity(screen, 'mirror')).toBe(0)
     })
 
-    // onRecenter itself is state-aware (index.tsx's own recenterGestureTarget) - the same call, fired
-    // again on every further TRANSPORT_LONG_PRESS_MS, is what lets a single continued hold walk through
-    // its whole recentre/stop/reorient cascade without ever releasing. This only checks that the calls
-    // themselves keep coming and then stop on release - the cascade's own stage logic is covered in
-    // index.tsx's own tests (swirlScreen.gesture.test.tsx).
-    it('keeps calling onRecenter every further TRANSPORT_LONG_PRESS_MS while the hold continues, and stops once released', async () => {
-      const onRecenter = jest.fn()
-      await renderControls({ onRecenter })
+    // Same pace as every other randomize hold (the trigger stack, a wedge's own long press), not the
+    // faster TRANSPORT_LONG_PRESS_MS cadence, so each reroll is on screen long enough to look at.
+    it('keeps randomizing every RANDOMIZE_HOLD_REPEAT_MS while the hold continues, and stops once released', async () => {
+      const onRandomizeGestureTarget = jest.fn()
+      await renderControls({ onRandomizeGestureTarget })
 
       await fanBegin()
       await act(async () => {
         await jest.advanceTimersByTimeAsync(400)
       })
-      expect(onRecenter).toHaveBeenCalledTimes(1)
+      expect(onRandomizeGestureTarget).toHaveBeenCalledTimes(1)
 
       await act(async () => {
         await jest.advanceTimersByTimeAsync(400)
       })
-      expect(onRecenter).toHaveBeenCalledTimes(2)
+      expect(onRandomizeGestureTarget).toHaveBeenCalledTimes(1)
 
       await act(async () => {
-        await jest.advanceTimersByTimeAsync(400)
+        await jest.advanceTimersByTimeAsync(600)
       })
-      expect(onRecenter).toHaveBeenCalledTimes(3)
+      expect(onRandomizeGestureTarget).toHaveBeenCalledTimes(2)
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1000)
+      })
+      expect(onRandomizeGestureTarget).toHaveBeenCalledTimes(3)
+      expect(onRandomizeGestureTarget).toHaveBeenNthCalledWith(3, 'pattern')
 
       await fanFinalize()
       await act(async () => {
-        await jest.advanceTimersByTimeAsync(2000)
+        await jest.advanceTimersByTimeAsync(3000)
       })
-      expect(onRecenter).toHaveBeenCalledTimes(3)
+      expect(onRandomizeGestureTarget).toHaveBeenCalledTimes(3)
     })
 
-    // MAX_RECENTER_REPEATS is OnScreenControls' own private constant (8), duplicated here as a literal
-    // like TRANSPORT_LONG_PRESS_MS already is throughout this file - a hard backstop so a touch that's
-    // never released (the case that actually surfaced this - see MAX_RECENTER_REPEATS' own comment)
-    // can't leave the repeat timer scheduling itself forever.
-    it('stops repeating once MAX_RECENTER_REPEATS is reached, even if the touch is still held', async () => {
-      const onRecenter = jest.fn()
-      await renderControls({ onRecenter })
-
-      await fanBegin()
-      await act(async () => {
-        // The first fire, plus up to 8 further repeats = 9 total - comfortably more time than that
-        // (15 ticks) confirms it actually stops rather than merely not having gotten there yet.
-        await jest.advanceTimersByTimeAsync(400 * 15)
-      })
-
-      expect(onRecenter).toHaveBeenCalledTimes(9)
-    })
-
-    it('does not recentre if released before the hold reaches TRANSPORT_LONG_PRESS_MS', async () => {
-      const onRecenter = jest.fn()
-      await renderControls({ onRecenter })
+    it('does not randomize if released before the hold reaches TRANSPORT_LONG_PRESS_MS', async () => {
+      const onRandomizeGestureTarget = jest.fn()
+      await renderControls({ onRandomizeGestureTarget })
 
       await fanBegin()
       await act(async () => {
@@ -1141,19 +1124,17 @@ describe('OnScreenControls', () => {
       })
       await fanFinalize()
       await act(async () => {
-        await jest.advanceTimersByTimeAsync(1000)
+        await jest.advanceTimersByTimeAsync(2000)
       })
 
-      expect(onRecenter).not.toHaveBeenCalled()
+      expect(onRandomizeGestureTarget).not.toHaveBeenCalled()
     })
 
-    // The same dwell, reached through a wedge instead of the center - see OnScreenControls' own
-    // handleFanZoneChanged for why landing on a target swaps the armed bonus from onRecenter to
-    // onRandomizeGestureTarget rather than stacking both.
+    // The same dwell, reached through a wedge instead of the center - landing on a wedge swaps the armed
+    // target from the already-active one to that wedge's own.
     it('randomizes the targeted mode after holding still on its wedge past TRANSPORT_LONG_PRESS_MS, and closes the fan', async () => {
-      const onRecenter = jest.fn()
       const onRandomizeGestureTarget = jest.fn()
-      const screen = await renderControls({ onRecenter, onRandomizeGestureTarget })
+      const screen = await renderControls({ onRandomizeGestureTarget })
 
       await fanBegin()
       const { dx, dy } = wedgeOffset('gravity')
@@ -1165,8 +1146,26 @@ describe('OnScreenControls', () => {
 
       expect(onRandomizeGestureTarget).toHaveBeenCalledTimes(1)
       expect(onRandomizeGestureTarget).toHaveBeenCalledWith('gravity')
-      expect(onRecenter).not.toHaveBeenCalled()
       expect(fanItemOpacity(screen, 'mirror')).toBe(0)
+    })
+
+    it('stops a primary FAB randomize hold once the drag moves off onto a wedge', async () => {
+      const onRandomizeGestureTarget = jest.fn()
+      await renderControls({ onRandomizeGestureTarget })
+
+      await fanBegin()
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(400)
+      })
+      expect(onRandomizeGestureTarget).toHaveBeenCalledTimes(1)
+
+      const { dx, dy } = wedgeOffset('gravity')
+      await fanUpdate(dx, dy)
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1000)
+      })
+
+      expect(onRandomizeGestureTarget.mock.calls.filter(([target]) => target === 'pattern')).toHaveLength(1)
     })
 
     // A second, independent way to reach the exact same randomize - a plain press-and-hold directly on
@@ -1214,9 +1213,8 @@ describe('OnScreenControls', () => {
     // wedge's own radius, always lands here) - holding still means nothing in this zone, unlike either
     // of the two above.
     it('does not arm any dwell while adrift in the dead zone between wedges', async () => {
-      const onRecenter = jest.fn()
       const onRandomizeGestureTarget = jest.fn()
-      await renderControls({ onRecenter, onRandomizeGestureTarget })
+      await renderControls({ onRandomizeGestureTarget })
 
       await fanBegin()
       await fanUpdate(0, -500)
@@ -1225,7 +1223,6 @@ describe('OnScreenControls', () => {
         await jest.advanceTimersByTimeAsync(2000)
       })
 
-      expect(onRecenter).not.toHaveBeenCalled()
       expect(onRandomizeGestureTarget).not.toHaveBeenCalled()
     })
   })

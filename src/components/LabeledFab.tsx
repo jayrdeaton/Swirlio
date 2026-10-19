@@ -5,6 +5,7 @@ import { StyleSheet, View } from 'react-native'
 import { Text, useTheme } from 'react-native-paper'
 
 import { disabledFabTheme, disabledIconColor, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
+import { RotatingView } from '@/hooks/useButtonRotation'
 import { useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { resolveIcon } from './MdIcon'
@@ -98,11 +99,14 @@ export function LabeledFab({ icon, label, active, colorOverride, disabled = fals
   const backdropStyle = { borderRadius, overflow: 'hidden' as const }
   const wrapperStyle = { height: diameter, width: diameter }
 
+  // The whole column turns with the phone, label included, so a label stays under its button from the
+  // holder's point of view (see useButtonRotation.tsx). The icon itself is resolved without its own
+  // rotation for that reason, or it would turn twice.
   return (
-    <View style={styles.column}>
+    <RotatingView style={styles.column}>
       <View style={wrapperStyle}>
         {showBlurBackdrop && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, backdropStyle]} />}
-        <FAB testID={testID} size={size} icon={resolveIcon(icon)} disabled={disabled} accessibilityLabel={label} accessibilityState={{ disabled, selected: active }} color={iconColor} style={fabStyle} theme={disabledFabTheme(colors.primary)} onPress={onPress} onLongPress={onLongPress} onPressOut={onPressOut} delayLongPress={delayLongPress} />
+        <FAB testID={testID} size={size} icon={resolveIcon(icon, false)} disabled={disabled} accessibilityLabel={label} accessibilityState={{ disabled, selected: active }} color={iconColor} style={fabStyle} theme={disabledFabTheme(colors.primary)} onPress={onPress} onLongPress={onLongPress} onPressOut={onPressOut} delayLongPress={delayLongPress} />
       </View>
       {/* One word per line via an explicit break, rather than letting a long caption wrap on its
       own: a browser sizes an auto-width block to its max-width whenever IT has to wrap the text
@@ -118,7 +122,7 @@ export function LabeledFab({ icon, label, active, colorOverride, disabled = fals
           {label.split(' ').join('\n')}
         </Text>
       )}
-    </View>
+    </RotatingView>
   )
 }
 

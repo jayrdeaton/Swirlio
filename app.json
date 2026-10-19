@@ -14,7 +14,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.jayrdeaton.Swirlio",
+      "bundleIdentifier": "com.infinitetoken.Swirlio",
       "icon": {
         "dark": "./assets/images/dark-icon.png",
         "light": "./assets/images/light-icon.png"
@@ -25,7 +25,7 @@
     },
     "android": {
       "predictiveBackGestureEnabled": false,
-      "package": "com.jayrdeaton.Swirlio",
+      "package": "com.infinitetoken.swirlio",
       "blockedPermissions": [
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
@@ -77,7 +77,7 @@
       ],
       "expo-asset",
       "@tastic/edge-guard",
-      "expo-status-bar"
+      "@tastic/core"
     ],
     "runtimeVersion": {
       "policy": "fingerprint"

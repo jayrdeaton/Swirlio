@@ -45,6 +45,9 @@ type GlassToggleFabProps = {
   // without this. Threaded straight to the real FAB below, whose disabled handling is a proper
   // component-level check, not a CSS hack.
   disabled?: boolean
+  // Keeps the icon pointing along the screen instead of turning with the phone (see resolveIcon's
+  // `rotate`), for a glyph whose direction means a screen direction.
+  fixedIcon?: boolean
 }
 
 // The on-canvas trigger stack and mic FAB (see OnScreenControls) float directly over the live,
@@ -55,7 +58,7 @@ type GlassToggleFabProps = {
 // Only mounted for the off state: the "on" fill is fully opaque colors.primary, which already
 // completely occludes anything blurred behind it, so blurring there would be pure wasted compositor
 // work with zero visible effect.
-export function GlassToggleFab({ icon, active, onPress, onLongPress, delayLongPress, onPressOut, testID, disabled }: GlassToggleFabProps) {
+export function GlassToggleFab({ icon, active, onPress, onLongPress, delayLongPress, onPressOut, testID, disabled, fixedIcon = false }: GlassToggleFabProps) {
   const { roundness } = useTheme()
   const { backgroundColor, iconColor, borderColor, blurEnabled, tintOpacity } = useToggleFabAppearance(active)
   // Same borderRadius math LabeledFab's own small FAB uses (see BORDER_RADIUS_MULTIPLIER_SMALL there)
@@ -75,7 +78,7 @@ export function GlassToggleFab({ icon, active, onPress, onLongPress, delayLongPr
       couple pixels taller than the BlurView backdrop above, both sharing the same top edge, so a
       sliver of whatever's behind both shows through at the bottom. border-box is what makes this
       explicit height/width actually include the border instead of adding to it. */}
-      <FAB testID={testID} icon={resolveIcon(icon)} size='small' color={iconColor} style={fabStyle} onPress={onPress} onLongPress={onLongPress} delayLongPress={delayLongPress} onPressOut={onPressOut} disabled={disabled} />
+      <FAB testID={testID} icon={resolveIcon(icon, !fixedIcon)} size='small' color={iconColor} style={fabStyle} onPress={onPress} onLongPress={onLongPress} delayLongPress={delayLongPress} onPressOut={onPressOut} disabled={disabled} />
     </View>
   )
 }

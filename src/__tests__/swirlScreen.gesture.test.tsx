@@ -1363,11 +1363,10 @@ describe('SwirlScreen gestures', () => {
     expect(setPolygonSides).toHaveBeenCalledWith(3)
   })
 
-  // onRecenter (see OnScreenControls' own prop comment) - a long press on the primary gesture-target
-  // FAB now, not a one-finger canvas long press (that used to fight the canvas's own touch-tracking
-  // glide - see recenterGestureTarget's own comment in index.tsx). This file mocks OnScreenControls
-  // entirely, so calling the prop directly is how it exercises the same underlying action.
-  it("recentres the pattern epicentre via onRecenter, the primary FAB's own long press", async () => {
+  // onRecenterEverything (see OnScreenControls' own prop comment) - a long press on the corner
+  // Pause/Play FAB. This file mocks OnScreenControls entirely, so calling the prop directly is how it
+  // exercises the same underlying action.
+  it("recentres the pattern epicentre via onRecenterEverything, the pause FAB's own long press", async () => {
     const { width, height } = Dimensions.get('window')
     // Stopped, so the rotation half of the recenter is observable too - see the 'reset' describe
     // block's own tests for why an actively-rotating pattern would otherwise leave rotation as-is.
@@ -1383,7 +1382,7 @@ describe('SwirlScreen gestures', () => {
     expect(getLastSpiralProps().epicenterX.value).not.toBe(0)
 
     await act(async () => {
-      getLastControlsProps().onRecenter()
+      getLastControlsProps().onRecenterEverything()
     })
 
     expect(getLastSpiralProps().epicenterX.value).toBe(0)
@@ -3826,97 +3825,6 @@ describe('SwirlScreen gestures', () => {
       expect(getLastSpiralProps().epicenterX.value).toBe(0)
     })
 
-    describe("onRecenter (the primary FAB's own long press)", () => {
-      it("recenters only the mirror anchor when gestureTarget is 'mirror', leaving the pattern epicentre untouched", async () => {
-        const { width, height } = Dimensions.get('window')
-        mockSettings({ mirrorLines: 4 })
-        await renderScreen()
-
-        const panGesture = gestureTestUtils.getLastGesture('Pan')
-        await act(async () => {
-          // Straight out along the positive x-axis from center is wedge 0 (identity correction), so
-          // the pattern epicentre tracks this touch point directly too. Starts within the outer-field
-          // grab radius (see useEpicenter.ts's GRAB_RADIUS_PX) so this still counts as a direct grab.
-          panGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
-          panGesture.__handlers.update?.({ x: width / 2 + width * 0.2, y: height / 2 })
-        })
-        const epicenterBefore = getLastSpiralProps().epicenterX.value
-        expect(epicenterBefore).not.toBe(0)
-
-        await selectGestureTarget('mirror')
-        // index.tsx rebuilds panGesture fresh on every render, so a mode switch needs a fresh reference.
-        const mirrorPanGesture = gestureTestUtils.getLastGesture('Pan')
-        await act(async () => {
-          // The mirror anchor has no wedge of its own, so it tracks this touch point directly.
-          mirrorPanGesture.__handlers.start?.({ x: width / 2 + 20, y: height / 2 })
-          mirrorPanGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 })
-        })
-        expect(getLastSpiralProps().mirrorAnchorX.value).toBeCloseTo(0.3, 5)
-
-        await act(async () => {
-          getLastControlsProps().onRecenter()
-        })
-
-        expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
-        expect(getLastSpiralProps().epicenterX.value).toBe(epicenterBefore)
-      })
-
-      // Once position is already centered, a further onRecenter moves on to easing rotation speed down
-      // to 0 instead - see recenterGestureTarget's own comment in index.tsx. "Not abrupt" is the whole
-      // point of this stage (the user's own ask), so the one thing worth locking in here is that
-      // setRotationSpeed/setMirrorRotationSpeed is NOT what a slow release/stopAndSnapGesture already
-      // does (an instant, synchronous commit) - this file's own withTiming mock never invokes its
-      // callback (see jest.setup.ts), so an eased commit reads as "not called yet," a genuinely
-      // different, observable outcome from an abrupt one.
-      it('eases rotation speed toward 0 instead of committing it abruptly, once position is already centered', async () => {
-        mockSettings({ rotationSpeed: 2 })
-        await renderScreen()
-        expect(getLastSpiralProps().epicenterX.value).toBe(0)
-
-        await act(async () => {
-          getLastControlsProps().onRecenter()
-        })
-
-        expect(setRotationSpeed).not.toHaveBeenCalled()
-      })
-
-      it('eases mirrorRotationSpeed down to 0 the ordinary, already-eased way (setMirrorRotationSpeed(0)) once the mirror anchor is already centered', async () => {
-        mockSettings({ mirrorLines: 4, mirrorRotationSpeed: 2 })
-        await renderScreen()
-        await selectGestureTarget('mirror')
-        expect(getLastSpiralProps().mirrorAnchorX.value).toBe(0)
-
-        await act(async () => {
-          getLastControlsProps().onRecenter()
-        })
-
-        // Unlike pattern's own hand-rolled ease (see the test above), mirror's own rotation rate
-        // already eases automatically once mirrorRotationSpeed lands at 0 (useLoopingProgress's own
-        // frozen branch - see PAUSE_EASE_DURATION_MS's own comment), so the commit itself is
-        // synchronous here - there's no separate deferred-persist trick needed for mirror the way
-        // pattern's baseRotationRate needs one.
-        expect(setMirrorRotationSpeed).toHaveBeenCalledWith(0)
-      })
-
-      // Gravity has no rotation of its own to cascade through - a long press always just recentres the
-      // well, exactly as it always did, regardless of how many times it's pressed in a row.
-      it('keeps recentring the gravity well on every press, with no further stage to cascade into', async () => {
-        mockSettings({ gravity: 2 })
-        await renderScreen()
-        await selectGestureTarget('gravity')
-
-        await act(async () => {
-          getLastControlsProps().onRecenter()
-        })
-        await act(async () => {
-          getLastControlsProps().onRecenter()
-        })
-
-        expect(setRotationSpeed).not.toHaveBeenCalled()
-        expect(setMirrorRotationSpeed).not.toHaveBeenCalled()
-      })
-    })
-
     // Rotation/zoom no longer have a dedicated 'speed' mode to switch into - the same one-finger drag
     // that moves the pattern/mirror when it starts near their own center instead spins/zooms them when
     // it starts further out (see useEpicenter.ts's GRAB_RADIUS_PX and panGesture's own onStart). These
@@ -4746,7 +4654,7 @@ describe('SwirlScreen gestures', () => {
       expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.3, 5)
 
       await act(async () => {
-        getLastControlsProps().onRecenter()
+        getLastControlsProps().onRecenterEverything()
       })
       // recenter itself springs straight to (0, 0) (passthrough withSpring mock) rather than tilt's own
       // 0.1 - pattern was never the tilt target's own separate concept the way gravity's handle is, so
@@ -5288,14 +5196,14 @@ describe('SwirlScreen gestures', () => {
     // Guards the exclusion list itself, not just the inclusion list above - nothing stops a future
     // edit from reflexively copy-pasting the "pushHistory() first" hot-key pattern onto this one,
     // which would start polluting the undo stack with ephemeral, non-Look state (canvas position/
-    // rotation) that captureLook wouldn't even serialize correctly. onRecenter resets ephemeral
-    // SharedValue rotation/position, not SwirlSettings.
-    it('never pushes to history: onRecenter', async () => {
+    // rotation) that captureLook wouldn't even serialize correctly. onRecenterEverything resets
+    // ephemeral SharedValue rotation/position, not SwirlSettings.
+    it('never pushes to history: onRecenterEverything', async () => {
       await renderScreen()
       expect(getLastControlsProps().backDisabled).toBe(true)
 
       await act(async () => {
-        getLastControlsProps().onRecenter()
+        getLastControlsProps().onRecenterEverything()
       })
 
       expect(getLastControlsProps().backDisabled).toBe(true)

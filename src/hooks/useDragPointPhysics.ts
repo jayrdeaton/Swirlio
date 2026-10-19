@@ -245,9 +245,8 @@ export type DragPointPhysics = {
   // Springs to (targetX, targetY), defaulting to the literal origin - used both for the drag-release
   // "let go near the middle and it clicks home" shortcut (see useEpicenter.ts's onEnd, which passes an
   // explicit target for pattern/mirror's own version - wherever gravity currently sits, not a fixed
-  // point) and for an outright reset (index.tsx's resetPattern/resetMirror/resetGravityPosition/
-  // recenterGestureTarget, which always want the true center regardless of gravity, so they call this
-  // with no arguments).
+  // point) and for an outright reset (index.tsx's resetPattern/resetMirror/resetGravityPosition, which
+  // always want the true center regardless of gravity, so they call this with no arguments).
   recenter: (targetX?: number, targetY?: number) => void
 }
 

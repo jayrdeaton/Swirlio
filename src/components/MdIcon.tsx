@@ -2,6 +2,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons'
 import React from 'react'
 import { View } from 'react-native'
 
+import { RotatingView } from '@/hooks/useButtonRotation'
+
 type MdIconProps = {
   name: string
   color: string
@@ -59,18 +61,33 @@ const resolvedIconCache = new Map<string, (props: { size: number; color: string 
 // Normalizes a FAB-family `icon` prop so a plain glyph name always renders through MdIcon (above)
 // instead of paper's DefaultIcon, without touching every call site individually - an already-provided
 // render function (PatternIcon, DashStyleIcon, or MdIcon itself) passes through untouched.
-export function resolveIcon(icon: IconOrRenderFn): (props: { size: number; color: string }) => React.ReactNode {
-  if (typeof icon === 'string') {
-    const cached = resolvedIconCache.get(icon)
-    if (cached) return cached
-    // Named (not an inline anonymous arrow) so eslint-plugin-react's react/display-name check - which
-    // can't otherwise prove this returned closure is a component at all, let alone name one - has a
-    // binding to read a display name from.
-    const ResolvedMdIcon = ({ size, color }: { size: number; color: string }) => <MdIcon name={icon} color={color} size={size} />
-    resolvedIconCache.set(icon, ResolvedMdIcon)
-    return ResolvedMdIcon
-  }
-  return icon
+//
+// `rotate` (default true) also turns the icon in place to stay upright for however the phone is held
+// (see useButtonRotation.tsx). The wrapper is cached per resolved icon too, keyed by its identity, for
+// the same CrossFadeIcon reason as the name cache above. Pass false when something further out already
+// turns the whole button (LabeledFab), or for a glyph whose direction means a screen direction (the
+// trigger stack's chevron).
+const rotatingIconCache = new WeakMap<(props: { size: number; color: string }) => React.ReactNode, (props: { size: number; color: string }) => React.ReactNode>()
+
+export function resolveIcon(icon: IconOrRenderFn, rotate = true): (props: { size: number; color: string }) => React.ReactNode {
+  const base = typeof icon === 'string' ? resolveNamedIcon(icon) : icon
+  if (!rotate) return base
+  const cached = rotatingIconCache.get(base)
+  if (cached) return cached
+  const RotatingIcon = (props: { size: number; color: string }) => <RotatingView>{base(props)}</RotatingView>
+  rotatingIconCache.set(base, RotatingIcon)
+  return RotatingIcon
+}
+
+function resolveNamedIcon(icon: string): (props: { size: number; color: string }) => React.ReactNode {
+  const cached = resolvedIconCache.get(icon)
+  if (cached) return cached
+  // Named (not an inline anonymous arrow) so eslint-plugin-react's react/display-name check - which
+  // can't otherwise prove this returned closure is a component at all, let alone name one - has a
+  // binding to read a display name from.
+  const ResolvedMdIcon = ({ size, color }: { size: number; color: string }) => <MdIcon name={icon} color={color} size={size} />
+  resolvedIconCache.set(icon, ResolvedMdIcon)
+  return ResolvedMdIcon
 }
 
 // resolveIcon's own fix above only covers the *string* half of this bug class. The other half: a

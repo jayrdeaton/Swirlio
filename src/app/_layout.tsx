@@ -5,9 +5,11 @@ import * as AutoPaper from '@rific/auto-paper'
 import { Provider as AutoPaperProvider, useThemeSettings } from '@rific/auto-paper'
 import { DrawerProvider } from '@rific/drawer'
 import { FeedbackPressProvider, useHapticSettings } from '@rific/feedback-press'
+import { OrientationProvider, useRotationAwareStatusBar } from '@tastic/core'
 import * as ExpoBlur from 'expo-blur'
 import { useFonts } from 'expo-font'
 import { Stack } from 'expo-router'
+import { DeviceMotion } from 'expo-sensors'
 import * as SplashScreen from 'expo-splash-screen'
 import React, { useEffect, useMemo } from 'react'
 import { Appearance, LogBox, Platform, StyleSheet, useColorScheme } from 'react-native'
@@ -20,11 +22,12 @@ import { ControlGroupTopSheetContent } from '@/components/ControlGroupTopSheetCo
 import { EdgeGuardBridge } from '@/components/EdgeGuardBridge'
 import { GuideHost } from '@/components/GuideHost'
 import { MONOCHROME_BLACK, MONOCHROME_WHITE } from '@/constants/fabTheme'
-import { ControlGroupBottomSheetProvider, ControlGroupProvider, ControlGroupTopSheetProvider } from '@/hooks/controlGroups'
+import { ControlGroupBottomSheetProvider, ControlGroupProvider, ControlGroupTopSheetProvider, useControlGroupSheetDrawer } from '@/hooks/controlGroups'
 import { SpeedRateBridgeProvider } from '@/hooks/speedRateBridge'
 import { useReady } from '@/hooks/splashGate'
 import { SwirlRandomizeProvider } from '@/hooks/swirlRandomize'
 import { SwirlResetProvider } from '@/hooks/swirlReset'
+import { ButtonRotationProvider } from '@/hooks/useButtonRotation'
 import { useShutterSound, useTypewriterSound } from '@/hooks/useMechanicalSounds'
 import { SwirlSettingsProvider, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
@@ -110,6 +113,20 @@ function FeedbackSoundBridge({ children }: { children: React.ReactNode }) {
   )
 }
 
+// The one screen's status bar, set as screen options rather than a <StatusBar> component: an app
+// linked against the iOS 27 SDK can't hide the bar app-wide any more, and @tastic/core's config plugin
+// turns on UIViewControllerBasedStatusBarAppearance so each screen sets it (see that package's README).
+// Immersive by default (a full-screen canvas, not a document to scroll past a status bar), surfaced
+// only while a control sheet is up so the clock/battery don't fight the art the rest of the time.
+// isVisible (not isOpen) tracks the sheets' own slide-out, not controlsVisible/EdgeRevealZones' idle
+// fade. useRotationAwareStatusBar also hides it whenever the buttons are turned (see
+// useButtonRotation.tsx): the bar is glued to the device's physical top edge and would read sideways.
+function RootStack() {
+  const { isVisible: groupSheetVisible } = useControlGroupSheetDrawer()
+  const statusBar = useRotationAwareStatusBar({ animation: 'fade' })
+  return <Stack screenOptions={{ headerShown: false, ...statusBar, statusBarHidden: statusBar.statusBarHidden || !groupSheetVisible }} />
+}
+
 export default function RootLayout() {
   if (__DEV__ && Platform.OS === 'web') {
     LogBox.ignoreLogs(['Animated: `useNativeDriver` is not supported because the native animated module is missing.'])
@@ -135,9 +152,15 @@ export default function RootLayout() {
       the native frame usually already landed before first paint. */}
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <FontsGate />
-        <SwirlSettingsProvider>
-          <EdgeGuardBridge />
-          {/* Wraps AutoPaperProvider (not the reverse - see git history), rather than nested inside
+        {/* The OS stays portrait-locked (@tastic/core's config plugin in app.json); this reads how the
+        phone is actually held from DeviceMotion so the buttons, the guide card and the status bar can
+        follow it (see useButtonRotation.tsx). Everything else, the canvas, tilt and every gesture,
+        stays in screen space. */}
+        <OrientationProvider deviceMotion={DeviceMotion}>
+          <ButtonRotationProvider>
+            <SwirlSettingsProvider>
+              <EdgeGuardBridge />
+              {/* Wraps AutoPaperProvider (not the reverse - see git history), rather than nested inside
           it: AutoPaperProvider renders react-native-paper's own Provider internally, which mounts a
           PortalHost near its own root - react-native-paper's Portal (used by OnScreenControls' trigger
           stack while a sheet is open, and by @rific/auto-paper's own Dialog) renders its content as a
@@ -151,43 +174,46 @@ export default function RootLayout() {
           mount the host. FeedbackPressProvider itself has no dependency on AutoPaperProvider being an
           ancestor (paper is a static import, not read from AutoPaper's own context), so this reorder
           is free. */}
-          <FeedbackSoundBridge>
-            <AutoPaperProvider initialValue={{ appearance: 'system', color: initialScheme === 'dark' ? MONOCHROME_WHITE : MONOCHROME_BLACK }} expoBlur={ExpoBlur}>
-              <MonochromeThemeBridge />
-              <DrawerProvider autoPaper={AutoPaper}>
-                <SwirlResetProvider>
-                  <SwirlRandomizeProvider>
-                    <ControlGroupProvider>
-                      {/* SwirlScreen (the Stack's own screen) and ControlGroupBottomSheetContent are siblings
+              <FeedbackSoundBridge>
+                {/* statusBar={false}: RootStack sets the bar per screen instead (see its comment). */}
+                <AutoPaperProvider statusBar={false} initialValue={{ appearance: 'system', color: initialScheme === 'dark' ? MONOCHROME_WHITE : MONOCHROME_BLACK }} expoBlur={ExpoBlur}>
+                  <MonochromeThemeBridge />
+                  <DrawerProvider autoPaper={AutoPaper}>
+                    <SwirlResetProvider>
+                      <SwirlRandomizeProvider>
+                        <ControlGroupProvider>
+                          {/* SwirlScreen (the Stack's own screen) and ControlGroupBottomSheetContent are siblings
                       here, not ancestor/descendant - see speedRateBridge.tsx's own comment for why the 6 speed
                       sliders living in the latter need this bridge to reach rate SharedValues owned by the
                       former. */}
-                      <SpeedRateBridgeProvider>
-                        {/* enabled={false} on both: these two sheets only ever open via their own trigger FABs
+                          <SpeedRateBridgeProvider>
+                            {/* enabled={false} on both: these two sheets only ever open via their own trigger FABs
                         (see OnScreenControls' openGroup) - @rific/drawer's own edge-swipe-to-open gesture isn't a
                         feature this app uses. enabled only gates DrawerEdgeSwipe itself (see createDrawer.tsx),
                         so open()/close() (and every trigger FAB that calls them) are completely unaffected; this
                         just removes the swipe gesture's own always-on 24px hit-band along the true top/bottom
                         edges, which otherwise sits above (and steals touches from) any FAB placed within it. */}
-                        {/* GuideHost also mounts the first-launch PhotosensitivityWarning, so it can hold the
+                            {/* GuideHost also mounts the first-launch PhotosensitivityWarning, so it can hold the
                         how-to-play guide back until that's cleared. Wraps both sheet providers, not just the
                         Stack: the Settings sheet's "How to Play" FAB renders inside the top sheet's own
                         provider, which would otherwise sit outside GuideProvider's context. */}
-                        <GuideHost>
-                          <ControlGroupTopSheetProvider content={<ControlGroupTopSheetContent />} enabled={false}>
-                            <ControlGroupBottomSheetProvider content={<ControlGroupBottomSheetContent />} enabled={false}>
-                              <Stack screenOptions={{ headerShown: false }} />
-                            </ControlGroupBottomSheetProvider>
-                          </ControlGroupTopSheetProvider>
-                        </GuideHost>
-                      </SpeedRateBridgeProvider>
-                    </ControlGroupProvider>
-                  </SwirlRandomizeProvider>
-                </SwirlResetProvider>
-              </DrawerProvider>
-            </AutoPaperProvider>
-          </FeedbackSoundBridge>
-        </SwirlSettingsProvider>
+                            <GuideHost>
+                              <ControlGroupTopSheetProvider content={<ControlGroupTopSheetContent />} enabled={false}>
+                                <ControlGroupBottomSheetProvider content={<ControlGroupBottomSheetContent />} enabled={false}>
+                                  <RootStack />
+                                </ControlGroupBottomSheetProvider>
+                              </ControlGroupTopSheetProvider>
+                            </GuideHost>
+                          </SpeedRateBridgeProvider>
+                        </ControlGroupProvider>
+                      </SwirlRandomizeProvider>
+                    </SwirlResetProvider>
+                  </DrawerProvider>
+                </AutoPaperProvider>
+              </FeedbackSoundBridge>
+            </SwirlSettingsProvider>
+          </ButtonRotationProvider>
+        </OrientationProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   )

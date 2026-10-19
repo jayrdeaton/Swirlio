@@ -31,7 +31,7 @@ const FAB_EDGE_MARGIN = 16
 // one consistent "how long is a hold" feel everywhere in the app. Shared by every transport-row FAB that
 // layers a hold on top of its ordinary tap - skip-previous (onResetAllSettings), mirror mode's own
 // background/foreground pair (onCycleBackgroundTwoTone/onGrowForeground), forward (onGoForwardBatch), Cycle line type (reset to solid),
-// Cycle shape (onCycleSides), and the primary gesture-target FAB (onRecenter) - not a separate tuning
+// Cycle shape (onCycleSides), and the primary gesture-target FAB (onRandomizeGestureTarget) - not a separate tuning
 // for any one of them.
 const TRANSPORT_LONG_PRESS_MS = 400
 // How far a drag has to land from the primary FAB's own center before it still counts as "hasn't gone
@@ -54,15 +54,6 @@ const FAN_CAPTURE_RADIUS_PX = 42
 // blur for Cycle shape, especially with only 3-8 possible values - MIN/MAX_POLYGON_SIDES in
 // useSwirlSettings.tsx - to land on) so each step is actually watchable landing on its own value.
 const HOLD_REPEAT_MS = 400
-// Hard backstop on armRecenterRepeat's own re-arming (see its own comment) - recenterGestureTarget's
-// cascade is at most 3 real stages (recentre, ease rotation to a stop, reorient), each of which is
-// idempotent once settled, so continuing to fire well past that is never wrong, just pointless. Without
-// a cap, a touch that's never released (a real finger stuck under something, or - the case that
-// actually surfaced this - any test that simulates pressing the primary FAB down without ever
-// simulating a release) leaves armRecenterRepeat scheduling itself forever, which under real timers
-// never lets the process exit cleanly. 8 reps (3.2s of continuous holding) is generous headroom past 3
-// stages without being so high a genuinely-abandoned hold keeps ticking for long.
-const MAX_RECENTER_REPEATS = 8
 const FADE_DURATION_MS = 250
 // How far the collapsible siblings (see siblingsFadeStyle below) nudge upward while fading out - a
 // modest cue toward "tucking away behind the toggle" above them, not a literal distance to the
@@ -158,7 +149,7 @@ type OnScreenControlsProps = {
   onToggleFrozen: () => void
   // The same FAB's own long-press bonus - recentres AND reorients every point at once (pattern, mirror,
   // gravity), unconditionally, regardless of which gesture target happens to be active. Distinct from
-  // onRecenter below, which only touches whichever target(s) activeTargets currently holds.
+  // the primary gesture-target FAB's own long press, which randomizes whichever target is active.
   onRecenterEverything: () => void
   // Live-selecting a fan item mid-drag (see fanGesture's own onUpdate/handlePhaseChanged further
   // down) - replaces activeTargets outright with just this one.
@@ -183,12 +174,6 @@ type OnScreenControlsProps = {
   // onGestureFanOpenChange).
   gestureFanOpen: boolean
   onGestureFanOpenChange: (open: boolean) => void
-  // "Put back whatever's currently active" - index.tsx passes its recenterGestureTarget straight
-  // through, reachable via a long press on the primary gesture-target FAB (see its own comment further
-  // down) - the canvas's own gestures (press, drag, long press alike) are all just for moving things
-  // around now, so a long press is always a way to bring whatever you're controlling back, regardless
-  // of mode.
-  onRecenter: () => void
   onGoBack: () => void
   // Bonus long-press gesture on the same skip-previous FAB as onGoBack - the settings drawer's own
   // "Reset All" button (see ControlGroupTopSheetContent's 'settings' branch), reachable without
@@ -265,7 +250,7 @@ type OnScreenControlsProps = {
 // controls' own hit areas capture anything. Faded via opacity rather than conditionally rendered so
 // hiding/revealing transitions smoothly instead of popping instantly - see EdgeRevealZones for how it
 // comes back once fully hidden and no longer touchable.
-export function OnScreenControls({ visible, activeTargets, backDisabled, frozen, onToggleFrozen, onRecenterEverything, gestureFanOpen, onGestureFanOpenChange, onSelectGestureTarget, onRandomizeGestureTarget, onReveal, onRecenter, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, onAlternateBackground, onCycleBackgroundTwoTone, onRandomizeForeground, onGrowForeground, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, onCycleParticleShape, onGrowParticleShapes, onRandomizeParticleColors, onGrowParticleColors, gravityRepelling, onReverseGravity, onHideControls }: OnScreenControlsProps) {
+export function OnScreenControls({ visible, activeTargets, backDisabled, frozen, onToggleFrozen, onRecenterEverything, gestureFanOpen, onGestureFanOpenChange, onSelectGestureTarget, onRandomizeGestureTarget, onReveal, onGoBack, onResetAllSettings, onGoForward, onGoForwardBatch, onAlternateBackground, onCycleBackgroundTwoTone, onRandomizeForeground, onGrowForeground, onCycleShape, onCycleLineType, onCycleSides, onResetLineToSolid, onCycleParticleShape, onGrowParticleShapes, onRandomizeParticleColors, onGrowParticleColors, gravityRepelling, onReverseGravity, onHideControls }: OnScreenControlsProps) {
   // Recomputed every render (not a module-level constant) purely so tests can flip Platform.OS and
   // actually exercise both of gravity mode's slotA branches below - see useAudioReactive.test.ts for
   // the same Platform.OS-mutation pattern. Cheap enough that per-render cost was never a concern.
@@ -323,7 +308,9 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // still there, which turned out not to be how anyone actually reaches for "long-press this to
   // randomize it" - this is the same in-place gesture the trigger stack's own buttons already use).
   // Both ultimately call the same onRandomizeGestureTarget, so a wedge picked either way rerolls
-  // identically.
+  // identically. Also drives the primary FAB's own hold (see handleFanZoneChanged's zone -1 dwell),
+  // which rerolls whichever target is already active, so that hold repeats at the same
+  // RANDOMIZE_HOLD_REPEAT_MS pace as every other randomize hold instead of a faster one of its own.
   const randomizeGestureTargetHold = useHoldToRepeatByKey(onRandomizeGestureTarget, RANDOMIZE_HOLD_REPEAT_MS)
 
   // Whether the trigger stack's own group triggers (cog + GROUP_TRIGGERS) are showing, independent of
@@ -352,13 +339,13 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     function CycleLineTypeIcon({ size, color }: { size: number; color: string }) {
       return <DashStyleIcon dashStyle={settings.dashStyle} color={color} size={size} />
     }
-    return CycleLineTypeIcon
+    return resolveIcon(CycleLineTypeIcon)
   }, [settings.dashStyle])
   const cycleShapeIcon = useMemo(() => {
     function CycleShapeIcon({ size, color }: { size: number; color: string }) {
       return <PatternIcon pattern={settings.pattern} color={color} size={size} />
     }
-    return CycleShapeIcon
+    return resolveIcon(CycleShapeIcon)
   }, [settings.pattern])
   // Particles mode's own Cycle shape icon - same live-preview reasoning as cycleShapeIcon above, just
   // tracking settings.particleShapes instead of settings.pattern. nextParticleShape collapses the
@@ -367,7 +354,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     function CycleParticleShapeIcon({ size, color }: { size: number; color: string }) {
       return <ParticleIcon shape={settings.particleShapes[0]} color={color} size={size} />
     }
-    return CycleParticleShapeIcon
+    return resolveIcon(CycleParticleShapeIcon)
   }, [settings.particleShapes])
 
   // isVisible (not isOpen): stays true for the full outro animation, not just until something asks
@@ -416,8 +403,9 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // every single frame - only an actual zone change below ever calls scheduleOnRN. -2 is the dead zone
   // between wedges (drifted away from center without landing on any one wedge - no dwell timer runs
   // here at all, same as releasing there does nothing); -1 is "still basically on the primary FAB
-  // itself" (dwell-eligible for onRecenter, the same recenter a plain long-press on this FAB always
-  // meant); 0 and up is a GESTURE_TARGET_ORDER index (dwell-eligible for onRandomizeGestureTarget).
+  // itself" (dwell-eligible for randomizing whichever target was already active when the touch
+  // landed); 0 and up is a GESTURE_TARGET_ORDER index (dwell-eligible for randomizing that wedge's
+  // target). Both go through onRandomizeGestureTarget.
   const fanZone = useSharedValue(-1)
   // Whichever target this drag actually started from - restored (see applyTarget below) any time the
   // drag drifts back to the center or the dead zone without releasing, so "swipe onto a wedge, then
@@ -433,74 +421,26 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // startTargetRef is already the active one. Seeded from the same initialTarget as startTargetRef
   // above (not read from that ref's own .current) purely to keep this a plain-value initializer too.
   const appliedTargetRef = useRef<GestureTarget>(initialTarget)
-  // The dwell timer backing both onRecenter (zone -1) and onRandomizeGestureTarget (zone >= 0) below -
-  // a plain JS setTimeout rather than RNGH's own LongPressGesture, since a LongPress gesture fails
-  // outright once the touch has already moved more than its own small built-in tolerance, so it can
-  // never fire for "moved to a wedge, then held still there" the way this needs to, only for "held
-  // still from the very start." A single ref is enough: only one zone is ever dwell-eligible at a time,
-  // and handlePhaseChanged below always clears whatever was pending before starting a new one.
+  // The dwell timer backing both randomize dwells below (zone -1 and zone >= 0) - a plain JS setTimeout
+  // rather than RNGH's own LongPressGesture, since a LongPress gesture fails outright once the touch has
+  // already moved more than its own small built-in tolerance, so it can never fire for "moved to a
+  // wedge, then held still there" the way this needs to, only for "held still from the very start." A
+  // single ref is enough: only one zone is ever dwell-eligible at a time, and handleFanZoneChanged below
+  // always clears whatever was pending before starting a new one.
+  //
+  // A continued hold on the primary FAB, past its first dwell fire, keeps rerolling the same target
+  // through randomizeGestureTargetHold (the same hold-to-repeat a wedge's own long press uses), so the
+  // pace is RANDOMIZE_HOLD_REPEAT_MS and every haptic tick lands together with an actual reroll. Keyed
+  // by startTargetRef, the only target the zone -1 dwell ever starts it for, so every "this touch left
+  // the primary FAB or ended" path below stops exactly that key. Stopping a key that never started is a
+  // no-op.
   const fanDwellTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // A continued hold on the primary FAB, past the first dwell fire below - separate from
-  // fanDwellTimeout, not a second use of the same ref: that first fire always closes the fan
-  // (onGestureFanOpenChange(false)), which the belt-and-suspenders effect further down reacts to by
-  // clearing fanDwellTimeout - if a re-armed repeat lived in that same ref, this effect would race it
-  // and clear the very next repeat the instant the fan finishes closing, killing the cascade after
-  // exactly one extra tick. A genuinely separate ref sidesteps that race entirely; see armRecenterRepeat
-  // below for what actually schedules onto it, and its own comment for why repeating the exact same
-  // onRecenter call is what walks a held-through touch across recenterGestureTarget's own
-  // recentre/stop/reorient cascade (see index.tsx's own comment) without this file needing to know
-  // anything about which stage is next.
-  const recenterRepeatTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // How many times armRecenterRepeat has fired for the touch currently in progress - reset alongside
-  // dwellFiredRef in handleFanBegin (a fresh touch always gets a fresh MAX_RECENTER_REPEATS budget),
-  // checked against MAX_RECENTER_REPEATS below before ever re-arming.
-  const recenterRepeatCountRef = useRef(0)
-  const clearRecenterRepeat = useCallback(() => {
-    if (!recenterRepeatTimeout.current) return
-    clearTimeout(recenterRepeatTimeout.current)
-    recenterRepeatTimeout.current = null
-  }, [])
-  // Keeps calling onRecenter every further TRANSPORT_LONG_PRESS_MS for as long as the same touch stays
-  // on the primary FAB without releasing or drifting off it - onRecenter itself (index.tsx's
-  // recenterGestureTarget) is state-aware, so each successive call just does whichever of
-  // recentre/stop/reorient isn't already settled, the same progression a release-then-press-again would
-  // walk through one tick at a time. Deliberately doesn't touch onGestureFanOpenChange at all (the first
-  // dwell fire below already closed it) or dwellFiredRef (already true from that same first fire) -
-  // this is purely "keep advancing the cascade," nothing about the fan's own open/closed state. Stops
-  // re-arming once MAX_RECENTER_REPEATS is reached - see that constant's own comment. unref() (guarded
-  // - jsdom's own setTimeout returns a plain number with no such method, only real Node timers have
-  // it) tells the process this timer alone shouldn't keep it alive: harmless for real usage (the timer
-  // still fires exactly on schedule either way, and every real touch clears it well before
-  // MAX_RECENTER_REPEATS is ever reached regardless), but it's what stops a test that presses the
-  // primary FAB down and never simulates a release (there are many, none of which have anything to do
-  // with this cascade) from leaving Jest waiting out its own full duration before the process can exit.
-  const armRecenterRepeat = useCallback(() => {
-    if (recenterRepeatCountRef.current >= MAX_RECENTER_REPEATS) return
-    recenterRepeatCountRef.current += 1
-    recenterRepeatTimeout.current = setTimeout(() => {
-      notification()
-      onRecenter()
-      // Self-recursive via this const binding's own closure, not a freshest-value ref - safe at
-      // runtime (this callback only runs later, after the binding above is assigned), but pins an
-      // in-flight repeat chain to whichever notification/onRecenter were current when this
-      // particular instance was armed, rather than picking up a mid-chain identity change to
-      // either. Accepted deliberately: a chain is short (bounded by MAX_RECENTER_REPEATS), tied to
-      // a single continuous touch, and notification/onRecenter aren't expected to change identity
-      // mid-gesture in practice - a ref-holds-latest-callback indirection was tried and
-      // consistently tripped this same rule in a different, unresolved way, for a correctness gain
-      // this narrow.
-      // eslint-disable-next-line react-hooks/immutability
-      armRecenterRepeat()
-    }, TRANSPORT_LONG_PRESS_MS)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Node's Timeout has unref(); jsdom's plain number doesn't, hence the guard rather than the real type
-    ;(recenterRepeatTimeout.current as any)?.unref?.()
-  }, [notification, onRecenter])
   // Whether the fan was already open the moment this touch landed - a plain tap has to tell "opening
   // it" from "closing it back up" apart at release time (see handleFanFinalize below), the exact same
   // toggle the old onPress={() => onGestureFanOpenChange(!gestureFanOpen)} used to give it, just decided
   // at onBegin now instead of read fresh at release.
   const wasAlreadyOpenRef = useRef(false)
-  // Whether this gesture's own dwell (recenter or randomize) actually fired - set the instant either
+  // Whether this gesture's own randomize dwell (on the primary FAB or a wedge) actually fired - set the instant either
   // one does (see handleFanZoneChanged below). handleFanFinalize checks this first: a dwell already
   // closed the fan deliberately, so the eventual release finishing the same touch shouldn't reopen it
   // by then falling through to the plain-tap toggle below.
@@ -526,16 +466,15 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // zone change always means whatever was about to fire no longer applies. wedgeIndex >= 0: live-select
   // that wedge (with its own lighter "just moved onto something" tick) and arm the randomize-this-mode
   // dwell; anything else: fall back to startTargetRef (the live-preview-reverts-on-leaving behavior -
-  // see its own comment), and additionally arm the recenter dwell only for -1 (still on the primary FAB
-  // itself), never for -2 (adrift in the dead zone, where holding still means nothing).
+  // see its own comment), and additionally arm the randomize-the-active-target dwell only for -1 (still
+  // on the primary FAB itself), never for -2 (adrift in the dead zone, where holding still means nothing).
   const handleFanZoneChanged = useCallback(
     (zone: number) => {
       clearFanDwell()
-      // Drifting off the primary FAB entirely (onto a wedge, or into the dead zone) always ends any
-      // recenter cascade still in progress - armRecenterRepeat only ever means "the same touch is still
-      // sitting on the primary FAB," which is no longer true the instant the zone changes to anything
-      // else.
-      clearRecenterRepeat()
+      // Drifting off the primary FAB entirely (onto a wedge, or into the dead zone) always ends a
+      // primary-FAB randomize hold still in progress - it only ever means "the same touch is still
+      // sitting on the primary FAB," which is no longer true the instant the zone changes.
+      randomizeGestureTargetHold.onPressOut(startTargetRef.current)()
       if (zone >= 0) {
         const target = GESTURE_TARGET_ORDER[zone]
         selection()
@@ -555,21 +494,19 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
           fanDwellTimeout.current = null
           dwellFiredRef.current = true
           notification()
-          onRecenter()
           onGestureFanOpenChange(false)
-          armRecenterRepeat()
+          randomizeGestureTargetHold.onLongPress(startTargetRef.current)()
         }, TRANSPORT_LONG_PRESS_MS)
       }
     },
-    [applyTarget, armRecenterRepeat, clearFanDwell, clearRecenterRepeat, notification, onGestureFanOpenChange, onRandomizeGestureTarget, onRecenter, selection]
+    [applyTarget, clearFanDwell, notification, onGestureFanOpenChange, onRandomizeGestureTarget, randomizeGestureTargetHold, selection]
   )
 
   // Touch-down on the primary FAB - opens the fan immediately (rather than waiting for a completed tap)
   // so pressing and dragging can pick a target in one continuous motion instead of two separate taps.
   // Captures whichever target was already active as this gesture's own startTargetRef/appliedTargetRef
   // (see their own comments), then reuses handleFanZoneChanged for zone -1 (the primary FAB's own
-  // position) so a hold that never moves at all still arms the recenter dwell, the exact same way it
-  // always has. onReveal fires unconditionally too - this is what makes the pick visible even starting
+  // position) so a hold that never moves at all still arms the randomize-the-active-target dwell. onReveal fires unconditionally too - this is what makes the pick visible even starting
   // from fully hidden (see that prop's own comment), not just reachable-but-blind.
   const handleFanBegin = useCallback(() => {
     const current = [...activeTargets][0]
@@ -577,7 +514,6 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     appliedTargetRef.current = current
     wasAlreadyOpenRef.current = gestureFanOpen
     dwellFiredRef.current = false
-    recenterRepeatCountRef.current = 0
     selection()
     onReveal()
     onGestureFanOpenChange(true)
@@ -592,17 +528,16 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // whether this touch opened the fan or found it already open.
   const handleFanFinalize = useCallback(() => {
     clearFanDwell()
-    // Ends any recenter cascade still in progress - the same "this touch is over" boundary
-    // clearFanDwell already exists for, just for the separate repeat timer armRecenterRepeat uses (see
-    // its own comment for why it can't share fanDwellTimeout/clearFanDwell directly).
-    clearRecenterRepeat()
+    // Ends a primary-FAB randomize hold still in progress - the same "this touch is over" boundary
+    // clearFanDwell already exists for, just for the hold-to-repeat timer the zone -1 dwell starts.
+    randomizeGestureTargetHold.onPressOut(startTargetRef.current)()
     if (dwellFiredRef.current) return
     if (fanZone.value >= 0) {
       onGestureFanOpenChange(false)
       return
     }
     onGestureFanOpenChange(!wasAlreadyOpenRef.current)
-  }, [clearFanDwell, clearRecenterRepeat, fanZone, onGestureFanOpenChange])
+  }, [clearFanDwell, fanZone, onGestureFanOpenChange, randomizeGestureTargetHold])
 
   // Belt-and-suspenders for the fan closing through some other path entirely (closeFanFirst, pressing a
   // group trigger mid-drag) - gestureFanOpen going false is the one signal guaranteed to cover every one
@@ -761,8 +696,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // onLongPress is a bonus on top of the ordinary pause/resume tap - the same tap/hold-does-something-
   // else convention every other long-press-carrying FAB in this file already uses - recentring AND
   // reorienting every point at once (see index.tsx's own recenterEverything), unconditionally rather
-  // than scoped to whichever gesture target happens to be active the way the primary FAB's own
-  // onRecenter is. "Pause everything" and "put everything back" read as one matched pair on the same
+  // than scoped to whichever gesture target happens to be active. "Pause everything" and "put everything back" read as one matched pair on the same
   // button, the on-canvas equivalent of the settings sheet's own Reset all - minus the persisted
   // settings that one also touches.
   const pauseFab = (
@@ -808,6 +742,9 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
       press whenever the stack is expanded. */}
       <GlassToggleFab
         icon={siblingsVisible ? 'chevron-up' : 'chevron-down'}
+        // The stack folds along the screen, not along the holder's view, so the chevron keeps pointing
+        // the way it moves instead of turning with the other buttons.
+        fixedIcon
         testID={siblingsVisible ? 'fab-chevron-up' : 'fab-chevron-down'}
         active={!siblingsVisible}
         onPress={closeFanFirst(() => {

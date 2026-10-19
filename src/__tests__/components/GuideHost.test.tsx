@@ -6,16 +6,17 @@ import { GUIDE_STORAGE_KEY, GUIDE_VERSION } from '@/constants/guide'
 
 // The provider and the card are @tastic/hud's own (tested there). What's Swirlio's here is the wiring:
 // where the seen version comes from and goes to, and when auto-show is allowed to fire.
-let mockProviderProps: { seenVersion: number; onSeen: (version: number) => void } | null = null
+let mockProviderProps: { seenVersion: number; onSeen: (version: number) => void; rotation?: number } | null = null
 const mockAutoShow = jest.fn()
 jest.mock('@tastic/hud/guide', () => ({
-  GuideProvider: ({ children, seenVersion, onSeen }: { children: unknown; seenVersion: number; onSeen: (version: number) => void }) => {
-    mockProviderProps = { seenVersion, onSeen }
+  GuideProvider: ({ children, seenVersion, onSeen, rotation }: { children: unknown; seenVersion: number; onSeen: (version: number) => void; rotation?: number }) => {
+    mockProviderProps = { seenVersion, onSeen, rotation }
     return children
   },
   useAutoShowGuide: (enabled: boolean) => mockAutoShow(enabled)
 }))
-jest.mock('@tastic/core', () => ({ useIsTouchPrimaryDevice: () => true }))
+let mockRotation = 0
+jest.mock('@tastic/core', () => ({ useIsTouchPrimaryDevice: () => true, useRotation: () => mockRotation }))
 
 let mockOnCleared: (() => void) | undefined
 jest.mock('@/components/PhotosensitivityWarning', () => ({
@@ -36,6 +37,7 @@ describe('GuideHost', () => {
     jest.clearAllMocks()
     mockProviderProps = null
     mockOnCleared = undefined
+    mockRotation = 0
     await AsyncStorage.clear()
   })
 
@@ -75,5 +77,12 @@ describe('GuideHost', () => {
     await act(async () => mockProviderProps?.onSeen(GUIDE_VERSION))
     expect(await AsyncStorage.getItem(GUIDE_STORAGE_KEY)).toBe(String(GUIDE_VERSION))
     expect(mockProviderProps?.seenVersion).toBe(GUIDE_VERSION)
+  })
+
+  it('hands the guide card the live rotation so it turns with the phone', async () => {
+    mockRotation = -90
+    await render(<GuideHost>{null}</GuideHost>)
+    await flush()
+    expect(mockProviderProps?.rotation).toBe(-90)
   })
 })

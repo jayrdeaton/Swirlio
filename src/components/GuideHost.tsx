@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { useIsTouchPrimaryDevice } from '@tastic/core'
+import { useIsTouchPrimaryDevice, useRotation } from '@tastic/core'
 import { GuideProvider, useAutoShowGuide } from '@tastic/hud/guide'
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { Platform } from 'react-native'
@@ -30,10 +30,13 @@ function GuideAutoShow({ enabled }: { enabled: boolean }) {
 //
 // Also owns the first-run order: PhotosensitivityWarning comes first, and the guide only auto-shows
 // once that's cleared AND the stored seen version has loaded (otherwise a returning player would get
-// the guide for the split second before the read lands). No rotation prop: the app is portrait-only
-// (app.json), with none of the games' fake-landscape turning.
+// the guide for the split second before the read lands). The OS stays portrait-locked, but the guide card
+// turns with the phone like the buttons do (see useButtonRotation.tsx): its Portal renders outside any
+// rotated view, so it's handed the live rotation directly, the way the games' GuideHosts do. `children`
+// is the stable element _layout passes in, so a turn re-rendering this never re-renders the stack.
 export function GuideHost({ children }: { children: ReactNode }) {
   const touch = useIsTouchPrimaryDevice()
+  const rotation = useRotation()
   const [seenVersion, setSeenVersion] = useState<number | null>(null)
   const [warningCleared, setWarningCleared] = useState(false)
 
@@ -64,7 +67,7 @@ export function GuideHost({ children }: { children: ReactNode }) {
   const onWarningCleared = useCallback(() => setWarningCleared(true), [])
 
   return (
-    <GuideProvider steps={steps} currentVersion={GUIDE_VERSION} seenVersion={seenVersion ?? 0} onSeen={onSeen}>
+    <GuideProvider steps={steps} currentVersion={GUIDE_VERSION} seenVersion={seenVersion ?? 0} onSeen={onSeen} rotation={rotation}>
       {children}
       <PhotosensitivityWarning onCleared={onWarningCleared} />
       <GuideAutoShow enabled={seenVersion !== null && warningCleared} />

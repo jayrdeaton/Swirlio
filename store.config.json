@@ -1,0 +1,46 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "copyright": "2026 Infinite Token LLC",
+    "categories": ["ENTERTAINMENT"],
+    "info": {
+      "en-US": {
+        "title": "Swirlio",
+        "subtitle": "Kaleidoscope Fidget Toy",
+        "promoText": "A kaleidoscope you can push, pinch, twist, tilt, and shake. Fill it with colors and bouncing beads, mirror it up to twelve ways, and let it move to the music.",
+        "description": "A hands-on kaleidoscope you can push, pinch, twist, tilt, and shake. There's nothing to win: just a moving pattern to play with, with no ads, no accounts, and no tracking.\n\nPLAY WITH IT\n• Drag the swirl and it glides to your finger. Throw it and it bounces off the edges\n• Drag in circles around it to spin it\n• Pinch and twist to reshape it, and tap with two fingers for the next pattern\n• Tap to swap the colors\n• Tilt your device to roll it around, and shake for a whole new look\n\nMAKE A KALEIDOSCOPE\n• Up to six mirror lines, for twelve copies of the pattern\n• Seven patterns: Spiral, Rings, Heart, Burst, Star, Polygon, and Flower\n• Six line styles, from solid to dots and dashes\n• Colors that blend through a list you pick, forward or in reverse\n\nBEADS AND GRAVITY\n• Up to 150 beads that bounce off each other, drawn in every mirror copy\n• Swipe through them to scatter them, or hold to gather them under your finger\n• A gravity well that pulls the swirl and the beads, or pushes them away\n\nMOVE TO THE MUSIC\n• Turn on Audio Reactive and the swirl follows the sound in the room: bass, mids, and treble each drive their own part of it\n• The sound is measured on your device and never recorded\n\nRANDOMIZE AND GO BACK\n• Randomize any group of controls, or tweak one thing at a time\n• Step back through your last 100 looks\n\n• The controls fade away so the whole screen is yours\n• Light and dark mode, on iPhone and iPad\n• Plays offline\n• A photosensitivity warning on first launch, then a short how-to-play guide you can skip\n\nAlso plays in your browser at swirlio.infinitetoken.com\n\nOpen source on GitHub: https://github.com/jayrdeaton/Swirlio",
+        "keywords": ["spiral", "pattern", "mirror", "relax", "calm", "trippy", "hypnotic", "sensory", "visualizer", "particle", "gravity", "color", "art"],
+        "marketingUrl": "https://swirlio.infinitetoken.com",
+        "supportUrl": "https://swirlio.infinitetoken.com/support",
+        "privacyPolicyUrl": "https://swirlio.infinitetoken.com/privacy"
+      }
+    },
+    "advisory": {
+      "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+      "contests": "NONE",
+      "gamblingSimulated": "NONE",
+      "gunsOrOtherWeapons": "NONE",
+      "horrorOrFearThemes": "NONE",
+      "matureOrSuggestiveThemes": "NONE",
+      "medicalOrTreatmentInformation": "NONE",
+      "profanityOrCrudeHumor": "NONE",
+      "sexualContentGraphicAndNudity": "NONE",
+      "sexualContentOrNudity": "NONE",
+      "violenceCartoonOrFantasy": "NONE",
+      "violenceRealistic": "NONE",
+      "violenceRealisticProlongedGraphicOrSadistic": "NONE",
+      "advertising": false,
+      "ageAssurance": false,
+      "gambling": false,
+      "healthOrWellnessTopics": false,
+      "lootBox": false,
+      "messagingAndChat": false,
+      "parentalControls": false,
+      "unrestrictedWebAccess": false,
+      "userGeneratedContent": false,
+      "kidsAgeBand": null,
+      "ageRatingOverride": "NONE",
+      "koreaAgeRatingOverride": "NONE"
+    }
+  }
+}
