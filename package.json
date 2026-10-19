@@ -1,6 +1,6 @@
 {
   "name": "swirlio",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "An interactive kaleidoscope toy driven by touch, tilt, and gravity physics.",
   "type": "commonjs",
