@@ -134,7 +134,8 @@ react-native-worklets 0.13 keeps a native strong reference (a Hermes GC root) to
 - `vercel.json`: `buildCommand` `npm run build:web` (which runs `verify`), output `dist`, `cleanUrls`, git deploys off. `.github/workflows/deploy.yml` is Solitaire's: deploys on `v*` tags, needs `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` repo secrets.
 - `public/privacy.html` and `public/support.html` are copied into the export as-is and served at `/privacy` and `/support` (the App Store's privacy and support URLs). Plain HTML, web only, so they never reach the native app. Keep the privacy page in step with what the app reads (microphone for Audio Reactive, motion for tilt and shake, all processed in memory).
 - Bundle ID moved from `com.jayrdeaton.Swirlio` to `com.infinitetoken.Swirlio` (Android `com.infinitetoken.swirlio`) before the first submission, matching the fleet. The local `ios/`/`android/` folders predate it: `expo prebuild --clean` before the next local build.
-- Listing text is `store.config.json` (EAS Metadata, Entertainment category, title `Swirlio`), and `store/README.md` has everything set by hand in App Store Connect. Screenshots aren't made yet (Jay's `app-store-prep` skill).
+- Listing text is `store.config.json` (EAS Metadata, Entertainment then Graphics & Design, title `Swirlio`), and `store/README.md` has everything set by hand in App Store Connect. Screenshots and how to redo them are in `store/README.md` (Jay's `app-store-prep` skill).
+- **The root `.gitignore` is part of the EAS fingerprint** (`ios/` and `android/` are gitignored, so it decides what's generated): any edit there changes the runtime version, and OTA updates stop reaching builds already out. Seen 2026-10-19 when the screenshot output's ignore lines went there; they live in `store/.gitignore` instead. Run `eas fingerprint:compare --build-id <id>` before committing anything that might touch native inputs.
 
 ## Primary FAB hold randomizes (2026-10-18)
 

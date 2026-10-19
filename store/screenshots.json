@@ -1,0 +1,13 @@
+{
+  "font": "/System/Library/Fonts/SFNS.ttf",
+  "out": "screenshots",
+  "raw": "screenshots/raw",
+  "shots": [
+    { "name": "01-kaleidoscope", "title": "A Kaleidoscope You Can Touch", "sub": "Push, pinch, twist, tilt and shake", "background": ["#2a2f7a", "#0b0221"] },
+    { "name": "02-mirror", "title": "Mirror It Up to 12 Ways", "sub": "Seven patterns, six line styles", "background": ["#3a1a6e", "#12001f"] },
+    { "name": "03-beads", "title": "Beads That Bounce and Roll", "sub": "Up to 150, pulled by gravity", "background": ["#0a3442", "#02121a"] },
+    { "name": "04-targets", "title": "Pick What Your Fingers Move", "sub": "Pattern, mirror, gravity and more", "background": ["#26303a", "#0b0f14"] },
+    { "name": "05-colors", "title": "Colors That Blend and Cycle", "sub": "Pick a list, run it either way", "background": ["#26303a", "#0b0f14"] },
+    { "name": "06-audio", "title": "Let It Move to the Music", "sub": "Turn on Audio Reactive in Settings", "background": ["#26303a", "#0b0f14"] }
+  ]
+}

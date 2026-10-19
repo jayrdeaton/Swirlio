@@ -1,8 +1,9 @@
 {
   "configVersion": 0,
   "apple": {
+    "version": "1.0.1",
     "copyright": "2026 Infinite Token LLC",
-    "categories": ["ENTERTAINMENT"],
+    "categories": ["ENTERTAINMENT", "GRAPHICS_AND_DESIGN"],
     "info": {
       "en-US": {
         "title": "Swirlio",

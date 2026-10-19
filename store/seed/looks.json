@@ -1,0 +1,104 @@
+{
+  "base": {
+    "soundEnabled": false
+  },
+  "looks": {
+    "flower": {
+      "pattern": "flower",
+      "polygonSides": 6,
+      "mirrorLines": 6,
+      "mirrorAlternateColors": true,
+      "foregroundColors": [
+        "#d500f9",
+        "#03a9f4",
+        "#fdd835",
+        "#ff5722"
+      ],
+      "backgroundColors": [
+        "#0b0221",
+        "#3f51b5"
+      ],
+      "foregroundCycleSpeed": 2,
+      "backgroundCycleSpeed": 1,
+      "strokeWidth": 14,
+      "rotationSpeed": 3,
+      "zoomSpeed": 2
+    },
+    "star": {
+      "pattern": "star",
+      "polygonSides": 6,
+      "mirrorLines": 4,
+      "mirrorGap": 0.2,
+      "mirrorRotationSpeed": 1,
+      "dashStyle": "dashes",
+      "foregroundColors": [
+        "#fdd835",
+        "#ff9800",
+        "#f44336",
+        "#ec407a"
+      ],
+      "backgroundColors": [
+        "#1a0033",
+        "#673ab7"
+      ],
+      "foregroundCycleSpeed": 2,
+      "backgroundCycleSpeed": -1,
+      "strokeWidth": 12,
+      "rotationSpeed": -3,
+      "zoomSpeed": 2
+    },
+    "beads": {
+      "pattern": "spiral",
+      "mirrorLines": 3,
+      "foregroundColors": [
+        "#00bcd4",
+        "#3f51b5"
+      ],
+      "backgroundColors": [
+        "#02121a"
+      ],
+      "strokeWidth": 10,
+      "particleCount": 150,
+      "particleSize": 12,
+      "particleShapes": [
+        "circle",
+        "star",
+        "heart"
+      ],
+      "particleColors": [
+        "#fdd835",
+        "#ff5722",
+        "#ec407a",
+        "#8bc34a",
+        "#ffffff"
+      ],
+      "particleBorderColors": [
+        "#000000"
+      ],
+      "gravity": 0.3,
+      "gravityMarkerVisible": true,
+      "gestureTarget": "particles",
+      "bounceFriction": 0.2,
+      "foregroundCycleSpeed": 1
+    },
+    "spiral": {
+      "pattern": "spiral",
+      "mirrorLines": 2,
+      "dashStyle": "dashDot",
+      "foregroundColors": [
+        "#4caf50",
+        "#00bcd4",
+        "#2196f3",
+        "#9c27b0"
+      ],
+      "backgroundColors": [
+        "#000000",
+        "#101820"
+      ],
+      "foregroundCycleSpeed": 3,
+      "strokeWidth": 18,
+      "controlsAutoHideSpeed": 0,
+      "showLabels": true
+    }
+  }
+}

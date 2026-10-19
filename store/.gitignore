@@ -1,0 +1,4 @@
+# App Store screenshots and creative art (build output, see README.md). Kept out of the root .gitignore,
+# which is part of the EAS fingerprint: an edit there changes the runtime version and cuts off OTA updates.
+screenshots/
+apple/
