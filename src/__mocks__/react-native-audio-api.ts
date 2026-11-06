@@ -5,7 +5,7 @@
 // useAudioReactive.ts's setup path without also having to mock a permission denial.
 module.exports = {
   AudioContext: jest.fn().mockImplementation(() => ({
-    createRecorderAdapter: jest.fn(() => ({ connect: jest.fn() })),
+    createGain: jest.fn(() => ({ connect: jest.fn(), gain: { value: 1 } })),
     // 'suspended' by default (matching a freshly-constructed real AudioContext) so the default mock
     // actually exercises useAudioReactive's resume() call, not just its skip branch.
     state: 'suspended',
@@ -25,7 +25,7 @@ module.exports = {
   })),
   AudioManager: {
     requestRecordingPermissions: jest.fn().mockResolvedValue('Granted'),
-    setAudioSessionOptions: jest.fn(),
+    setSystemOptions: jest.fn(),
     setAudioSessionActivity: jest.fn().mockResolvedValue(undefined)
   }
 }

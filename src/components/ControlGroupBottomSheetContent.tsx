@@ -1,10 +1,11 @@
-import { StyleSheet, View } from 'react-native'
+import { useState } from 'react'
+import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { copyCountForMirrorLines, MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
 import { PatternType } from '@/constants/patterns'
 import { POLYGON_SIDE_NAMES } from '@/constants/polygonMath'
-import { BOTTOM_SHEET_FOOTER_CLEARANCE } from '@/constants/sheetLayout'
+import { BOTTOM_SHEET_FOOTER_CLEARANCE, TOP_SHEET_RIGHT_CLEARANCE, TRIGGER_STACK_COLUMN_STEP, triggerStackLayout } from '@/constants/sheetLayout'
 import { controlsAutoHideDelayMs, MAX_CONTROLS_AUTO_HIDE_SPEED, MIN_CONTROLS_AUTO_HIDE_SPEED } from '@/constants/swirlSettingsRanges'
 import { useControlGroups } from '@/hooks/controlGroups'
 import { useSpeedRateBridge } from '@/hooks/speedRateBridge'
@@ -67,6 +68,15 @@ const SIDES_SLIDER_LABELS: Partial<Record<PatternType, string>> = {
 // OnScreenControls' own comment on why those don't need to stay reachable while adjusting.
 export function ControlGroupBottomSheetContent() {
   const insets = useSafeAreaInsets()
+  const { height: windowHeight } = useWindowDimensions()
+  // The trigger stack sits above both sheets while they're open. In portrait it ends well above this
+  // sheet, but on a short window (a landscape phone) it reaches down into it, so the sliders keep out
+  // from under it the same way the top sheet always does. Measured, not assumed: this sheet's height
+  // depends on the group.
+  const [sheetHeight, setSheetHeight] = useState(0)
+  const stackShape = triggerStackLayout(windowHeight, insets)
+  const underStack = sheetHeight > 0 && stackShape.bottom > windowHeight - sheetHeight
+  const rightClearance = insets.right + (underStack ? TOP_SHEET_RIGHT_CLEARANCE + (stackShape.columns - 1) * TRIGGER_STACK_COLUMN_STEP : 0)
   const { activeGroup } = useControlGroups()
   const { settings, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setFollowSpeed, setForegroundCycleSpeed, setGravity, setHoleRadius, setMicSensitivity, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderWidth, setParticleCount, setParticleSize, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setZoomSpeed } = useSwirlSettings()
   // A low-latency fast path alongside the onChange/setXSpeed calls above - see speedRateBridge.tsx's
@@ -78,7 +88,7 @@ export function ControlGroupBottomSheetContent() {
   const group = activeGroup ?? 'mirror'
 
   return (
-    <View style={{ paddingBottom: insets.bottom + BOTTOM_SHEET_FOOTER_CLEARANCE }}>
+    <View style={{ paddingBottom: insets.bottom + BOTTOM_SHEET_FOOTER_CLEARANCE, paddingLeft: insets.left, paddingRight: rightClearance }} onLayout={(event) => setSheetHeight(event.nativeEvent.layout.height)}>
       <View style={styles.body}>
         {group === 'mirror' && (
           <>

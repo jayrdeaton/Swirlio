@@ -1,11 +1,11 @@
 import { useThemeSettings } from '@rific/auto-paper'
 import { useUpdater } from '@rific/updater'
 import { useGuide } from '@tastic/hud/guide'
-import { Platform, StyleSheet, View } from 'react-native'
+import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { release } from '@/constants/release'
-import { TOP_SHEET_HEADER_CLEARANCE, TOP_SHEET_RIGHT_CLEARANCE } from '@/constants/sheetLayout'
+import { TOP_SHEET_HEADER_CLEARANCE, TOP_SHEET_RIGHT_CLEARANCE, TRIGGER_STACK_COLUMN_STEP, triggerStackLayout } from '@/constants/sheetLayout'
 import { MAX_RAINBOW_SOUP_COLORS } from '@/constants/swirlSettingsRanges'
 import { useControlGroups } from '@/hooks/controlGroups'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
@@ -39,6 +39,10 @@ const isIOS = Platform.OS === 'ios'
 // most of it.
 export function ControlGroupTopSheetContent() {
   const insets = useSafeAreaInsets()
+  const { height: windowHeight } = useWindowDimensions()
+  // Clears every column the trigger stack wraps into on a short window, not just the first (see
+  // triggerStackLayout), plus the side insets a landscape phone's Dynamic Island or notch adds.
+  const rightClearance = insets.right + TOP_SHEET_RIGHT_CLEARANCE + (triggerStackLayout(windowHeight, insets).columns - 1) * TRIGGER_STACK_COLUMN_STEP
   const { activeGroup } = useControlGroups()
   const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setForegroundColors, setGravity, setGravityMarkerVisible, setHapticsEnabled, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPatternVisible, setShakeEnabled, setShowLabels, setSoundEnabled, setStrokeWidth, setTiltEnabled, setTightness } = useSwirlSettings()
   const { swapColors } = useSwapColors()
@@ -76,7 +80,7 @@ export function ControlGroupTopSheetContent() {
   const appearanceFabs = useAppearanceIconFabs(themeSettings.appearance, (value) => setThemeSettings({ appearance: value }))
 
   return (
-    <View style={{ paddingTop: insets.top + TOP_SHEET_HEADER_CLEARANCE, paddingRight: TOP_SHEET_RIGHT_CLEARANCE }}>
+    <View style={{ paddingTop: insets.top + TOP_SHEET_HEADER_CLEARANCE, paddingLeft: insets.left, paddingRight: rightClearance }}>
       <View style={styles.body}>
         {group === 'mirror' && (
           <>

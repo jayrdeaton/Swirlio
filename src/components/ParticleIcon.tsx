@@ -6,8 +6,6 @@ import { ParticleShape } from '@/constants/particleShapes'
 import { buildPolygonPath } from '@/constants/polygonMath'
 import { buildStarPath } from '@/constants/starMath'
 
-import { GLOBAL_NUDGE_X, GLOBAL_NUDGE_Y } from './MdIcon'
-
 // Same sizing as PatternIcon.tsx's own preview constants (not imported - small, local duplication is
 // this codebase's own established convention for a sizing constant two independent icon components
 // each happen to want identical, see useEpicenter.ts's own LONG_PRESS_MS comment for the fuller
@@ -33,10 +31,7 @@ type ParticleIconProps = {
 // ParticleColorBucket), so a stroked preview would show the wrong thing.
 export function ParticleIcon({ shape, color, size = 32 }: ParticleIconProps) {
   return (
-    // Same GLOBAL_NUDGE_X/Y correction as PatternIcon.tsx applies - this sits in the same FAB slots as
-    // font-glyph icons that already get it via MdIcon, and needs to read as consistently centered
-    // alongside them.
-    <Svg width={size} height={size} viewBox={`${-PREVIEW_BOUNDS} ${-PREVIEW_BOUNDS} ${PREVIEW_BOUNDS * 2} ${PREVIEW_BOUNDS * 2}`} style={{ transform: [{ translateX: GLOBAL_NUDGE_X }, { translateY: GLOBAL_NUDGE_Y }] }}>
+    <Svg width={size} height={size} viewBox={`${-PREVIEW_BOUNDS} ${-PREVIEW_BOUNDS} ${PREVIEW_BOUNDS * 2} ${PREVIEW_BOUNDS * 2}`}>
       <ParticleIconShape shape={shape} color={color} />
     </Svg>
   )

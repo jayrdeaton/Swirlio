@@ -57,3 +57,7 @@ yarn-error.*
 # vercel
 .vercel
 .env*
+
+# App Store screenshots and creative art (build output, see store/README.md)
+/store/screenshots/
+/store/apple/

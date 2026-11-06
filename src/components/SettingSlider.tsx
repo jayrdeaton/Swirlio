@@ -6,7 +6,6 @@ import Animated, { SharedValue, useAnimatedStyle, useSharedValue, withSpring } f
 
 import { contrastColor, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
 import { positionToValue, valueToProgress } from '@/constants/sliderMath'
-import { RotatingView } from '@/hooks/useButtonRotation'
 import { useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { MdIcon } from './MdIcon'
@@ -264,16 +263,7 @@ export function SettingSlider({ label, value, displayValue, minimumValue, maximu
           color, so the border now always matches what's drawn on top of it, not just what happens to
           be legible against the icon by coincidence. */}
           <Animated.View testID='setting-slider-thumb' style={[styles.thumb, styles.thumbBorder, { backgroundColor: colors.primary, borderColor: contrastColor(colors.primary) }, thumbAnimatedStyle]}>
-            {/* nudgeX/nudgeY=0: this thumb's own icon container already centers exactly (measured,
-            no rounding drift - see MdIcon's prop comment), so it skips MdIcon's FAB-calibrated
-            default nudge entirely rather than inheriting a correction sized for a much bigger icon. */}
-            {/* Turns in place with the phone like every button (see useButtonRotation.tsx); the drag
-            itself stays along the screen's own track, so the gesture needs no remapping. */}
-            {icon ? (
-              <RotatingView>
-                <MdIcon name={icon} size={THUMB_ICON_SIZE} color={contrastColor(colors.primary)} nudgeX={0} nudgeY={0} />
-              </RotatingView>
-            ) : null}
+            {icon ? <MdIcon name={icon} size={THUMB_ICON_SIZE} color={contrastColor(colors.primary)} /> : null}
           </Animated.View>
         </View>
       </GestureDetector>

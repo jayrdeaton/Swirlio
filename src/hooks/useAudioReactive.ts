@@ -83,14 +83,14 @@ export function useAudioReactive(enabled: boolean, sensitivity: number = 1) {
         // doesn't route mic input anywhere. Without switching to 'playAndRecord' and activating the
         // session, AudioRecorder.start() resolves fine but nothing actually captures, so this looks
         // identical to a working-but-silent room instead of a broken feature. Android has no such
-        // category concept (SessionOptions is all ios*-prefixed), so this is a no-op there.
+        // category concept (it ignores the `ios` group), so this is a no-op there.
         // 'mixWithOthers' is what lets this be a visualizer for whatever's already playing (Music,
         // Spotify, a podcast) instead of silencing it: activating playAndRecord without that option
         // interrupts other apps' audio the moment the session goes active, same as any other app
         // grabbing the mic. Android never requests audio focus here in the first place (see
         // observeAudioInterruptions, which this hook doesn't call), so it has no equivalent silencing
         // to opt out of.
-        AudioManager.setAudioSessionOptions({ iosCategory: 'playAndRecord', iosMode: 'default', iosOptions: ['mixWithOthers'] })
+        AudioManager.setSystemOptions({ ios: { category: 'playAndRecord', mode: 'default', options: ['mixWithOthers'] } })
         await AudioManager.setAudioSessionActivity(true)
         if (cancelled) return
 
@@ -99,10 +99,14 @@ export function useAudioReactive(enabled: boolean, sensitivity: number = 1) {
         // that used to justify them was abandoned) - onAudioReady has only ever been exercised WITH
         // this pairing in place, never without it, so removing it now would be an untested guess about
         // whether the native recorder needs it to activate at all. Cheap to leave in; risky to cut.
+        // Since react-native-audio-api 1.0, connect() builds the adapter itself and wires it to a
+        // destination node. A muted gain node that leads nowhere stands in for the old unconnected
+        // adapter, so the mic never reaches the speakers.
         audioContext = new AudioContext()
-        const recorderAdapter = audioContext.createRecorderAdapter()
+        const silentSink = audioContext.createGain()
+        silentSink.gain.value = 0
         recorder = new AudioRecorder()
-        recorder.connect(recorderAdapter)
+        recorder.connect(audioContext, silentSink)
 
         if (audioContext.state === 'suspended') await audioContext.resume()
         if (cancelled) return

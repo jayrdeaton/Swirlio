@@ -4,7 +4,7 @@ import React from 'react'
 import { StyleSheet, View } from 'react-native'
 import { useTheme } from 'react-native-paper'
 
-import { VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
+import { fabRingStyle } from '@/constants/fabTheme'
 
 import { BORDER_RADIUS_MULTIPLIER_SMALL, FAB_HEIGHT_SMALL } from './LabeledFab'
 import { resolveIcon } from './MdIcon'
@@ -45,9 +45,6 @@ type GlassToggleFabProps = {
   // without this. Threaded straight to the real FAB below, whose disabled handling is a proper
   // component-level check, not a CSS hack.
   disabled?: boolean
-  // Keeps the icon pointing along the screen instead of turning with the phone (see resolveIcon's
-  // `rotate`), for a glyph whose direction means a screen direction.
-  fixedIcon?: boolean
 }
 
 // The on-canvas trigger stack and mic FAB (see OnScreenControls) float directly over the live,
@@ -58,7 +55,7 @@ type GlassToggleFabProps = {
 // Only mounted for the off state: the "on" fill is fully opaque colors.primary, which already
 // completely occludes anything blurred behind it, so blurring there would be pure wasted compositor
 // work with zero visible effect.
-export function GlassToggleFab({ icon, active, onPress, onLongPress, delayLongPress, onPressOut, testID, disabled, fixedIcon = false }: GlassToggleFabProps) {
+export function GlassToggleFab({ icon, active, onPress, onLongPress, delayLongPress, onPressOut, testID, disabled }: GlassToggleFabProps) {
   const { roundness } = useTheme()
   const { backgroundColor, iconColor, borderColor, blurEnabled, tintOpacity } = useToggleFabAppearance(active)
   // Same borderRadius math LabeledFab's own small FAB uses (see BORDER_RADIUS_MULTIPLIER_SMALL there)
@@ -67,18 +64,13 @@ export function GlassToggleFab({ icon, active, onPress, onLongPress, delayLongPr
   // getFabStyle math.
   const borderRadius = BORDER_RADIUS_MULTIPLIER_SMALL * (roundness ?? 4)
   const backdropStyle = { borderRadius, overflow: 'hidden' as const }
-  const fabStyle = { backgroundColor: active ? backgroundColor : 'transparent', borderColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' as const }
+  // The ring takes no room inside the button (see fabRingStyle), so the icon stays centered.
+  const fabStyle = { backgroundColor: active ? backgroundColor : 'transparent', ...fabRingStyle(borderColor), height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL }
 
   return (
     <View style={styles.wrapper}>
       {!active && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, backdropStyle]} />}
-      {/* height/width/boxSizing: without an explicit box-sizing, the border this style adds grows the
-      FAB Surface's own intrinsic box a couple pixels past FAB_HEIGHT_SMALL - see LabeledFab's fabStyle
-      for the full mechanism (same underlying react-native-paper FAB, same bug). That leaves the Surface a
-      couple pixels taller than the BlurView backdrop above, both sharing the same top edge, so a
-      sliver of whatever's behind both shows through at the bottom. border-box is what makes this
-      explicit height/width actually include the border instead of adding to it. */}
-      <FAB testID={testID} icon={resolveIcon(icon, !fixedIcon)} size='small' color={iconColor} style={fabStyle} onPress={onPress} onLongPress={onLongPress} delayLongPress={delayLongPress} onPressOut={onPressOut} disabled={disabled} />
+      <FAB testID={testID} icon={resolveIcon(icon)} size='small' color={iconColor} style={fabStyle} onPress={onPress} onLongPress={onLongPress} delayLongPress={delayLongPress} onPressOut={onPressOut} disabled={disabled} />
     </View>
   )
 }

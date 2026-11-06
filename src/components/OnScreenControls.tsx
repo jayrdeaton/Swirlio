@@ -2,15 +2,16 @@ import { BlurView, useBlur } from '@rific/auto-paper'
 import { callWorkletCallback, useWorkletCallback } from '@rific/core'
 import { FAB, useHoldToRepeat, useHoldToRepeatByKey, useVibration } from '@rific/feedback-press'
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
-import { Platform, StyleSheet, View } from 'react-native'
+import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Portal, useTheme } from 'react-native-paper'
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { scheduleOnRN } from 'react-native-worklets'
 
-import { contrastColor, DISABLED_ON_CANVAS_SCRIM_COLOR, disabledOnCanvasFabTheme, TOGGLE_OFF_BLUR_TINT_OPACITY, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
+import { contrastColor, DISABLED_ON_CANVAS_SCRIM_COLOR, disabledOnCanvasFabTheme, fabRingStyle, TOGGLE_OFF_BLUR_TINT_OPACITY } from '@/constants/fabTheme'
 import { RANDOMIZE_HOLD_REPEAT_MS } from '@/constants/holdToRepeat'
+import { triggerStackLayout } from '@/constants/sheetLayout'
 import { ControlGroup, useControlGroups, useControlGroupSheetDrawer, useOpenControlGroup } from '@/hooks/controlGroups'
 import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { GESTURE_TARGET_ORDER, GestureTarget } from '@/hooks/useEpicenter'
@@ -256,6 +257,10 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // the same Platform.OS-mutation pattern. Cheap enough that per-render cost was never a concern.
   const isWeb = Platform.OS === 'web'
   const insets = useSafeAreaInsets()
+  const { height: windowHeight } = useWindowDimensions()
+  // One column wherever it fits; a short window (a landscape phone) wraps it into more (see triggerStackLayout)
+  const stackShape = triggerStackLayout(windowHeight, insets)
+  const stackWrapStyle = stackShape.columns > 1 ? { flexWrap: 'wrap-reverse' as const, height: stackShape.perColumn * FAB_HEIGHT_SMALL + (stackShape.perColumn - 1) * FAB_ROW_GAP } : null
   const { colors, roundness } = useTheme()
   const blurEnabled = useBlur()
   const openGroup = useOpenControlGroup()
@@ -639,10 +644,11 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // to differ from the fill - colors.primary doesn't (a solid FAB's fill IS colors.primary, so a
   // colors.primary border is the same color as the fill it's outlining, and vanishes right along with
   // it). The icon color always differs from the fill by construction (contrastColor never equals its
-  // own input), so borrowing IT for the border instead guarantees a border that's never the same tone
+  // own input), so borrowing IT for the ring instead guarantees a ring that's never the same tone
   // as what it's tracing - the ring stays visible even when the fill itself blends straight into the
-  // canvas, not just the floating icon.
-  const fabOutlineStyle = { borderColor: solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH }
+  // canvas, not just the floating icon. An inset outline, not a border (see fabRingStyle), so the icon
+  // stays centered.
+  const fabOutlineStyle = fabRingStyle(solidFabColor)
   const solidFabStyle = { backgroundColor: colors.primary, ...fabOutlineStyle }
   const disabledBackdropStyle = { borderRadius: BORDER_RADIUS_MULTIPLIER_SMALL * (roundness ?? 4), overflow: 'hidden' as const }
   // Every boundary-disabled small FAB (skip-previous below) needs this conditional
@@ -653,16 +659,13 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // colors.primary always wins right back over disabledOnCanvasFabTheme's intended transparent fill.
   // Without this, the BlurView backdrop (and the disabled-tinted icon drawn on top of it) never
   // actually shows - colors.primary paints over both.
-  const disabledAwareFabStyle = (disabled: boolean) => ({ backgroundColor: disabled ? 'transparent' : colors.primary, borderColor: disabled ? colors.primary : solidFabColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' as const })
-  // Without an explicit box-sizing, the border above grows a FAB's own intrinsic Surface box a couple
-  // pixels past its true small/medium footprint (react-native-paper's FAB Surface has no size of its
-  // own - see LabeledFab's fabStyle for the full mechanism). Invisible on these solid FABs themselves
-  // (fill and border are the same element, so they can't drift apart from each other), but it still
-  // throws off anything measuring/aligning against their real footprint - merged in as a second style
-  // array entry (not baked into solidFabStyle itself) since that one constant is shared between both
-  // small and medium FABs below.
-  const solidFabSizeSmall = { height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL, boxSizing: 'border-box' as const }
-  const solidFabSizeMedium = { height: FAB_HEIGHT_MEDIUM, width: FAB_HEIGHT_MEDIUM, boxSizing: 'border-box' as const }
+  const disabledAwareFabStyle = (disabled: boolean) => ({ backgroundColor: disabled ? 'transparent' : colors.primary, ...fabRingStyle(disabled ? colors.primary : solidFabColor), height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL })
+  // Each FAB's real small/medium footprint, stated outright for anything measuring or aligning against
+  // it (react-native-paper's FAB Surface has no size of its own - see LabeledFab's fabStyle). A second
+  // style array entry, not baked into solidFabStyle itself, since that one constant is shared between
+  // both small and medium FABs below.
+  const solidFabSizeSmall = { height: FAB_HEIGHT_SMALL, width: FAB_HEIGHT_SMALL }
+  const solidFabSizeMedium = { height: FAB_HEIGHT_MEDIUM, width: FAB_HEIGHT_MEDIUM }
 
   // The trigger stack needs to stay reachable while the group sheet is open, rather than getting
   // covered by it. A plain zIndex bump doesn't reach far enough for that, since it only wins within
@@ -700,7 +703,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
   // button, the on-canvas equivalent of the settings sheet's own Reset all - minus the persisted
   // settings that one also touches.
   const pauseFab = (
-    <Animated.View testID='pause-fab-fade' style={[styles.fab, sheetFadeStyle, { top: insets.top + FAB_EDGE_MARGIN, left: FAB_EDGE_MARGIN }]} pointerEvents={anySheetVisible ? 'none' : 'auto'}>
+    <Animated.View testID='pause-fab-fade' style={[styles.fab, sheetFadeStyle, { top: insets.top + FAB_EDGE_MARGIN, left: insets.left + FAB_EDGE_MARGIN }]} pointerEvents={anySheetVisible ? 'none' : 'auto'}>
       <FAB testID={frozen ? 'fab-play' : 'fab-pause'} icon={resolveIcon(frozen ? 'play' : 'pause')} size='small' color={solidFabColor} style={[solidFabStyle, solidFabSizeSmall]} onPress={closeFanFirst(onToggleFrozen)} onLongPress={closeFanFirst(onRecenterEverything)} delayLongPress={TRANSPORT_LONG_PRESS_MS} />
     </Animated.View>
   )
@@ -715,7 +718,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
     // permanently solid regardless of what's actually open. All right-anchored under each other
     // instead of spread across the top of the screen, so the top sheet's own content has an unbroken
     // left-to-right span to lay its buttons out in (see ControlGroupTopSheetContent/FabRow).
-    <View testID='trigger-stack' style={[styles.triggerStack, { top: insets.top + FAB_EDGE_MARGIN, right: FAB_EDGE_MARGIN }]} pointerEvents='box-none'>
+    <View testID='trigger-stack' style={[styles.triggerStack, { top: insets.top + FAB_EDGE_MARGIN, right: insets.right + FAB_EDGE_MARGIN }]} pointerEvents='box-none'>
       {/* Anchors the top of the stack, always visible regardless of siblingsVisible - collapsing the
       siblings below it is a fade+nudge (see siblingsFadeStyle), not a layout change, so this FAB never
       itself moves, and (leading rather than trailing GROUP_TRIGGERS) its own position stays pinned to
@@ -742,9 +745,6 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
       press whenever the stack is expanded. */}
       <GlassToggleFab
         icon={siblingsVisible ? 'chevron-up' : 'chevron-down'}
-        // The stack folds along the screen, not along the holder's view, so the chevron keeps pointing
-        // the way it moves instead of turning with the other buttons.
-        fixedIcon
         testID={siblingsVisible ? 'fab-chevron-up' : 'fab-chevron-down'}
         active={!siblingsVisible}
         onPress={closeFanFirst(() => {
@@ -763,7 +763,7 @@ export function OnScreenControls({ visible, activeTargets, backDisabled, frozen,
       touching the collapse toggle above, which stays put - see siblingsFadeStyle's own comment. The
       gap/column styling that used to live on the outer View moves down onto this wrapper for the same
       reason: styles.triggerStack's own gap now only separates this wrapper from the toggle FAB. */}
-      <Animated.View testID='trigger-stack-siblings' style={[styles.triggerStackSiblings, siblingsFadeStyle]} pointerEvents={siblingsVisible ? 'box-none' : 'none'}>
+      <Animated.View testID='trigger-stack-siblings' style={[styles.triggerStackSiblings, stackWrapStyle, siblingsFadeStyle]} pointerEvents={siblingsVisible ? 'box-none' : 'none'}>
         {[{ group: 'settings' as const, icon: 'cog', testID: 'fab-cog' }, ...GROUP_TRIGGERS].map(({ group, icon, testID }) => {
           // Only the trigger for whichever group is actually showing gets the "on" treatment, the same
           // solid/glass-scrim on/off language every other GlassToggleFab in this file uses (gravity
@@ -1080,8 +1080,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: FAB_ROW_GAP
   },
+  // flex-end, not center: once the siblings wrap into a second column (see stackWrapStyle), the
+  // collapse toggle stays over the first one, at the screen edge.
   triggerStack: {
-    alignItems: 'center',
+    alignItems: 'flex-end',
     flexDirection: 'column',
     gap: FAB_ROW_GAP,
     position: 'absolute'

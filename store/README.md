@@ -67,8 +67,6 @@ To upload: the version's Product Page Information > Header and Search Results, p
 >
 > Swirlio is a kaleidoscope toy with no goal. Drag, pinch, twist and tap the screen to play with the pattern. The on-screen controls fade out after a few seconds; tap the bottom edge or the top right corner to bring them back.
 >
-> The screen stays in portrait on purpose, on iPad too, where the app runs full screen. When you turn the device, the buttons turn in place to face you instead, using the motion sensor.
->
 > The microphone is only requested when Audio Reactive is turned on in Settings. The app measures the sound level in memory to move the pattern and never records or sends audio. The motion sensors drive Tilt and Shake to Randomize.
 >
 > On first launch a photosensitivity warning appears (tap I Understand), followed by a five-card How to Play guide (tap Skip to go straight to the app).

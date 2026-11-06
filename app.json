@@ -3,7 +3,7 @@
     "name": "Swirlio",
     "slug": "Swirlio",
     "version": "1.0.2",
-    "orientation": "portrait",
+    "orientation": "default",
     "scheme": "swirlio",
     "icon": "./assets/images/dark-icon.png",
     "userInterfaceStyle": "automatic",
@@ -20,7 +20,8 @@
         "light": "./assets/images/light-icon.png"
       },
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIViewControllerBasedStatusBarAppearance": true
       }
     },
     "android": {
@@ -76,8 +77,7 @@
         }
       ],
       "expo-asset",
-      "@tastic/edge-guard",
-      "@tastic/core"
+      "@tastic/edge-guard"
     ],
     "runtimeVersion": {
       "policy": "fingerprint"

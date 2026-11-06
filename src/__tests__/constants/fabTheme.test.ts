@@ -1,4 +1,4 @@
-import { contrastColor, disabledFabTheme, disabledOnCanvasFabTheme, MONOCHROME_BLACK, MONOCHROME_WHITE, toggleFabBackgroundColor, toggleFabIconColor, withAlpha } from '@/constants/fabTheme'
+import { contrastColor, disabledFabTheme, disabledOnCanvasFabTheme, fabRingStyle, MONOCHROME_BLACK, MONOCHROME_WHITE, toggleFabBackgroundColor, toggleFabIconColor, withAlpha } from '@/constants/fabTheme'
 
 describe('withAlpha', () => {
   it('converts a hex color to an rgba string at the given alpha', () => {
@@ -65,5 +65,15 @@ describe('disabledOnCanvasFabTheme', () => {
         surfaceDisabled: 'transparent'
       }
     })
+  })
+})
+
+describe('fabRingStyle', () => {
+  // react-native-paper's FAB lays its icon out in a box the button's full size, so anything that takes
+  // room inside the button (a border, padding) pushes the icon off center.
+  it('draws the ring as an inset outline that takes no room inside the button', () => {
+    const ring = fabRingStyle('#000000')
+    expect(ring).toEqual({ outlineColor: '#000000', outlineOffset: -1, outlineStyle: 'solid', outlineWidth: 1 })
+    expect(Object.keys(ring).some((key) => key.startsWith('border') || key.startsWith('padding'))).toBe(false)
   })
 })

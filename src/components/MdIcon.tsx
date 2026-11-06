@@ -2,44 +2,22 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons'
 import React from 'react'
 import { View } from 'react-native'
 
-import { RotatingView } from '@/hooks/useButtonRotation'
-
 type MdIconProps = {
   name: string
   color: string
   size: number
-  // Overrides GLOBAL_NUDGE_X/Y below for this one instance - that constant was calibrated by eye at
-  // FAB scale (40-56px), where a 1px shift is a small fraction of the glyph's own size. At SettingSlider
-  // thumb's much smaller THUMB_ICON_SIZE (15px), the exact same 1px carries over as a much bigger
-  // fraction of the glyph and reads as visibly off-center - measuring the thumb's own layout in the
-  // browser confirmed its icon container centers at an exact fractional pixel with zero rounding drift,
-  // so the offset there isn't a container/rounding bug, just this nudge being oversized for it.
-  nudgeX?: number
-  nudgeY?: number
 }
 
-// react-native-paper's own icon renderer (MaterialCommunityIcon.tsx) pairs every glyph with
-// `lineHeight: size` - a font's own line-box metrics (ascent/descent) don't necessarily agree with
-// where a platform's text renderer visually centers a glyph inside that box. Removing that lineHeight
-// override (below) wasn't enough on its own to fix it on-device, so this is a second, blunter pass on
-// top of it: a flat, hand-picked nudge, the same fixed 1px regardless of icon size, applied to every
-// icon in the app through this one shared component. Calibrated by eye against a real device, not
-// derived - adjust these two numbers directly if it's still off, or in the wrong direction/amount.
-// Exported so the app's other icon components (PatternIcon, DashStyleIcon - custom SVG, not a font
-// glyph, so they don't go through MdIcon itself) can apply the exact same on-device correction rather
-// than a second, possibly-drifting copy of the same two numbers.
-export const GLOBAL_NUDGE_X = -1
-export const GLOBAL_NUDGE_Y = -1
-
-export function MdIcon({ name, color, size, nudgeX = GLOBAL_NUDGE_X, nudgeY = GLOBAL_NUDGE_Y }: MdIconProps) {
+// The glyph, centered in a size x size box with no offset of its own. Every icon here used to carry a
+// flat -1,-1 nudge to look centered in a FAB; that was compensating for the FAB's ring, which pushed
+// react-native-paper's icon box 1pt right and down while it was a border. It's an inset outline now
+// (see fabRingStyle in fabTheme.ts), so there is nothing left to compensate for.
+export function MdIcon({ name, color, size }: MdIconProps) {
   const containerStyle = { height: size, width: size, alignItems: 'center' as const, justifyContent: 'center' as const }
-  const iconWrapperStyle = { transform: [{ translateX: nudgeX }, { translateY: nudgeY }] }
 
   return (
     <View style={containerStyle}>
-      <View style={iconWrapperStyle}>
-        <MaterialCommunityIcons name={name as never} color={color} size={size} />
-      </View>
+      <MaterialCommunityIcons name={name as never} color={color} size={size} />
     </View>
   )
 }
@@ -61,33 +39,18 @@ const resolvedIconCache = new Map<string, (props: { size: number; color: string 
 // Normalizes a FAB-family `icon` prop so a plain glyph name always renders through MdIcon (above)
 // instead of paper's DefaultIcon, without touching every call site individually - an already-provided
 // render function (PatternIcon, DashStyleIcon, or MdIcon itself) passes through untouched.
-//
-// `rotate` (default true) also turns the icon in place to stay upright for however the phone is held
-// (see useButtonRotation.tsx). The wrapper is cached per resolved icon too, keyed by its identity, for
-// the same CrossFadeIcon reason as the name cache above. Pass false when something further out already
-// turns the whole button (LabeledFab), or for a glyph whose direction means a screen direction (the
-// trigger stack's chevron).
-const rotatingIconCache = new WeakMap<(props: { size: number; color: string }) => React.ReactNode, (props: { size: number; color: string }) => React.ReactNode>()
-
-export function resolveIcon(icon: IconOrRenderFn, rotate = true): (props: { size: number; color: string }) => React.ReactNode {
-  const base = typeof icon === 'string' ? resolveNamedIcon(icon) : icon
-  if (!rotate) return base
-  const cached = rotatingIconCache.get(base)
-  if (cached) return cached
-  const RotatingIcon = (props: { size: number; color: string }) => <RotatingView>{base(props)}</RotatingView>
-  rotatingIconCache.set(base, RotatingIcon)
-  return RotatingIcon
-}
-
-function resolveNamedIcon(icon: string): (props: { size: number; color: string }) => React.ReactNode {
-  const cached = resolvedIconCache.get(icon)
-  if (cached) return cached
-  // Named (not an inline anonymous arrow) so eslint-plugin-react's react/display-name check - which
-  // can't otherwise prove this returned closure is a component at all, let alone name one - has a
-  // binding to read a display name from.
-  const ResolvedMdIcon = ({ size, color }: { size: number; color: string }) => <MdIcon name={icon} color={color} size={size} />
-  resolvedIconCache.set(icon, ResolvedMdIcon)
-  return ResolvedMdIcon
+export function resolveIcon(icon: IconOrRenderFn): (props: { size: number; color: string }) => React.ReactNode {
+  if (typeof icon === 'string') {
+    const cached = resolvedIconCache.get(icon)
+    if (cached) return cached
+    // Named (not an inline anonymous arrow) so eslint-plugin-react's react/display-name check - which
+    // can't otherwise prove this returned closure is a component at all, let alone name one - has a
+    // binding to read a display name from.
+    const ResolvedMdIcon = ({ size, color }: { size: number; color: string }) => <MdIcon name={icon} color={color} size={size} />
+    resolvedIconCache.set(icon, ResolvedMdIcon)
+    return ResolvedMdIcon
+  }
+  return icon
 }
 
 // resolveIcon's own fix above only covers the *string* half of this bug class. The other half: a

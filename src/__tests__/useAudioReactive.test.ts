@@ -59,9 +59,12 @@ describe('useAudioReactive', () => {
     const recorderInstance = mockedAudioRecorder.mock.results[0].value
     // AudioContext/RecorderAdapterNode are still created and connected even though nothing reads an
     // analyser from them anymore (see useAudioReactive.ts's own comment on why) - onAudioReady has
-    // only ever been exercised with this pairing in place.
-    expect(contextInstance.createRecorderAdapter).toHaveBeenCalledTimes(1)
-    expect(recorderInstance.connect).toHaveBeenCalledTimes(1)
+    // only ever been exercised with this pairing in place. The adapter now leads into a muted gain
+    // node that goes nowhere, so the mic can't reach the speakers.
+    const sink = contextInstance.createGain.mock.results[0].value
+    expect(sink.gain.value).toBe(0)
+    expect(sink.connect).not.toHaveBeenCalled()
+    expect(recorderInstance.connect).toHaveBeenCalledWith(contextInstance, sink)
     expect(recorderInstance.onAudioReady).toHaveBeenCalledTimes(1)
     expect(recorderInstance.start).toHaveBeenCalledTimes(1)
   })

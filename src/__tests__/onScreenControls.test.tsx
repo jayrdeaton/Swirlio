@@ -1,10 +1,11 @@
 import { act, fireEvent, render, within } from '@testing-library/react-native'
 import { useState } from 'react'
-import { Platform } from 'react-native'
+import { Dimensions, Platform, StyleSheet } from 'react-native'
 import * as gestureHandlerModule from 'react-native-gesture-handler'
 
 import { fanItemOffset } from '@/components/GestureFanItem'
 import { OnScreenControls } from '@/components/OnScreenControls'
+import { TRIGGER_STACK_SIBLINGS } from '@/constants/sheetLayout'
 import { GESTURE_TARGET_ORDER, GestureTarget } from '@/hooks/useEpicenter'
 
 // react-native-gesture-handler is mocked globally (see jest.setup.ts) - same registry-plus-handlers
@@ -461,7 +462,7 @@ describe('OnScreenControls', () => {
     const pattern = await renderControls({ activeTargets: new Set(['pattern']) })
     const patternFab = pattern.getByTestId('fab-target')
     expect(typeof patternFab.props.icon).toBe('function')
-    expect(patternFab.props.icon({ size: 24, color: '#000000' }).props.children.props.pattern).toBe('spiral')
+    expect(patternFab.props.icon({ size: 24, color: '#000000' }).props.pattern).toBe('spiral')
     await pattern.unmount()
 
     // 'mirror'/'gravity' are plain glyph names in GESTURE_TARGET_ICONS, but the FAB now receives
@@ -469,11 +470,11 @@ describe('OnScreenControls', () => {
     // the 'pattern' case above, so it's asserted the same way: call the icon function and check what
     // it renders (MdIcon, with the glyph name as its own `name` prop) rather than comparing a string.
     const mirror = await renderControls({ activeTargets: new Set(['mirror']) })
-    expect(mirror.getByTestId('fab-target').props.icon({ size: 24, color: '#000000' }).props.children.props.name).toBe('mirror')
+    expect(mirror.getByTestId('fab-target').props.icon({ size: 24, color: '#000000' }).props.name).toBe('mirror')
     await mirror.unmount()
 
     const gravity = await renderControls({ activeTargets: new Set(['gravity']) })
-    expect(gravity.getByTestId('fab-target').props.icon({ size: 24, color: '#000000' }).props.children.props.name).toBe('magnet')
+    expect(gravity.getByTestId('fab-target').props.icon({ size: 24, color: '#000000' }).props.name).toBe('magnet')
   })
 
   // GestureFanItem's own Animated.View style is an array (static position + animated opacity/
@@ -935,11 +936,11 @@ describe('OnScreenControls', () => {
 
       const cycleShapeFab = screen.getByTestId('fab-cycle-shape')
       expect(typeof cycleShapeFab.props.icon).toBe('function')
-      expect(cycleShapeFab.props.icon({ size: 24, color: '#000000' }).props.children.props.pattern).toBe('rings')
+      expect(cycleShapeFab.props.icon({ size: 24, color: '#000000' }).props.pattern).toBe('rings')
 
       const cycleLineTypeFab = screen.getByTestId('fab-cycle-line-type')
       expect(typeof cycleLineTypeFab.props.icon).toBe('function')
-      expect(cycleLineTypeFab.props.icon({ size: 24, color: '#000000' }).props.children.props.dashStyle).toBe('dashDot')
+      expect(cycleLineTypeFab.props.icon({ size: 24, color: '#000000' }).props.dashStyle).toBe('dashDot')
     })
 
     // Regression: react-native-paper's FAB cross-fades its icon whenever the `icon` prop's own
@@ -1261,6 +1262,46 @@ describe('OnScreenControls', () => {
   // switching from a group to settings (or back) closed one sheet pair and slid a different one in -
   // a visibly different transition than switching between two groups, which just swaps content inside
   // the same already-open sheet.
+  // triggerStackLayout (and the sheets and reveal zone sized from it) counts the stack's siblings
+  // itself, so it has to agree with what's actually rendered there.
+  // react-native-paper's FAB lays its icon out in a box the button's full size, so a ring that takes room
+  // inside the button (a border) pushed every icon 1pt right and down. Covers the trigger stack's toggle
+  // FABs and every solid FAB on the canvas.
+  it('rings every FAB with an inset outline, never a border that takes room from its icon', async () => {
+    const screen = await renderControls()
+    // Not the fan items' positioning wrappers or the primary FAB's hit layer, which share the prefix
+    const fabs = screen.queryAllByTestId(/^fab-(?!.*(-fan-item|-hit-layer)$)/)
+    expect(fabs.length).toBeGreaterThan(5)
+    for (const fab of fabs) {
+      const style = StyleSheet.flatten(fab.props.style)
+      expect(style).toMatchObject({ outlineOffset: -1, outlineWidth: 1 })
+      expect(Object.keys(style).filter((key) => key.startsWith('border') && !key.endsWith('Radius'))).toEqual([])
+      expect(Object.keys(style).filter((key) => key.startsWith('padding'))).toEqual([])
+    }
+  })
+
+  it('renders as many stack siblings as the shared stack layout counts', async () => {
+    const screen = await renderControls()
+    expect(screen.getByTestId('trigger-stack-siblings').children).toHaveLength(TRIGGER_STACK_SIBLINGS)
+  })
+
+  it('keeps the stack in one column on a tall window and wraps it into columns on a landscape phone', async () => {
+    const tall = await renderControls()
+    expect(StyleSheet.flatten(tall.getByTestId('trigger-stack-siblings').props.style).flexWrap).toBeUndefined()
+    await tall.unmount()
+
+    const window = Dimensions.get('window')
+    try {
+      Dimensions.set({ window: { ...window, height: 402, width: 874 } })
+      const short = await renderControls()
+      // 6 triggers per column at 402 tall with this file's zero safe-area insets (5 on a real phone,
+      // whose home indicator takes 21 more - see triggerStackLayout's own test)
+      expect(StyleSheet.flatten(short.getByTestId('trigger-stack-siblings').props.style)).toMatchObject({ flexWrap: 'wrap-reverse', height: 6 * 40 + 5 * 12 })
+    } finally {
+      Dimensions.set({ window })
+    }
+  })
+
   it('opens the right group sheet for each trigger FAB, including cog → settings', async () => {
     const screen = await renderControls()
 

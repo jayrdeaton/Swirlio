@@ -4,8 +4,7 @@ import React from 'react'
 import { StyleSheet, View } from 'react-native'
 import { Text, useTheme } from 'react-native-paper'
 
-import { disabledFabTheme, disabledIconColor, VISIBLE_HAIRLINE_WIDTH } from '@/constants/fabTheme'
-import { RotatingView } from '@/hooks/useButtonRotation'
+import { disabledFabTheme, disabledIconColor, fabRingStyle } from '@/constants/fabTheme'
 import { useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { resolveIcon } from './MdIcon'
@@ -84,29 +83,18 @@ export function LabeledFab({ icon, label, active, colorOverride, disabled = fals
   // getForegroundColor/getBackgroundColor), always rendering disabledFabTheme's own onSurfaceDisabled
   // color instead - the border needs to track THAT, not whichever color was computed for a state paper
   // isn't actually using right now.
-  // height/width/boxSizing: react-native-paper's FAB Surface has no size of its own - it's sized
-  // purely by its content (fabStyle's own 40/56 box) plus whatever border this style adds. Without an
-  // explicit box-sizing, that border is added OUTSIDE the content box (RN's default), growing the
-  // Surface a couple pixels taller than `diameter` - which the wrapper's default cross-axis stretch
-  // above happens to clip back down on width but not on height (height is the main axis in a column
-  // flex, never stretched), so the Surface ends up a couple pixels TALLER than the `diameter`-sized
-  // BlurView backdrop behind it, both sharing the same top edge - a sliver of whatever's behind both
-  // shows through at the bottom, between the backdrop's edge and the border tracing the (taller)
-  // Surface. boxSizing: 'border-box' is what makes an explicit height/width actually include the
-  // border instead of adding to it, so the Surface's true rendered box matches `diameter` exactly, on
-  // both axes, same as the backdrop it needs to align with.
-  const fabStyle = { backgroundColor: showBlurBackdrop ? 'transparent' : backgroundColor, borderColor: disabled ? disabledIconColor(colors.primary) : borderColor, borderWidth: VISIBLE_HAIRLINE_WIDTH, height: diameter, width: diameter, boxSizing: 'border-box' as const }
+  // height/width: react-native-paper's FAB Surface has no size of its own (it's sized by fabStyle's own
+  // 40/56 content box), so these state the footprint the `diameter`-sized BlurView backdrop matches. The
+  // ring takes no room inside it (see fabRingStyle), which is what keeps the icon centered.
+  const fabStyle = { backgroundColor: showBlurBackdrop ? 'transparent' : backgroundColor, ...fabRingStyle(disabled ? disabledIconColor(colors.primary) : borderColor), height: diameter, width: diameter }
   const backdropStyle = { borderRadius, overflow: 'hidden' as const }
   const wrapperStyle = { height: diameter, width: diameter }
 
-  // The whole column turns with the phone, label included, so a label stays under its button from the
-  // holder's point of view (see useButtonRotation.tsx). The icon itself is resolved without its own
-  // rotation for that reason, or it would turn twice.
   return (
-    <RotatingView style={styles.column}>
+    <View style={styles.column}>
       <View style={wrapperStyle}>
         {showBlurBackdrop && <BlurView blur={blurEnabled} tintColor={backgroundColor} tintOpacity={tintOpacity} style={[StyleSheet.absoluteFill, backdropStyle]} />}
-        <FAB testID={testID} size={size} icon={resolveIcon(icon, false)} disabled={disabled} accessibilityLabel={label} accessibilityState={{ disabled, selected: active }} color={iconColor} style={fabStyle} theme={disabledFabTheme(colors.primary)} onPress={onPress} onLongPress={onLongPress} onPressOut={onPressOut} delayLongPress={delayLongPress} />
+        <FAB testID={testID} size={size} icon={resolveIcon(icon)} disabled={disabled} accessibilityLabel={label} accessibilityState={{ disabled, selected: active }} color={iconColor} style={fabStyle} theme={disabledFabTheme(colors.primary)} onPress={onPress} onLongPress={onLongPress} onPressOut={onPressOut} delayLongPress={delayLongPress} />
       </View>
       {/* One word per line via an explicit break, rather than letting a long caption wrap on its
       own: a browser sizes an auto-width block to its max-width whenever IT has to wrap the text
@@ -122,7 +110,7 @@ export function LabeledFab({ icon, label, active, colorOverride, disabled = fals
           {label.split(' ').join('\n')}
         </Text>
       )}
-    </RotatingView>
+    </View>
   )
 }
 

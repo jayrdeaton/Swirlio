@@ -1,10 +1,11 @@
+import * as ScreenOrientation from 'expo-screen-orientation'
 import { DeviceMotion } from 'expo-sensors'
 import { useEffect } from 'react'
-import { Platform } from 'react-native'
+import { Dimensions, Platform } from 'react-native'
 import { useAnimatedReaction, useSharedValue, withSpring } from 'react-native-reanimated'
 
 import { clamp } from '@/constants/clamp'
-import { tiltToScreenAxes } from '@/constants/tiltOrientation'
+import { interfaceOrientationFromHold, tiltToScreenAxes } from '@/constants/tiltOrientation'
 
 const UPDATE_INTERVAL_MS = 100
 const NORMALIZE_RADIANS = Math.PI / 4
@@ -70,23 +71,47 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
 
     let subscription: { remove: () => void } | null = null
 
+    // The interface orientation tilt is turned through (see tiltToScreenAxes). Read once and then
+    // followed, since the OS rotates the interface with the device unless its rotation lock is on.
+    // A change that lands before the first read resolves wins over that read's older answer. While
+    // it's UNKNOWN (iOS, from launch until the first turn), heldOrientation stands in for it (see
+    // interfaceOrientationFromHold); Android always reads the display, so it never needs one.
+    let interfaceOrientation = ScreenOrientation.Orientation.UNKNOWN
+    let heldOrientation = ScreenOrientation.Orientation.PORTRAIT_UP
+    let orientationChanged = false
+    const orientationSubscription = ScreenOrientation.addOrientationChangeListener(({ orientationInfo }) => {
+      orientationChanged = true
+      interfaceOrientation = orientationInfo.orientation
+    })
+    ScreenOrientation.getOrientationAsync()
+      .then((orientation) => {
+        if (!orientationChanged) interfaceOrientation = orientation
+      })
+      .catch(() => {
+        // Stays UNKNOWN until the first turn, with the stand-in below covering it on iOS
+      })
+
     DeviceMotion.isAvailableAsync()
       .then((available) => {
         if (!available) return
         DeviceMotion.setUpdateInterval(UPDATE_INTERVAL_MS)
-        subscription = DeviceMotion.addListener(({ rotation }) => {
+        subscription = DeviceMotion.addListener(({ rotation, orientation }) => {
           if (!rotation) return
-          // Always the portrait mapping, deliberately ignoring the listener's own `orientation` -
-          // app.json locks this app to portrait, so the interface itself never rotates, but on iOS
-          // that field comes straight from UIDevice.current.orientation (see expo-sensors'
-          // SensorsUtils.swift), which tracks the phone's *physical* roll regardless of any interface
-          // lock. Rolling the phone far enough to pin gravityCenterX at the screen edge is roughly the
-          // same motion that crosses iOS's own landscape threshold, flipping that field to ±90 right
-          // at the moment gamma is maxed out - tiltToScreenAxes would then swap gamma onto the Y axis
-          // instead of X, snapping the gravity target toward the top/bottom instead of letting it keep
-          // rolling smoothly along the edge. Honoring a physical-orientation swap the UI never actually
-          // makes was the bug, not a real screen rotation to compensate for.
-          const screenTilt = tiltToScreenAxes(rotation.gamma, rotation.beta, 0)
+          // The interface orientation, deliberately not the listener's own `orientation` except as
+          // the launch stand-in: on iOS that field comes straight from UIDevice.current.orientation
+          // (see expo-sensors' SensorsUtils.swift), which tracks the phone's *physical* hold whether
+          // or not the interface follows it (rotation lock on), and on Android it's the display
+          // rotation, with the opposite sign for each landscape side. Back when the app was
+          // portrait-locked, honoring that physical field snapped the gravity target toward the
+          // top/bottom right as a roll pinned it at the side edge (that roll crosses iOS's own
+          // landscape threshold), a swap the UI never made.
+          let screenOrientation = interfaceOrientation
+          if (screenOrientation === ScreenOrientation.Orientation.UNKNOWN && Platform.OS === 'ios') {
+            const window = Dimensions.get('window')
+            heldOrientation = interfaceOrientationFromHold(window.width > window.height, orientation, heldOrientation)
+            screenOrientation = heldOrientation
+          }
+          const screenTilt = tiltToScreenAxes(rotation.gamma, rotation.beta, screenOrientation)
           const ratioX = applyDeadzone(clamp(screenTilt.x / NORMALIZE_RADIANS, -1, 1), TILT_NOISE_DEADZONE)
           const ratioY = applyDeadzone(clamp(screenTilt.y / NORMALIZE_RADIANS, -1, 1), TILT_NOISE_DEADZONE)
           rawX.value = ratioX * maxOffset
@@ -100,7 +125,10 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
         // tilt-driven gravity is a nice-to-have, so fail silently rather than crash the app
       })
 
-    return () => subscription?.remove()
+    return () => {
+      subscription?.remove()
+      orientationSubscription.remove()
+    }
   }, [enabled, maxOffset, rawTiltX, rawTiltY, rawX, rawY])
 
   useAnimatedReaction(

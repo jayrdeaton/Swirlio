@@ -1,3 +1,6 @@
+import { FAB_ROW_GAP } from '@/components/FabRow'
+import { FAB_HEIGHT_SMALL } from '@/components/LabeledFab'
+
 // Shared layout clearances for the group sheet - split into a top sheet (buttons/pickers) and a
 // bottom sheet (sliders), both opening together (see controlGroups.tsx) rather than one combined
 // sheet. Settings is just another group sharing this same pair (see ControlGroupTopSheetContent/
@@ -27,3 +30,31 @@ export const BOTTOM_SHEET_FOOTER_CLEARANCE = 16
 // was, so only this one edge needs reserving now - top sheet content still starts flush at
 // TOP_SHEET_HEADER_CLEARANCE on the left, same as before.
 export const TOP_SHEET_RIGHT_CLEARANCE = 16 + 40 + 2 + 12
+
+// What the trigger stack holds below its collapse toggle: the settings cog plus OnScreenControls' 6
+// GROUP_TRIGGERS.
+export const TRIGGER_STACK_SIBLINGS = 7
+
+// One more trigger-stack column's width, for whatever has to keep clear of the stack.
+export const TRIGGER_STACK_COLUMN_STEP = FAB_HEIGHT_SMALL + FAB_ROW_GAP
+
+export type TriggerStackLayout = {
+  // How many columns the cog and group triggers wrap into, and how many sit in each before wrapping
+  columns: number
+  perColumn: number
+  // How far down the first (tallest) column reaches, in window coordinates
+  bottom: number
+}
+
+// The trigger stack (OnScreenControls) is one column down the right edge wherever it fits, which is
+// every portrait phone and every iPad. In a short window (a landscape phone, a small Stage Manager
+// window) its last triggers would run off the bottom, so they wrap into further columns to the left
+// instead. The top sheet, the bottom sheet and the top-right reveal zone size themselves from this
+// too, so they always clear the stack's real shape. 16 is OnScreenControls' FAB_EDGE_MARGIN, top and
+// bottom.
+export function triggerStackLayout(windowHeight: number, insets: { top: number; bottom: number }): TriggerStackLayout {
+  const siblingsTop = insets.top + 16 + TRIGGER_STACK_COLUMN_STEP
+  const room = windowHeight - insets.bottom - 16 - siblingsTop
+  const perColumn = Math.min(TRIGGER_STACK_SIBLINGS, Math.max(1, Math.floor((room + FAB_ROW_GAP) / TRIGGER_STACK_COLUMN_STEP)))
+  return { bottom: siblingsTop + perColumn * TRIGGER_STACK_COLUMN_STEP - FAB_ROW_GAP, columns: Math.ceil(TRIGGER_STACK_SIBLINGS / perColumn), perColumn }
+}

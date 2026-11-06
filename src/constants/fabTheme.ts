@@ -25,6 +25,17 @@ export const MONOCHROME_BLACK = '#0F0F0F'
 // renders consistently thin-but-visible everywhere instead.
 export const VISIBLE_HAIRLINE_WIDTH = 1
 
+// How every FAB draws that ring: an outline inset by its own width, not a border. A border takes
+// room inside the button, and react-native-paper's FAB lays its icon out in a box the button's full
+// size (40 or 56), so a 1pt border left 38 and pushed that box, and every icon in it, 1pt right and
+// down. A flat -1,-1 nudge on every icon used to cancel it, which held only while nothing turned the
+// icon: the old turn-in-place button rotation turned the nudge with it, so on a device held sideways
+// icons sat up to 2pt off. An outline takes no layout room, so paper's box is the button and the icon
+// is centered by construction.
+export function fabRingStyle(color: string) {
+  return { outlineColor: color, outlineOffset: -VISIBLE_HAIRLINE_WIDTH, outlineStyle: 'solid' as const, outlineWidth: VISIBLE_HAIRLINE_WIDTH }
+}
+
 // How strongly a toggle FAB's inactive-state tint covers the BlurView backdrop it's layered over
 // (see useToggleFabAppearance) - full opacity when the app's blur setting is off, so BlurView's own
 // plain-surface fallback (react-native-paper's under-recolored surface token - see the disabled-FAB
