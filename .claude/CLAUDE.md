@@ -13,7 +13,7 @@ An interactive kaleidoscope toy driven by touch, tilt, and gravity physics (Expo
 ```bash
 npm run lint          # expo lint .
 npm run fix            # expo lint . --fix
-npm test               # Jest (37 suites, 693 tests: 671 run, 22 skipped)
+npm test               # Jest (38 suites, 699 tests: 677 run, 22 skipped)
 npm run test:watch     # Jest --watchAll
 npm run typecheck      # tsc
 npm run verify         # lint + test + typecheck
@@ -171,3 +171,12 @@ Every dependency moved to its latest release in the same native build as the rot
 - `react-native-audio-api` 0.13 to 1.0 (`useAudioReactive.ts`): the iOS session category moved from `setAudioSessionOptions({ iosCategory, ... })` to `setSystemOptions({ ios: { category, ... } })`, and `AudioRecorder.connect` now takes `(context, destination)` and builds the recorder adapter itself, so the adapter leads into a muted gain node that goes nowhere (the old adapter was simply left unconnected). The config plugin's options are unchanged. Not checked on a device.
 - `@types/node` `^26`, plus in-range updates (`typescript-eslint`, `react-native-paper`, `@react-native/jest-preset` 0.88.1, `eslint-plugin-package-json`).
 - Not moved: TypeScript 7 (`typescript-eslint` 8.72 supports TypeScript below 6.1), ESLint 10 (`eslint-plugin-react`, which `eslint-config-expo` brings, calls `context.getFilename`, which ESLint 10 removed; its latest release declares ESLint 9 at most), and what the SDK pins (`react`/`react-dom` 19.3.0, `react-native-gesture-handler` 3.3, `react-native-svg`, `react-native-worklets`, the slider, `@react-native-async-storage/async-storage` 2.2.0), which stay where `expo install` puts them.
+
+## Long press then drag (2026-11-08)
+
+Holding the canvas pulls the active target to the finger (`useEpicenter.ts`'s `longPressGesture`), and moving on from there is supposed to drag it. On iOS it didn't: the target came to the finger and then fell away under gravity as soon as the finger moved. Two things together, both in how the long press hands off to `panGesture`:
+
+- RNGH's iOS long press fails the moment the finger moves past its slop, even while active, often before Pan activates for that same move. Its `onEnd` treated that as a lift and released the target to gravity with the finger still down. `onEnd` now releases only on `success`, and `panGesture`'s `onFinalize` releases a grab that ended with neither a drag nor a successful lift.
+- `panGesture`'s `onStart` measured the outer field (spin/zoom) from wherever the target was at that moment, which after a long press is rarely under the finger (still springing in, or already falling). A pan that continues a long-press grab (`longPressGrabbed`) now always grabs.
+
+Reproduced and checked on the iPhone 18 Pro simulator from a Release build with `touch_path` (hold, then drag), recorded with `simctl io recordVideo`; the Jest harness can't show it because its `withSpring` lands instantly. Tests: the long-press tests in `swirlScreen.gesture.test.tsx`.

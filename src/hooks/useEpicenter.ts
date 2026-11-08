@@ -592,6 +592,13 @@ export function useEpicenter(
   // twice, firing onGrab (and its selection() click) once per recognizer instead of once per touch.
   const grabFired = useSharedValue(false)
 
+  // Whether longPressGesture has grabbed the active target(s) for the touch currently on the screen and
+  // nothing has released them yet - reset alongside panActive on every fresh touch-down. While it's
+  // set, a pan that activates is that same grab carrying on (see panGesture's onStart), and whichever of
+  // longPressGesture's onEnd or panGesture's onFinalize runs first releases a grab that never became a
+  // drag (see longPressGesture's own comment).
+  const longPressGrabbed = useSharedValue(false)
+
   // Whether the touch that started this pan landed outside GRAB_RADIUS_PX of the active target's own
   // center - decided once, in onStart, and held for the rest of the gesture (a drag that starts in the
   // outer field stays an outer-field drag even if it later sweeps back over the center, and vice versa
@@ -661,12 +668,17 @@ export function useEpicenter(
       panActive.value = false
       outerFieldActive.value = false
       grabFired.value = false
+      longPressGrabbed.value = false
     })
     .onStart((event) => {
       panActive.value = true
       // Only pattern/mirror have an outer field - gravity has no zoom/spin concept of its own, so a
       // touch anywhere always just grabs it directly, same as every target used to work before this.
-      if (targetsPattern || targetsMirror) {
+      // A pan that carries on from a long-press grab is always a grab too, wherever the target is right
+      // now: the long press already chose it, and the target is often still springing in when the
+      // finger starts moving. Measuring the outer field from there spun or zoomed the pattern instead
+      // and left the target behind.
+      if ((targetsPattern || targetsMirror) && !longPressGrabbed.value) {
         const { angleDeg, radius } = polarAroundOuterFieldOrigin(event.x, event.y)
         outerFieldActive.value = radius > GRAB_RADIUS_PX
         if (outerFieldActive.value) {
@@ -920,6 +932,14 @@ export function useEpicenter(
       }
       releaseTargets(event.velocityX, event.velocityY)
     })
+    // Runs for every touch that began, whether or not this pan ever activated - the one place that's
+    // sure to see the lift for a long-press grab that never became a drag but whose long press didn't
+    // end with success either (see longPressGesture's own comment).
+    .onFinalize(() => {
+      if (panActive.value || !longPressGrabbed.value) return
+      longPressGrabbed.value = false
+      releaseTargets(0, 0)
+    })
 
   // The one-finger, held-still counterpart to panGesture above: pulls whichever point(s) are active
   // to wherever you're pressing, the same glideTargetsTo an ordinary drag's own onStart already runs
@@ -941,24 +961,25 @@ export function useEpicenter(
   // Gesture.Simultaneous in index.tsx, not exclusive with each other), so if you keep moving your
   // finger after the long press fires, panGesture's own onStart/onUpdate pick up that movement and
   // live-track it exactly like any other drag - nothing here has to hand off control, panGesture was
-  // already watching the whole time. One known edge case worth verifying on a real device: panGesture's
-  // own onStart classifies inner-vs-outer-field by the target's *current* position, which right after a
-  // long-press grab is still mid-spring toward your finger rather than already there - a very fast
-  // follow-up flick, before that spring settles, could misjudge the distance and read as outer-field
-  // instead of a drag continuation. Narrow (needs a hard flick within the spring's own settle time) and
-  // not something to design around speculatively; call out if it turns out to be visible in practice.
+  // already watching the whole time. longPressGrabbed is what tells panGesture's onStart that's what's
+  // happening, so it grabs rather than measuring the outer field from a target that's still springing
+  // in (see its own comment).
   //
-  // onEnd only calls releaseTargets itself when panActive is still false - if panGesture ever
-  // activated during this same touch (you kept dragging after the long press grabbed the point),
-  // panGesture's own onEnd fires for that same finger-lift and already runs this exact release
-  // decision; running it again here too would double-apply it (e.g. starting the same bounce twice
-  // with the same velocity, or recentering out from under a bounce panGesture's onEnd just started).
+  // onEnd releases only on success, a lift while the long press was still held. On iOS the long press
+  // fails the moment the finger moves past its slop (RNLongPressHandler's shouldCancelGesture, measured
+  // from touch-down for the gesture's whole life, active or not), often before panGesture activates for
+  // that same move. That's the drag starting, not a lift: releasing there handed the target to gravity
+  // with the finger still down, so it fell away while you dragged. panGesture's onEnd releases a drag,
+  // and its onFinalize releases a grab that ended without either a drag or a successful lift (a system
+  // cancel), so nothing is left held. longPressGrabbed is cleared by whichever release runs, so a still
+  // lift (long press ends with success, pan finalizes without activating) releases exactly once.
   // A long press that never turns into a drag has no real release velocity of its own, so this passes
   // (0, 0) - the point either settles right where it was pulled to, or keeps rolling from there if
   // gravity's pulling on it, same as letting go of an ordinary drag with no speed on it already does.
   const longPressGesture = Gesture.LongPress()
     .minDuration(LONG_PRESS_MS)
     .onStart((event) => {
+      longPressGrabbed.value = true
       glideTargetsTo(event.x, event.y)
       scheduleOnRN(callWorkletCallback, dragChangeKey)
       if (!grabFired.value) {
@@ -966,8 +987,9 @@ export function useEpicenter(
         scheduleOnRN(callWorkletCallback, grabKey)
       }
     })
-    .onEnd(() => {
-      if (panActive.value) return
+    .onEnd((_event, success) => {
+      if (!success || panActive.value || !longPressGrabbed.value) return
+      longPressGrabbed.value = false
       releaseTargets(0, 0)
     })
 

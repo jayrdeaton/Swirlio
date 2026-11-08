@@ -701,7 +701,7 @@ describe('SwirlScreen gestures', () => {
 
     await act(async () => {
       longPress.__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
-      longPress.__handlers.end?.()
+      longPress.__handlers.end?.({}, true)
     })
 
     const settledX = getLastSpiralProps().epicenterX.value
@@ -732,7 +732,7 @@ describe('SwirlScreen gestures', () => {
       // Both handlers fire for the same physical finger-lift once panGesture has activated - see
       // useEpicenter.ts's longPressGesture own comment for why its onEnd has to recognize that and
       // stay out of panGesture's own release instead of re-running it a second time.
-      longPress.__handlers.end?.()
+      longPress.__handlers.end?.({}, true)
     })
 
     const props = getLastSpiralProps()
@@ -742,6 +742,83 @@ describe('SwirlScreen gestures', () => {
     // is what keeps panGesture's onStart from firing a second one for this same touch - see its own
     // comment), plus one release click from the snap back to center. Not a double-apply of either.
     expect(selection).toHaveBeenCalledTimes(2)
+  })
+
+  // The order a real device reports a long press that turns into a drag: Pan begins on touch-down,
+  // the long press grabs, and the drag starts while the epicenter is still springing in toward the
+  // press (its glide takes about half a second at the default follow speed). The epicenter is put back
+  // partway along that glide by hand, since the mocked withSpring lands instantly.
+  it('keeps following a drag that starts while the long press is still pulling the epicenter in', async () => {
+    const { width, height } = Dimensions.get('window')
+    await renderScreen()
+
+    await act(async () => {
+      gestureTestUtils.getLastGesture('Pan').__handlers.begin?.({ x: width / 2 + width * 0.3, y: height / 2 })
+      oneFingerLongPress().__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+    })
+    // Still well outside GRAB_RADIUS_PX of the finger, partway through the glide
+    getLastSpiralProps().epicenterX.value = 0.05
+    getLastSpiralProps().epicenterY.value = 0
+    await act(async () => {
+      const panGesture = gestureTestUtils.getLastGesture('Pan')
+      panGesture.__handlers.start?.({ x: width / 2 + width * 0.3 + 12, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 - width * 0.2, y: height / 2 + height * 0.2 })
+    })
+
+    const props = getLastSpiralProps()
+    expect(props.epicenterX.value).toBeCloseTo(-0.2, 5)
+    expect(props.epicenterY.value).toBeCloseTo(0.2, 5)
+  })
+
+  // On iOS the long press fails the moment the finger moves past its slop, which can land before Pan
+  // activates for the same move. That isn't a release: the finger is still down and the drag goes on.
+  it('does not release the epicenter when the move that cancels the long press starts a drag', async () => {
+    const { width, height } = Dimensions.get('window')
+    await renderScreen()
+
+    await act(async () => {
+      gestureTestUtils.getLastGesture('Pan').__handlers.begin?.({ x: width / 2 + width * 0.02, y: height / 2 })
+      oneFingerLongPress().__handlers.start?.({ x: width / 2 + width * 0.02, y: height / 2 })
+    })
+    await act(async () => {
+      oneFingerLongPress().__handlers.end?.({}, false)
+    })
+
+    // Close enough to center that a release would have snapped it home with a click
+    expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.02, 5)
+    expect(selection).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      const panGesture = gestureTestUtils.getLastGesture('Pan')
+      panGesture.__handlers.start?.({ x: width / 2 + width * 0.02 + 12, y: height / 2 })
+      panGesture.__handlers.update?.({ x: width / 2 + width * 0.3, y: height / 2 - height * 0.1 })
+    })
+
+    expect(getLastSpiralProps().epicenterX.value).toBeCloseTo(0.3, 5)
+    expect(getLastSpiralProps().epicenterY.value).toBeCloseTo(-0.1, 5)
+  })
+
+  it('still releases a long-press grab that is cancelled without ever turning into a drag', async () => {
+    const { width, height } = Dimensions.get('window')
+    mockSettings({ gravity: 1 })
+    await renderScreen()
+
+    await act(async () => {
+      gestureTestUtils.getLastGesture('Pan').__handlers.begin?.({ x: width / 2 + width * 0.3, y: height / 2 })
+      oneFingerLongPress().__handlers.start?.({ x: width / 2 + width * 0.3, y: height / 2 })
+      oneFingerLongPress().__handlers.end?.({}, false)
+      gestureTestUtils.getLastGesture('Pan').__handlers.finalize?.({}, false)
+    })
+
+    const settledX = getLastSpiralProps().epicenterX.value
+    expect(settledX).toBeCloseTo(0.3, 5)
+
+    await act(async () => {
+      stepBounce(16)
+    })
+
+    // Released, so gravity pulls it back toward center rather than leaving it held as a drag
+    expect(getLastSpiralProps().epicenterX.value).not.toBeCloseTo(settledX, 5)
   })
 
   it('reaches the actual screen edge even dragging through a mirrored wedge whose own correction angle is not axis-aligned', async () => {
