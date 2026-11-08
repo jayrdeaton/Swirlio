@@ -1,5 +1,3 @@
-import 'react-native-reanimated'
-
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons'
 import * as AutoPaper from '@rific/auto-paper'
 import { Provider as AutoPaperProvider, useThemeSettings } from '@rific/auto-paper'
@@ -13,6 +11,7 @@ import React, { useEffect, useMemo } from 'react'
 import { Appearance, LogBox, Platform, StyleSheet, useColorScheme } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import * as RNPaper from 'react-native-paper'
+import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated'
 import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context'
 
 import { ControlGroupBottomSheetContent } from '@/components/ControlGroupBottomSheetContent'
@@ -127,6 +126,10 @@ export default function RootLayout() {
   if (__DEV__ && Platform.OS === 'web') {
     LogBox.ignoreLogs(['Animated: `useNativeDriver` is not supported because the native animated module is missing.'])
   }
+  // ReducedMotionConfig's own dev-only notice, on every launch - the override below is deliberate
+  if (__DEV__) {
+    LogBox.ignoreLogs(['Reduced motion setting is overwritten'])
+  }
 
   // A plain (non-reactive) read here, not the useColorScheme hook - this only seeds the very first
   // paint, avoiding a flash of the old accent color before MonochromeThemeBridge's effect runs; the
@@ -136,6 +139,14 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={styles.root}>
+      {/* Every withSpring/withTiming in the app (and in the fleet packages: the sheets, the FAB fan)
+      animates even with the system's Reduce Motion on. Reanimated's default under Reduce Motion skips
+      an animation straight to its end value, so the long-press pull, every drag's catch-up, the snap
+      home and the sheets all teleported instead of moving, in an app whose whole point is smooth
+      motion (and whose ambient rotation and physics never honored the setting anyway, so nothing was
+      actually calmer, just jumpier). useReducedMotion still reads the system setting, so the guide's
+      own reduced-motion art (GuideArt, @tastic/hud's SwipeHint) is unaffected. */}
+      <ReducedMotionConfig mode={ReduceMotion.Never} />
       {/* initialMetrics seeds the very first paint with the native module's synchronously-cached
       frame/insets instead of {top:0,...} - react-native-safe-area-context's own documented fix for
       the first-render-zero-insets race. Without it, anything reading insets.top/insets.bottom on
