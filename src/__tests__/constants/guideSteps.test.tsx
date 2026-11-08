@@ -36,7 +36,7 @@ describe('getGuideSteps', () => {
 
   it('teaches tilt and shake only on native, where they exist', () => {
     const titles = (native: boolean) => getGuideSteps({ touch: true, native }).map((step) => step.title)
-    expect(titles(true)).toContain('Tap, Tilt, Shake')
+    expect(titles(true)).toContain('Tap, Shake, Tilt')
     expect(getGuideSteps({ touch: true, native: false }).some((step) => /tilt|shake/i.test(`${step.title} ${step.body}`))).toBe(false)
   })
 

@@ -15,7 +15,7 @@ interface GuideStepsInput {
 // GuideHost feeds it useIsTouchPrimaryDevice() and the platform, and memoizes the result.
 //
 // These are the things a first-time player can't work out from the screen, at fresh-install
-// defaults (Pattern target, 0 mirror lines, tilt and shake on). Every sentence is checked against the
+// defaults (Pattern target, 0 mirror lines, shake on, tilt off). Every sentence is checked against the
 // code:
 // - Drag and Spin: a drag that starts on the pattern's center moves it, one that starts farther out
 //   spins it as it circles (useEpicenter.ts's inner drag vs. outer field). Throwing and the outer
@@ -28,8 +28,10 @@ interface GuideStepsInput {
 //   points at the one combination that makes the kaleidoscope: a fresh install has 0 mirror lines,
 //   and twisting with Mirror picked is how lines get added (it's exempt from the 0-lines fallback to
 //   Pattern). Desktop can't twist, so it lists the targets instead.
-// - Tap, Tilt, Shake: a one-finger tap swaps the colors whatever the target. Tilt and shake are on by
-//   default on native.
+// - Tap, Shake, Tilt: a one-finger tap swaps the colors whatever the target. Shake is on by default on
+//   native; tilt is off (since 2026-11-08), so the card names its toggle, Tilt Control in the gravity
+//   group's sheet. Existing players kept tilt on (their saved setting), so the change needed no
+//   GUIDE_VERSION bump.
 // - Controls Fade: the controls auto-hide after 5 seconds by default, and EdgeRevealZones brings them
 //   back. The top-left zone is left out on purpose: tapping it also pauses, which a player following
 //   the card wouldn't expect. On desktop, pointing at a zone is enough.
@@ -65,8 +67,8 @@ export function getGuideSteps({ touch, native }: GuideStepsInput): GuideStep[] {
     },
     native
       ? {
-          title: 'Tap, Tilt, Shake',
-          body: 'Tap to swap colors. Tilt to roll the swirl around. Shake for a whole new look.',
+          title: 'Tap, Shake, Tilt',
+          body: 'Tap to swap colors. Shake for a new look. Turn on Tilt Control to roll the swirl.',
           art: <GuideTiltShake />
         }
       : {

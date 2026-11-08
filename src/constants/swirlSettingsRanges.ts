@@ -80,8 +80,11 @@ export function controlsAutoHideDelayMs(speed: number): number | null {
 // units) applied every frame gravity is nonzero, not just alongside a release-driven bounce - see
 // useDragPointPhysics.ts's frame callback and its ambient-activation reaction. 0 leaves the epicentre
 // with no pull toward the gravity center at all; 5 pulls it back firmly enough to noticeably overshoot
-// past the gravity center before friction and further pulls settle it there. Nonzero by default (see
-// DEFAULT_GRAVITY) so tilt has something to actually roll the epicentre with out of the box.
+// past the gravity center before friction and further pulls settle it there. Off by default
+// (2026-11-08, was 1): out of the box, whatever you drag or throw stays where it lands instead of
+// drifting back to the center and wobbling there. Tilt doesn't need it - tilt is its own pull (see
+// useEpicenter.ts's TILT_PULL_STRENGTH) - and the Gravity target's pinch, the slider and Randomize
+// all bring it up.
 // MIN is -MAX_GRAVITY, not 0 - negative gravity is a repeller (the same spring constant, flipped into
 // pushing the epicentre away instead of pulling it in). This used to be pinned at 0 (repel tried and
 // pulled back out, not because anything about it was broken, just not worth keeping live at the time)
@@ -93,7 +96,7 @@ export function controlsAutoHideDelayMs(speed: number): number | null {
 // gravity-targeting pinch gesture itself (see index.tsx's own GRAVITY_ZERO_STICKY_ZONE).
 export const MAX_GRAVITY = 5
 export const MIN_GRAVITY = -MAX_GRAVITY
-export const DEFAULT_GRAVITY = 1
+export const DEFAULT_GRAVITY = 0
 // A linear multiplier on raw mic RMS, not a dB amount - see micSensitivity's own comment on
 // SwirlSettings above. 1 is unity/neutral (exactly useAudioReactive's existing calibration, unchanged
 // from before this setting existed), and 4 is loud enough to push even a quiet room's mic input toward
@@ -105,8 +108,10 @@ export const DEFAULT_GRAVITY = 1
 export const MIN_MIC_SENSITIVITY = 0.1
 export const MAX_MIC_SENSITIVITY = 4
 // A time-scale multiplier on the spring driving glideTo/recenter (see useDragPointPhysics.ts), not a
-// raw damping/stiffness value - 1 is the original feel (BASE_DAMPING/BASE_STIFFNESS, unscaled), 3 is
-// noticeably snappier, and 0.25 is slow and floaty enough to watch the catch-up happen frame by frame.
+// raw damping/stiffness value - 1 is the original feel (BASE_DAMPING/BASE_STIFFNESS, unscaled, settling
+// in about 0.45s), 3 is noticeably snappier, and 0.25 is slow and floaty enough to watch the catch-up
+// happen frame by frame. The default is 2 (2026-11-08, was 1): settles in about 0.22s, still a visible
+// glide, with room left above it on the slider.
 // Scaling stiffness by speed^2 and damping by speed (rather than moving either alone) is what keeps
 // the spring's own damping *ratio* - how bouncy versus dead-stop it looks - constant across the whole
 // range: only how fast it gets there changes, not its character. MIN stops short of 0 - a speed of
@@ -215,7 +220,7 @@ export const defaultSettings: SwirlSettings = {
   dashStyle: DEFAULT_DASH_STYLE,
   deferBottomEdgeGestures: false,
   fixedSpacing: DEFAULT_FIXED_SPACING,
-  followSpeed: 1,
+  followSpeed: 2,
   foregroundColors: DEFAULT_FOREGROUND_COLORS,
   foregroundCycleSpeed: 1,
   gestureTarget: 'pattern',
@@ -249,7 +254,9 @@ export const defaultSettings: SwirlSettings = {
   soundEnabled: !__DEV__,
   strokeWidth: DEFAULT_STROKE_WIDTH,
   tightness: DEFAULT_TIGHTNESS,
-  tiltEnabled: true,
+  // Opt-in (2026-11-08, was on): the gravity group's Tilt Control toggle, or the tilt button on the
+  // canvas while Gravity is the target, turns it on.
+  tiltEnabled: false,
   triggerStackExpanded: true,
   zoomSpeed: 2
 }

@@ -98,7 +98,7 @@ describe('useSwirlSettings', () => {
     expect(getApi().settings.backgroundCycleSpeed).toBe(1)
     expect(getApi().settings.polygonSides).toBe(4)
     expect(getApi().settings.rotationSpeed).toBe(2)
-    expect(getApi().settings.tiltEnabled).toBe(true)
+    expect(getApi().settings.tiltEnabled).toBe(false)
     expect(getApi().settings.mirrorLines).toBe(0)
     expect(getApi().settings.showLabels).toBe(false)
     expect(getApi().settings.deferBottomEdgeGestures).toBe(false)
@@ -654,11 +654,11 @@ describe('useSwirlSettings', () => {
     expect(controlsAutoHideDelayMs(5)).toBe(1000)
   })
 
-  it('defaults gravity to 1 (nonzero, so tilt has something to roll with out of the box) and lets it be changed', async () => {
+  it('defaults gravity to 0 (off, so whatever you drag or throw stays where it lands) and lets it be changed', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
-    expect(getApi().settings.gravity).toBe(1)
+    expect(getApi().settings.gravity).toBe(0)
 
     await act(async () => {
       getApi().setGravity(2.5)
@@ -693,17 +693,17 @@ describe('useSwirlSettings', () => {
     await waitFor(() => expect(getApi().settings.gravity).toBe(5))
   })
 
-  it('defaults followSpeed to 1 (the original, un-tunable feel) and lets it be changed', async () => {
+  it('defaults followSpeed to 2 (a quicker glide than the original 1) and lets it be changed', async () => {
     ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
     const { getApi } = await renderProbe()
 
-    expect(getApi().settings.followSpeed).toBe(1)
+    expect(getApi().settings.followSpeed).toBe(2)
 
     await act(async () => {
-      getApi().setFollowSpeed(2)
+      getApi().setFollowSpeed(1.5)
     })
 
-    await waitFor(() => expect(getApi().settings.followSpeed).toBe(2))
+    await waitFor(() => expect(getApi().settings.followSpeed).toBe(1.5))
   })
 
   it('clamps followSpeed setter and hydration values to their valid range', async () => {

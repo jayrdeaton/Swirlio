@@ -184,3 +184,13 @@ Reproduced and checked on the iPhone 18 Pro simulator from a Release build with 
 ## Animations ignore Reduce Motion (2026-11-08)
 
 `_layout.tsx` mounts Reanimated's `<ReducedMotionConfig mode={ReduceMotion.Never} />`, so every `withSpring`/`withTiming` in the app and in the fleet packages it renders animates whatever the system's Reduce Motion setting says. Reanimated's default (`ReduceMotion.System`) skips an animation straight to its end value under Reduce Motion, which made the long-press pull, every drag's catch-up, the snap home and the sheets teleport. Jay's rule: everything in Swirlio moves smoothly, that's the point of the app. The ambient rotation and the bounce physics are frame callbacks and never honored the setting anyway. `useReducedMotion()` reads the system setting directly, not this override, so `GuideArt` and `@tastic/hud`'s guide still show their static art under Reduce Motion. Checked on the iPhone 18 Pro simulator, which has Reduce Motion on: the long-press pull went from a one-frame jump to a glide over about a third of a second.
+
+## Default changes (2026-11-08)
+
+After an audit of every default in `defaultSettings` (`constants/swirlSettingsRanges.ts`), three changed:
+
+- **Tilt off** (`tiltEnabled: false`, was on). Turned on by the gravity group's Tilt Control toggle, or the tilt button on the canvas while Gravity is the target. The guide's fourth native card is now "Tap, Shake, Tilt" and names the toggle (no `GUIDE_VERSION` bump: existing players kept tilt on). The store description and README say tilt has to be turned on.
+- **Tracking speed 2** (`followSpeed`, was 1): the glide settles in about 0.22s instead of 0.45s.
+- **Gravity 0** (`DEFAULT_GRAVITY`, was 1): what you drag or throw stays where it lands. The gravity group's Reset and Reset All now set it to 0 too. Tilt is its own pull and doesn't need gravity.
+
+Defaults only reach fresh installs: the whole settings object is saved on every change, so existing installs keep their stored values, and Reset All keeps tilt and tracking speed by design. The store text change needs `eas metadata:push` to reach App Store Connect.
