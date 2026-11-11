@@ -113,6 +113,11 @@ export function mergePersistedSettings(rawValue: string): SwirlSettings | null {
       ...(typeof persisted.gravityMarkerVisible === 'boolean' ? { gravityMarkerVisible: persisted.gravityMarkerVisible } : null),
       ...(typeof persisted.hapticsEnabled === 'boolean' ? { hapticsEnabled: persisted.hapticsEnabled } : null),
       ...(typeof persisted.holeRadius === 'number' ? { holeRadius: clamp(persisted.holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : null),
+      // The amounts each layer's on switch puts back (see SwirlSettings' lastGravity). Never 0, so a
+      // 0 or missing value keeps defaultSettings' starter amount.
+      ...(typeof persisted.lastGravity === 'number' && Number.isFinite(persisted.lastGravity) && persisted.lastGravity !== 0 ? { lastGravity: clamp(persisted.lastGravity, MIN_GRAVITY, MAX_GRAVITY) } : null),
+      ...(typeof persisted.lastMirrorLines === 'number' && persisted.lastMirrorLines >= 1 ? { lastMirrorLines: clampInt(persisted.lastMirrorLines, 1, MAX_MIRROR_LINES) } : null),
+      ...(typeof persisted.lastParticleCount === 'number' && persisted.lastParticleCount >= 1 ? { lastParticleCount: clampInt(persisted.lastParticleCount, 1, MAX_PARTICLE_COUNT) } : null),
       // Checked against PATTERN_ORDER itself rather than an enumerated list of literals: this is
       // what makes retiring a pattern safe later, not just adding one. Whatever's persisted - a
       // pattern that was removed after shipping, a typo, garbage from a future version - either

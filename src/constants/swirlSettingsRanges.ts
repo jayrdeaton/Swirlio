@@ -208,6 +208,14 @@ export const DEFAULT_MIRROR_ALTERNATE_COLORS = false
 export const DEFAULT_MIRROR_GAP = 0
 export const DEFAULT_MIRROR_LINES = 0
 export const DEFAULT_MIRROR_ROTATION_SPEED = 0
+// What each layer's on switch (Mirror, Beads, Gravity, in their own sheets) restores when its value is
+// 0 and no amount has been remembered yet - see lastMirrorLines/lastParticleCount/lastGravity on
+// SwirlSettings. Zero is still each layer's off position (every consumer already treats it that way,
+// and the mirror twist dial passes through it); the switch only moves the value between 0 and the
+// remembered amount. Also where a group's own Reset puts a layer that's switched on.
+export const STARTER_MIRROR_LINES = 3
+export const STARTER_PARTICLE_COUNT = 40
+export const STARTER_GRAVITY = 1
 
 export const defaultSettings: SwirlSettings = {
   audioReactiveEnabled: false,
@@ -229,6 +237,9 @@ export const defaultSettings: SwirlSettings = {
   hapticsEnabled: true,
   holeRadius: 0,
   holeShaped: true,
+  lastGravity: STARTER_GRAVITY,
+  lastMirrorLines: STARTER_MIRROR_LINES,
+  lastParticleCount: STARTER_PARTICLE_COUNT,
   micSensitivity: 1,
   mirrorAlternateColors: DEFAULT_MIRROR_ALTERNATE_COLORS,
   mirrorGap: DEFAULT_MIRROR_GAP,

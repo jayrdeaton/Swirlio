@@ -13,7 +13,7 @@ An interactive kaleidoscope toy driven by touch, tilt, and gravity physics (Expo
 ```bash
 npm run lint          # expo lint .
 npm run fix            # expo lint . --fix
-npm test               # Jest (38 suites, 699 tests: 677 run, 22 skipped)
+npm test               # Jest (38 suites, 711 tests: 689 run, 22 skipped)
 npm run test:watch     # Jest --watchAll
 npm run typecheck      # tsc
 npm run verify         # lint + test + typecheck
@@ -191,6 +191,30 @@ After an audit of every default in `defaultSettings` (`constants/swirlSettingsRa
 
 - **Tilt off** (`tiltEnabled: false`, was on). Turned on by the gravity group's Tilt Control toggle, or the tilt button on the canvas while Gravity is the target. The guide's fourth native card is now "Tap, Shake, Tilt" and names the toggle (no `GUIDE_VERSION` bump: existing players kept tilt on). The store description and README say tilt has to be turned on.
 - **Tracking speed 2** (`followSpeed`, was 1): the glide settles in about 0.22s instead of 0.45s.
-- **Gravity 0** (`DEFAULT_GRAVITY`, was 1): what you drag or throw stays where it lands. The gravity group's Reset and Reset All now set it to 0 too. Tilt is its own pull and doesn't need gravity.
+- **Gravity 0** (`DEFAULT_GRAVITY`, was 1): what you drag or throw stays where it lands. Reset All sets it to 0 too (the gravity group's own Reset keeps its switch, see "Layer switches" below). Tilt is its own pull and doesn't need gravity.
 
 Defaults only reach fresh installs: the whole settings object is saved on every change, so existing installs keep their stored values, and Reset All keeps tilt and tracking speed by design. The store text change needs `eas metadata:push` to reach App Store Connect.
+
+## Layer switches (2026-11-08)
+
+Pattern, Mirror, Particles and Gravity each have an on/off switch in their top sheet, in the same slot right after Randomize and Reset, with the same `power` icon and the layer's name as its label (`ControlGroupTopSheetContent.tsx`). Plan: `/Users/jay/.claude/plans/replicated-dazzling-marble.md`.
+
+- **Zero stays "off".** Every consumer already treated `mirrorLines`, `particleCount` and `gravity` at 0 as off (render, physics, gesture fallbacks, the signed mirror twist dial that flips alternate colors past 0), so there's no separate on/off flag. A switch reads on when its value isn't 0; `setMirrorEnabled`/`setParticlesEnabled`/`setGravityEnabled` move the value between 0 and a remembered amount, `lastMirrorLines`/`lastParticleCount`/`lastGravity`. `setMirrorLines`/`setParticleCount`/`setGravity` record every nonzero value there, so a twist, pinch or slider through 0 keeps the last real amount, and touching a layer's controls turns it on by itself. Pattern keeps its boolean, `patternVisible` (nothing to turn down).
+- **Starter amounts** (`STARTER_MIRROR_LINES` 3, `STARTER_PARTICLE_COUNT` 40, `STARTER_GRAVITY` 1 in `swirlSettingsRanges.ts`) are the remembered amounts on a fresh install and after Reset All. `lastGravity` keeps its sign, so a repelling well comes back repelling.
+- **Existing installs needed no migration:** the switches read their saved values, so people keep what they had. `mergePersistedSettings` only loads the three new fields (never 0, clamped like their values).
+- **Randomize leaves switches alone.** Its mirror-lines, bead-count and gravity rerolls go through `setMirrorLinesKeepingSwitch`/`setParticleCountKeepingSwitch`/`setGravityKeepingSwitch` (`useRerollUnits.tsx`): the live value when the layer is on (mirror lines now 1 to 6, never 0), only the remembered amount when it's off. So shake, randomize-everything and the forward tweak never switch a layer on or off. A layer's own Randomize (its sheet button, trigger long-press, fan wedge or primary-FAB hold) then switches it on through `switchOnLayer` in `index.tsx`, like pattern randomize already forced `patternVisible` on. Undo restores the switch with the value, since those values are Look fields.
+- **Resets:** a group's own Reset keeps its switch (the starter amount if on, only the remembered amount if off), through the same `*KeepingSwitch` setters. Reset All still resets every value, so only the pattern is on afterward.
+- **Tests:** "layer switches" in `useSwirlSettings.test.tsx`, plus the switch-on and shake tests next to the pattern randomize tests in `swirlScreen.gesture.test.tsx`. The screen tests' look-history checks list the `*KeepingSwitch` setters alongside the plain ones.
+- **Checked** on web: each sheet shows its switch, Mirror on from a fresh install draws 3 lines and off keeps them, Particles on draws 40 beads, Pattern off leaves the beads alone on screen, Gravity on is 1, and the Mirror sheet's Randomize switched mirror on. Not checked on a device.
+- **Canvas layer stack:** the render restructure from the same plan; see "Layer-based canvas" below.
+
+## Layer-based canvas (2026-11-08)
+
+The canvas is one kaleidoscope wrapping a stack of layers, so new sources (a camera, touch ripples) can be drawn as layers instead of riding inside the pattern.
+
+- `Spiral.tsx` renders the background Rect, then `PatternSource`, then `Kaleidoscope`, then `GravityWell`. `PatternSource` mounts the active pattern component and hands its geometry to a render function. With `patternVisible` off it mounts none and hands `null`, so a hidden pattern's geometry isn't computed.
+- `Kaleidoscope` (in `KaleidoscopeCopy.tsx`) is the `kaleidoscopeMatrix` Group and one `KaleidoscopeCopy` per copy. It calls a per-copy render function with that copy's `strokeColor`, since alternate colors swap it.
+- Each copy draws `PatternLayer` (`components/layers/`, the cropped, dashed stroke) and `BeadLayer` (the bead buckets) inside one wedge clip. Keep one clip per copy around every layer: `WEDGE_SEAM_OVERLAP_DEG` was tuned against it.
+- New layers go in that per-copy render function in `Spiral.tsx`. Anything that imports Skia must stay reachable only through `Spiral.tsx` (the web lazy loader).
+- Toggling or switching the pattern remounts the kaleidoscope, which is cheap since everything it draws from is a SharedValue above it.
+- Checked on the iPhone 18 Pro simulator from a Release build by swapping only the JS bundle: 12 seeded looks pixel-identical before and after, outside the Dynamic Island.

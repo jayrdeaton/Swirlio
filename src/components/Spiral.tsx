@@ -1,6 +1,6 @@
-import { Canvas, FillType, Group, Rect, Skia, SkPath, SkPoint } from '@shopify/react-native-skia'
+import { Canvas, FillType, Rect, Skia, SkPath, SkPoint } from '@shopify/react-native-skia'
 import { GravityWell } from '@tastic/sprites/gravity'
-import React from 'react'
+import React, { ReactNode } from 'react'
 import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { SharedValue, useDerivedValue } from 'react-native-reanimated'
 
@@ -8,7 +8,7 @@ import { clamp } from '@/constants/clamp'
 import { buildFlowerPoints } from '@/constants/flowerMath'
 import { gravityHoleRadius } from '@/constants/gravityWellMath'
 import { buildHeartPoints } from '@/constants/heartMath'
-import { copyCountForMirrorLines, farthestCornerDistance, rotationMatrix, translateRotateMatrix, wedgeAngleDegrees } from '@/constants/kaleidoscope'
+import { farthestCornerDistance, translateRotateMatrix } from '@/constants/kaleidoscope'
 import { ParticleShape } from '@/constants/particleShapes'
 import { hasPolygonSides, PatternType } from '@/constants/patterns'
 import { buildPolygonPoints } from '@/constants/polygonMath'
@@ -18,7 +18,9 @@ import { useCyclingColor } from '@/hooks/useCyclingColor'
 import { baseShapePoints, MAX_PARTICLE_COLOR_BUCKETS } from '@/hooks/useParticleField'
 import { MAX_CROP_RADIUS, MAX_GRAVITY, MIN_CROP_RADIUS } from '@/hooks/useSwirlSettings'
 
-import { KaleidoscopeCopy } from './KaleidoscopeCopy'
+import { Kaleidoscope } from './KaleidoscopeCopy'
+import { BeadLayer } from './layers/BeadLayer'
+import { PatternLayer } from './layers/PatternLayer'
 import { FlowerPattern } from './patterns/FlowerPattern'
 import { HeartPattern } from './patterns/HeartPattern'
 import { PolygonPattern } from './patterns/PolygonPattern'
@@ -95,15 +97,87 @@ export type PatternGeometry = {
   intervals: SharedValue<number[]>
 }
 
+type PatternSourceProps = {
+  pattern: PatternType
+  // Spiral's own patternVisible - see its prop comment.
+  visible: boolean
+  radius: SharedValue<number>
+  pulse: SharedValue<number>
+  tightness: SharedValue<number>
+  sides: SharedValue<number>
+  reversed: SharedValue<boolean>
+  strokeWidth: SharedValue<number>
+  dashStyle: SharedValue<DashStyle>
+  fixedSpacing: boolean
+  referenceRadius: number
+  // Called once per render with the active pattern's geometry, or null while the pattern is hidden.
+  children: (geometry: PatternGeometry | null) => ReactNode
+}
+
+// Mounts whichever pattern component is active and hands its geometry to `children`. A hidden pattern
+// mounts none at all, so none of its geometry is computed every frame for nothing; `children` still
+// runs (with null), since the beads and the mirror's alternate-color fill don't depend on the pattern.
+// Switching pattern or visibility swaps the element here, which remounts everything `children`
+// returns: cheap, since every value the kaleidoscope draws from lives in SharedValues above it.
+function PatternSource({ pattern, visible, radius, pulse, tightness, sides, reversed, strokeWidth, dashStyle, fixedSpacing, referenceRadius, children }: PatternSourceProps) {
+  if (!visible) return children(null)
+  switch (pattern) {
+    case 'spiral':
+      return (
+        <SpiralArms radius={radius} tightness={tightness} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
+          {children}
+        </SpiralArms>
+      )
+    case 'rings':
+      return (
+        <RingsPattern radius={radius} pulse={pulse} tightness={tightness} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
+          {children}
+        </RingsPattern>
+      )
+    case 'heart':
+      return (
+        <HeartPattern radius={radius} pulse={pulse} tightness={tightness} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
+          {children}
+        </HeartPattern>
+      )
+    case 'polygon':
+      return (
+        <PolygonPattern radius={radius} pulse={pulse} tightness={tightness} sides={sides} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
+          {children}
+        </PolygonPattern>
+      )
+    case 'star':
+      return (
+        <StarPattern radius={radius} pulse={pulse} tightness={tightness} sides={sides} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
+          {children}
+        </StarPattern>
+      )
+    case 'starburst':
+      return (
+        <StarburstPattern radius={radius} tightness={tightness} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
+          {children}
+        </StarburstPattern>
+      )
+    case 'flower':
+      return (
+        <FlowerPattern radius={radius} pulse={pulse} tightness={tightness} sides={sides} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
+          {children}
+        </FlowerPattern>
+      )
+  }
+}
+
 export type SpiralProps = {
   pattern: PatternType
   // Whether the pattern's own linework draws at all - see useSwirlSettings.tsx's own patternVisible
   // comment. Plain, not a SharedValue: only ever changes from a deliberate toggle press or a pattern
   // change (see index.tsx's own nextPattern), both of which already re-render this component, the same
   // "nothing here needs UI-thread reactivity" reasoning showGravityMarker just below already uses.
-  // Gates renderCopies' own pattern <Path> below, not the beads - beads stay independent of this
-  // entirely (see particleTransform's own comment for why beads already don't share the pattern's own
-  // rendering path), and not the crop/hole clip either, which particles never used to begin with.
+  // Gates PatternSource below: hidden mounts no pattern component at all (so its geometry isn't
+  // computed either) and drops PatternLayer from every copy. Not the beads - BeadLayer stays
+  // independent of this entirely (see particleTransform's own comment for why beads already don't
+  // share the pattern's own rendering path), and not the crop/hole clip either, which particles never
+  // used to begin with.
   patternVisible: boolean
   foregroundColors: string[]
   backgroundColors: string[]
@@ -327,7 +401,7 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
   // in the first place - Skia's clip is a plain geometric clip either way, so that reasoning still
   // applies, it just no longer needs restating per rendering backend.
   //
-  // Computed once here - not per kaleidoscope copy - and handed down to every KaleidoscopeCopy as the
+  // Computed once here - not per kaleidoscope copy - and handed to every copy's PatternLayer as the
   // same shared value: the path depends only on radius/fixedSpacing/cropRadius/cropShaped/holeRadius/
   // holeShaped/pattern/sides/referenceRadius, never on which copy is being drawn, so building it once
   // and reusing it for all (up to 12) copies avoids recomputing and reallocating an identical SkPath
@@ -393,13 +467,8 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
     return builder.setFillType(FillType.EvenOdd).detach()
   })
 
-  // Pivots on mirrorOriginX/Y (the wedge boundaries' own anchor), not originX/Y (the pattern
-  // content's) - spinning the wedges around a point that isn't itself their own anchor would swing
-  // the boundaries in a circle around it every frame instead of turning them in place.
-  const kaleidoscopeMatrix = useDerivedValue(() => rotationMatrix(mirrorOriginX.value, mirrorOriginY.value, mirrorRotation.value))
-
   // Identical for every copy (depends only on originX/Y/rotation, never on copyIndex) - computed once
-  // here, rather than once per KaleidoscopeCopy, for the same reason cropClip already is: a matrix -
+  // here, rather than once per copy's PatternLayer, for the same reason cropClip already is: a matrix -
   // translateRotateMatrix's own comment explains why this can't be Skia's plain translateX/translateY/
   // rotate transform shorthand instead: those compose scale-then-rotate-then-translate around the
   // LOCAL origin in a fixed order, whereas this needs rotate-then-translate as one specific
@@ -410,8 +479,8 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
   // Beads' own placement transform - translates to the literal window center (centerX/centerY, plain
   // numbers, not the SharedValue originX/Y the pattern's own innerTransform above tracks), and never
   // rotates. Beads still tumble under their own gravity/friction physics and still mirror/wedge-clip
-  // through every copy (see KaleidoscopeCopy's own particleTransform Group, a sibling of the pattern's
-  // innerTransform Group rather than nested inside it), but their whole coordinate space is otherwise
+  // through every copy (see BeadLayer, a sibling of PatternLayer inside each copy rather than nested
+  // inside the pattern's own innerTransform Group), but their whole coordinate space is otherwise
   // fully independent of the pattern's own epicentre - dragging the pattern must never visibly drag the
   // bead field along with it (see useParticleField.ts's own top comment, which this mirrors on the
   // render side). No rotation.value either, on top of that independence - see this comment's own earlier
@@ -419,7 +488,7 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
   // point goes one step further, dropping position too. Reuses translateRotateMatrix rather than a new
   // helper - angleDeg 0 makes its rotation term the identity, so the result is exactly a translation
   // matrix with no separate function needed. Wrapped in useDerivedValue purely so this stays a
-  // SharedValue<AffineMatrix> like every other KaleidoscopeCopy prop, even though the value itself never
+  // SharedValue<AffineMatrix> like PatternLayer's own innerTransform, even though the value itself never
   // actually changes frame to frame.
   const particleTransform = useDerivedValue(() => translateRotateMatrix(centerX, centerY, 0))
 
@@ -434,8 +503,8 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
   // force this to re-read the mutated arrays each frame, the same "compute once, share across every
   // copy" convention every other pattern's own geometry (see PatternGeometry's own comment) already
   // follows - a single shared base shape point list per frame (baseShapePoints), translated per
-  // particle, rather than each of up to 12 KaleidoscopeCopy instances rebuilding its own copy of this
-  // same work.
+  // particle, rather than each of up to 12 copies' BeadLayer rebuilding its own copy of this same
+  // work.
   const particleBucketPaths = useDerivedValue(() => {
     // the dependency described above; the tick's own value is never otherwise needed.
     // useDerivedValue tracks dependencies by which SharedValues get .value read during this
@@ -479,7 +548,7 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
     // reasoning particlesActive/particleBucketPaths' own null case already uses elsewhere: no point
     // building a second full set of merged border paths (bucketed independently from fill - see
     // useParticleField.ts's own borderColorIndex comment for why it can't just reuse the fill bucket)
-    // when KaleidoscopeCopy is about to draw them at zero width anyway.
+    // when BeadLayer is about to draw them at zero width anyway.
     const buildBorders = particleBorderWidth.value > 0
     const effectiveBorderBucketCount = buildBorders ? Math.max(1, Math.min(Math.round(particleBorderColorCount.value), MAX_PARTICLE_COLOR_BUCKETS)) : 0
     const borderBuilders = buildBorders ? Array.from({ length: MAX_PARTICLE_COLOR_BUCKETS }, () => Skia.PathBuilder.Make()) : []
@@ -515,38 +584,6 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
     return { fill: fillBuilders.map((builder) => builder.detach()), border: borderBuilders.map((builder) => builder.detach()) }
   })
 
-  // 0 mirror lines is the one case with no wedges to speak of (see wedgeAngleDegrees/copyCountForMirrorLines)
-  // - a single, unmirrored copy, kept out of the wedge-transform machinery entirely rather than letting
-  // it degrade to a rotate(0-degree-wedge) that happens to be a no-op. With no mirroring there's
-  // nothing to wedge at all, so this stays exactly today's plain, unmirrored pattern.
-  const active = mirrorLines > 0
-  const wedgeAngleDeg = wedgeAngleDegrees(mirrorLines)
-  const copyCount = copyCountForMirrorLines(mirrorLines)
-
-  // Only geometrically meaningful with real, non-overlapping wedges to alternate between - active
-  // (mirrorLines > 0) guarantees an even copy count (see copyCountForMirrorLines), so alternating by
-  // copyIndex parity is always a valid checkerboard here, never an odd-one-out.
-  const alternatingActive = active && mirrorAlternateColors
-
-  // Renders every kaleidoscope copy given one already-computed pattern geometry - handed to whichever
-  // pattern component below is actually active as its `children` render prop, so it runs exactly once
-  // per Spiral render no matter how many copies (1 to 12) end up sharing that same geometry. Each
-  // pattern component computes path/width/intervals itself (see PatternGeometry's own comment) and
-  // calls this with the result instead of rendering a <Path> directly.
-  function renderCopies(geometry: PatternGeometry) {
-    return (
-      <Group matrix={kaleidoscopeMatrix}>
-        {Array.from({ length: copyCount }, (_, copyIndex) => {
-          // Even copies are the "direct" half of each mirrored pair, odd copies the reflection - see
-          // wedgeContentTransform. That parity is also exactly the checkerboard alternation: adjacent
-          // wedges always differ in parity, so colouring by it is already a valid 2-colouring.
-          const isAlternate = alternatingActive && copyIndex % 2 === 1
-          return <KaleidoscopeCopy key={copyIndex} copyIndex={copyIndex} wedgeAngleDeg={wedgeAngleDeg} mirrorGap={mirrorGap} active={active} mirrorOriginX={mirrorOriginX} mirrorOriginY={mirrorOriginY} innerTransform={innerTransform} particleTransform={particleTransform} strokeColor={isAlternate ? background : foreground} backgroundFill={alternatingActive ? (isAlternate ? foreground : background) : null} cropClip={cropClip} geometry={geometry} patternVisible={patternVisible} particleBucketPaths={particlesActive ? particleBucketPaths : null} particleBorderWidth={particleBorderWidth} particleColors={particleColors} particleBorderColors={particleBorderColors} />
-        })}
-      </Group>
-    )
-  }
-
   return (
     // What actually paints the background is the plain Rect below, the very first thing drawn in the
     // canvas, filled edge-to-edge before anything else - not this wrapping View's own style, which
@@ -559,41 +596,23 @@ export const Spiral = React.memo(function Spiral({ pattern, patternVisible, fore
       nothing to gain from a platform split over two numbers already sitting right here. */}
       <Canvas style={{ width, height }}>
         <Rect x={0} y={0} width={width} height={height} color={background} />
-        {pattern === 'spiral' && (
-          <SpiralArms radius={radius} tightness={tightness} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
-            {renderCopies}
-          </SpiralArms>
-        )}
-        {pattern === 'rings' && (
-          <RingsPattern radius={radius} pulse={pulse} tightness={tightness} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
-            {renderCopies}
-          </RingsPattern>
-        )}
-        {pattern === 'heart' && (
-          <HeartPattern radius={radius} pulse={pulse} tightness={tightness} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
-            {renderCopies}
-          </HeartPattern>
-        )}
-        {pattern === 'polygon' && (
-          <PolygonPattern radius={radius} pulse={pulse} tightness={tightness} sides={sides} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
-            {renderCopies}
-          </PolygonPattern>
-        )}
-        {pattern === 'star' && (
-          <StarPattern radius={radius} pulse={pulse} tightness={tightness} sides={sides} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
-            {renderCopies}
-          </StarPattern>
-        )}
-        {pattern === 'starburst' && (
-          <StarburstPattern radius={radius} tightness={tightness} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
-            {renderCopies}
-          </StarburstPattern>
-        )}
-        {pattern === 'flower' && (
-          <FlowerPattern radius={radius} pulse={pulse} tightness={tightness} sides={sides} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
-            {renderCopies}
-          </FlowerPattern>
-        )}
+        {/* The kaleidoscope wraps a stack of layers: every copy draws the same layers, in order, inside
+        its own wedge (see Kaleidoscope in KaleidoscopeCopy.tsx). PatternSource sits outside it so the
+        pattern's geometry is computed once per frame, not once per copy, and hands null while the
+        pattern is hidden. */}
+        <PatternSource pattern={pattern} visible={patternVisible} radius={radius} pulse={pulse} tightness={tightness} sides={sides} reversed={reversed} strokeWidth={strokeWidth} dashStyle={dashStyle} fixedSpacing={fixedSpacing} referenceRadius={referenceRadius}>
+          {(geometry) => (
+            <Kaleidoscope mirrorLines={mirrorLines} mirrorAlternateColors={mirrorAlternateColors} mirrorGap={mirrorGap} mirrorRotation={mirrorRotation} mirrorOriginX={mirrorOriginX} mirrorOriginY={mirrorOriginY} foreground={foreground} background={background}>
+              {({ strokeColor }) => (
+                <>
+                  {geometry && <PatternLayer innerTransform={innerTransform} cropClip={cropClip} geometry={geometry} strokeColor={strokeColor} />}
+                  {/* After the pattern, so beads sit on top of it. */}
+                  {particlesActive && <BeadLayer particleTransform={particleTransform} particleBucketPaths={particleBucketPaths} particleBorderWidth={particleBorderWidth} particleColors={particleColors} particleBorderColors={particleBorderColors} />}
+                </>
+              )}
+            </Kaleidoscope>
+          )}
+        </PatternSource>
         {/* Drawn last, on top of every pattern copy, so it's always legible regardless of what's
         underneath. showGravityMarker is a plain JS conditional (not a worklet-reactive opacity) -
         it only ever changes from a deliberate toggle press (see its own prop comment), which already

@@ -12,14 +12,16 @@ import { buildStarPoints } from '@/constants/starMath'
 import { MAX_PARTICLE_COUNT } from '@/constants/swirlSettingsRanges'
 import { reflectOffAxis } from '@/hooks/useDragPointPhysics'
 
-// How many distinct bead colors can ever be drawn at once, independent of how long
-// settings.particleColors actually grows (that list has no length cap of its own beyond "must be
-// non-empty" - see setParticleColors' own comment) - a fixed, small, hand-writable cap keeps the
-// per-copy draw-call count (one merged Skia Path per bucket, per kaleidoscope copy - see Spiral.tsx's
-// own particleBucketPaths and KaleidoscopeCopy.tsx's ParticleColorBucket) bounded regardless of
-// palette size. Colors beyond this many in the list simply never get assigned to a bead. Lives here
-// (not Spiral.tsx, which is the one that actually consumes it for the Skia side) since this hook is
-// also the one that assigns each particle's own fixed color bucket at spawn - see colorIndex below.
+// How many distinct bead colors can ever be drawn at once, fill and border each, independent of how
+// long settings.particleColors/particleBorderColors actually grow (neither list has a length cap of
+// its own beyond "must be non-empty" - see setParticleColors' own comment) - a fixed, small,
+// hand-writable cap keeps the per-copy draw-call count (one merged fill Path and one merged border
+// Path per bucket, per kaleidoscope copy - see Spiral.tsx's own particleBucketPaths and
+// layers/BeadLayer.tsx's ParticleFillBucket/ParticleBorderBucket) bounded regardless of palette size.
+// Colors beyond this many in either list simply never get assigned to a bead. Lives here (not
+// Spiral.tsx or BeadLayer.tsx, which consume it on the Skia side) since this hook is also the one
+// that assigns each particle's own fixed color buckets at spawn - see colorIndex and borderColorIndex
+// below.
 export const MAX_PARTICLE_COLOR_BUCKETS = 8
 
 // Matches useEpicenter.ts's own LONG_PRESS_MS - one consistent "how long is a hold" feel everywhere

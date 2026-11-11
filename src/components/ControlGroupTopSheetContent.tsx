@@ -12,7 +12,7 @@ import { useSwirlRandomize } from '@/hooks/swirlRandomize'
 import { useSwirlReset } from '@/hooks/swirlReset'
 import { MAX_PARTICLE_COLOR_BUCKETS } from '@/hooks/useParticleField'
 import { useSwapColors } from '@/hooks/useSwapColors'
-import { DEFAULT_BACKGROUND_COLORS, DEFAULT_BOUNCE_FRICTION, DEFAULT_DASH_STYLE, DEFAULT_FIXED_SPACING, DEFAULT_FOREGROUND_COLORS, DEFAULT_GRAVITY, DEFAULT_MIRROR_ALTERNATE_COLORS, DEFAULT_MIRROR_GAP, DEFAULT_MIRROR_LINES, DEFAULT_MIRROR_ROTATION_SPEED, DEFAULT_PARTICLE_BORDER_COLORS, DEFAULT_PARTICLE_BORDER_WIDTH, DEFAULT_PARTICLE_COLORS, DEFAULT_PARTICLE_COUNT, DEFAULT_PARTICLE_SHAPES, DEFAULT_PARTICLE_SIZE, DEFAULT_STROKE_WIDTH, DEFAULT_TIGHTNESS, useSwirlSettings } from '@/hooks/useSwirlSettings'
+import { DEFAULT_BACKGROUND_COLORS, DEFAULT_BOUNCE_FRICTION, DEFAULT_DASH_STYLE, DEFAULT_FIXED_SPACING, DEFAULT_FOREGROUND_COLORS, DEFAULT_MIRROR_ALTERNATE_COLORS, DEFAULT_MIRROR_GAP, DEFAULT_MIRROR_ROTATION_SPEED, DEFAULT_PARTICLE_BORDER_COLORS, DEFAULT_PARTICLE_BORDER_WIDTH, DEFAULT_PARTICLE_COLORS, DEFAULT_PARTICLE_SHAPES, DEFAULT_PARTICLE_SIZE, DEFAULT_STROKE_WIDTH, DEFAULT_TIGHTNESS, STARTER_GRAVITY, STARTER_MIRROR_LINES, STARTER_PARTICLE_COUNT, useSwirlSettings } from '@/hooks/useSwirlSettings'
 
 import { ActionFab } from './ActionFab'
 import { FAB_ROW_GAP, FabRow } from './FabRow'
@@ -44,7 +44,7 @@ export function ControlGroupTopSheetContent() {
   // triggerStackLayout), plus the side insets a landscape phone's Dynamic Island or notch adds.
   const rightClearance = insets.right + TOP_SHEET_RIGHT_CLEARANCE + (triggerStackLayout(windowHeight, insets).columns - 1) * TRIGGER_STACK_COLUMN_STEP
   const { activeGroup } = useControlGroups()
-  const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setForegroundColors, setGravity, setGravityMarkerVisible, setHapticsEnabled, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPatternVisible, setShakeEnabled, setShowLabels, setSoundEnabled, setStrokeWidth, setTiltEnabled, setTightness } = useSwirlSettings()
+  const { settings, resetSettings, setAudioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setForegroundColors, setGravityEnabled, setGravityKeepingSwitch, setGravityMarkerVisible, setHapticsEnabled, setHoleShaped, setMirrorAlternateColors, setMirrorEnabled, setMirrorGap, setMirrorLinesKeepingSwitch, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCountKeepingSwitch, setParticlesEnabled, setParticleShapes, setParticleSize, setPattern, setPatternVisible, setShakeEnabled, setShowLabels, setSoundEnabled, setStrokeWidth, setTightness, setTiltEnabled } = useSwirlSettings()
   const { swapColors } = useSwapColors()
   const { resetGravity, resetMirror, resetPattern } = useSwirlReset()
   const { randomizeGroup } = useSwirlRandomize()
@@ -114,13 +114,21 @@ export function ControlGroupTopSheetContent() {
                 icon='backup-restore'
                 label='Reset'
                 onPress={() => {
-                  setMirrorLines(DEFAULT_MIRROR_LINES)
+                  // Keeps the Mirror switch where it is: back to the starter line count if it's on,
+                  // or just the remembered amount if it's off.
+                  setMirrorLinesKeepingSwitch(STARTER_MIRROR_LINES)
                   setMirrorRotationSpeed(DEFAULT_MIRROR_ROTATION_SPEED)
                   setMirrorGap(DEFAULT_MIRROR_GAP)
                   setMirrorAlternateColors(DEFAULT_MIRROR_ALTERNATE_COLORS)
                   resetMirror()
                 }}
               />
+              {/* This layer's on switch, the same power icon and slot (right after Randomize/Reset) in the
+              Pattern, Mirror, Particles and Gravity sheets. Mirror, Particles and Gravity are on whenever
+              their value isn't 0: the switch moves the value between 0 and the amount it remembers
+              (see useSwirlSettings.tsx's set*Enabled), so a twist or slider that passes through 0 is the
+              same off position, and touching a layer's controls turns it back on. */}
+              <SettingToggleFab icon='power' label='Mirror' value={settings.mirrorLines > 0} onValueChange={setMirrorEnabled} />
               {/* Shares this row with Randomize/Reset rather than getting a break of its own (compare
               Pattern/Line below, which do break their own trailing toggle out): with only 3 FABs
               total in this group, a forced break just left two sparse rows - 2 icons up top, 1 alone
@@ -190,16 +198,17 @@ export function ControlGroupTopSheetContent() {
               {/* Hides the pattern's own linework entirely, independent of which pattern is selected -
               lets beads be shown alone without switching pattern away (there's no "none" pattern
               option of its own). True by default, so this is always a deliberate hide, never a
-              surprise blank canvas on first launch. Same 'eye' icon/'Visible' label as the gravity
-              group's own marker-visibility toggle (see the 'gravity' branch below) - one consistent
-              "this shows/hides a layer" affordance rather than a bespoke glyph. Leads the row, right
+              surprise blank canvas on first launch. The pattern's own layer switch: same power icon,
+              layer-name label and slot as the Mirror, Particles and Gravity sheets' switches (the
+              only one backed by a boolean rather than a value at 0, since a pattern has no amount to
+              turn down). Leads the row, right
               after Randomize/Reset and before Crop/Hole shape, since those two are pattern-specific
               niceties that only matter once the pattern is actually visible to trace a boundary
               around. index.tsx's own nextPattern forces this back on whenever the pattern is changed
               via the pattern mode's own transport-row flanking button - see that handler's own
               comment for why a hidden pattern otherwise reads as "nothing happened" the moment you
               cycle to a new one. */}
-              <SettingToggleFab icon='eye' label='Visible' value={settings.patternVisible} onValueChange={setPatternVisible} />
+              <SettingToggleFab icon='power' label='Pattern' value={settings.patternVisible} onValueChange={setPatternVisible} />
               {/* Crop/Hole share this row with Randomize/Reset rather than getting a break of their
               own - see Mirror's own comment on Alternate colors for why: on their own they're just 2
               more icons in an otherwise-sparse row, not a cluster substantial enough to earn a whole
@@ -404,10 +413,17 @@ export function ControlGroupTopSheetContent() {
               label='Reset'
               onPress={() => {
                 setBounceFriction(DEFAULT_BOUNCE_FRICTION)
-                setGravity(DEFAULT_GRAVITY)
+                // Keeps the Gravity switch where it is, like Mirror's own Reset
+                setGravityKeepingSwitch(STARTER_GRAVITY)
                 resetGravity()
               }}
             />
+            {/* This layer's on switch, the same power icon and slot (right after Randomize/Reset) in the
+            Pattern, Mirror, Particles and Gravity sheets. Mirror, Particles and Gravity are on whenever
+            their value isn't 0: the switch moves the value between 0 and the amount it remembers
+            (see useSwirlSettings.tsx's set*Enabled), so a twist or slider that passes through 0 is the
+            same off position, and touching a layer's controls turns it back on. */}
+            <SettingToggleFab icon='power' label='Gravity' value={settings.gravity !== 0} onValueChange={setGravityEnabled} />
             {/* Whether GravityWell (Spiral.tsx) shows at all - independent of gestureTarget, so this
             is reachable (and stays in sync) regardless of which mode is active, unlike most of this
             row's neighbors - same shared gravityMarkerVisible setting the on-canvas transport-row
@@ -443,9 +459,9 @@ export function ControlGroupTopSheetContent() {
               <ActionFab icon='dice-multiple' label='Randomize' onPress={() => randomizeGroup('particles')} />
               {/* Puts every field this group owns back to its default - the same "every field this
               group owns, back to default, in one tap" shape Mirror/Colors/Line's own Reset buttons
-              already use. particleCount's own default (0) already turns beads back off, the same way
-              setMirrorLines(DEFAULT_MIRROR_LINES) already turns mirroring back off for that group's own
-              Reset - no separate on/off field to reset alongside it. No Gravity/Friction/Sides to reset
+              already use, except the bead count, which keeps the Particles switch where it is (back
+              to the starter count if it's on, only the remembered amount if it's off), like Mirror's
+              and Gravity's own Reset. No Gravity/Friction/Sides to reset
               here either - those belong to the Gravity/Pattern groups' own Reset buttons now (see
               useSwirlSettings.tsx's own particleShapes comment). No ephemeral gesture-state half to
               bridge through useSwirlReset here (unlike Mirror/Pattern/Gravity): particles have no
@@ -454,7 +470,7 @@ export function ControlGroupTopSheetContent() {
                 icon='backup-restore'
                 label='Reset'
                 onPress={() => {
-                  setParticleCount(DEFAULT_PARTICLE_COUNT)
+                  setParticleCountKeepingSwitch(STARTER_PARTICLE_COUNT)
                   setParticleSize(DEFAULT_PARTICLE_SIZE)
                   setParticleShapes(DEFAULT_PARTICLE_SHAPES)
                   setParticleColors(DEFAULT_PARTICLE_COLORS)
@@ -462,6 +478,12 @@ export function ControlGroupTopSheetContent() {
                   setParticleBorderWidth(DEFAULT_PARTICLE_BORDER_WIDTH)
                 }}
               />
+              {/* This layer's on switch, the same power icon and slot (right after Randomize/Reset) in the
+              Pattern, Mirror, Particles and Gravity sheets. Mirror, Particles and Gravity are on whenever
+              their value isn't 0: the switch moves the value between 0 and the amount it remembers
+              (see useSwirlSettings.tsx's set*Enabled), so a twist or slider that passes through 0 is the
+              same off position, and touching a layer's controls turns it back on. */}
+              <SettingToggleFab icon='power' label='Particles' value={settings.particleCount > 0} onValueChange={setParticlesEnabled} />
             </FabRow>
             {/* The shape picker gets its own row rather than trailing the actions/toggle above on
             whatever line it happens to wrap to - see Mirror's own comment for why a row break, not a

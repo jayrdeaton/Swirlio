@@ -279,16 +279,22 @@ const setFixedSpacing = jest.fn()
 const setForegroundColors = jest.fn()
 const setForegroundCycleSpeed = jest.fn()
 const setGravity = jest.fn()
+const setGravityEnabled = jest.fn()
+const setGravityKeepingSwitch = jest.fn()
 const setHoleRadius = jest.fn()
 const setHoleShaped = jest.fn()
 const setMirrorAlternateColors = jest.fn()
+const setMirrorEnabled = jest.fn()
 const setMirrorGap = jest.fn()
 const setMirrorLines = jest.fn()
+const setMirrorLinesKeepingSwitch = jest.fn()
 const setMirrorRotationSpeed = jest.fn()
 const setParticleBorderColors = jest.fn()
 const setParticleBorderWidth = jest.fn()
 const setParticleColors = jest.fn()
 const setParticleCount = jest.fn()
+const setParticleCountKeepingSwitch = jest.fn()
+const setParticlesEnabled = jest.fn()
 const setParticleShapes = jest.fn()
 const setParticleSize = jest.fn()
 const setPattern = jest.fn()
@@ -362,6 +368,9 @@ const defaultMockSettings = {
   hapticsEnabled: true,
   holeRadius: 0,
   holeShaped: true,
+  lastGravity: 1,
+  lastMirrorLines: 3,
+  lastParticleCount: 40,
   micSensitivity: 1,
   mirrorAlternateColors: false,
   mirrorGap: 0,
@@ -405,21 +414,27 @@ function mockSettings(overrides: Partial<typeof defaultMockSettings> = {}) {
     setForegroundCycleSpeed,
     setGestureTarget: jest.fn(),
     setGravity,
+    setGravityEnabled,
+    setGravityKeepingSwitch,
     setGravityMarkerVisible: jest.fn(),
     setHapticsEnabled: jest.fn(),
     setHoleRadius,
     setHoleShaped,
     setMicSensitivity: jest.fn(),
     setMirrorAlternateColors,
+    setMirrorEnabled,
     setMirrorGap,
     setMirrorLines,
+    setMirrorLinesKeepingSwitch,
     setMirrorRotationSpeed,
     setParticleBorderColors,
     setParticleBorderWidth,
     setParticleColors,
     setParticleCount,
+    setParticleCountKeepingSwitch,
     setParticleShapes,
     setParticleSize,
+    setParticlesEnabled,
     setPattern,
     setPatternVisible,
     setPolygonSides,
@@ -1518,7 +1533,7 @@ describe('SwirlScreen gestures', () => {
       randomize()
     })
 
-    expect(setMirrorLines).toHaveBeenCalled()
+    expect(setMirrorLinesKeepingSwitch).toHaveBeenCalled()
     expect(setMirrorGap).toHaveBeenCalled()
     expect(setMirrorAlternateColors).toHaveBeenCalled()
     expect(setTightness).toHaveBeenCalled()
@@ -1544,7 +1559,7 @@ describe('SwirlScreen gestures', () => {
       })
       randomSpy.mockRestore()
 
-      const [mirrorLines] = setMirrorLines.mock.calls[setMirrorLines.mock.calls.length - 1]
+      const [mirrorLines] = setMirrorLinesKeepingSwitch.mock.calls[setMirrorLinesKeepingSwitch.mock.calls.length - 1]
       const [mirrorGap] = setMirrorGap.mock.calls[setMirrorGap.mock.calls.length - 1]
       const [tightness] = setTightness.mock.calls[setTightness.mock.calls.length - 1]
       const [strokeWidth] = setStrokeWidth.mock.calls[setStrokeWidth.mock.calls.length - 1]
@@ -1553,7 +1568,8 @@ describe('SwirlScreen gestures', () => {
       const [cropShaped] = setCropShaped.mock.calls[setCropShaped.mock.calls.length - 1]
       const [holeShaped] = setHoleShaped.mock.calls[setHoleShaped.mock.calls.length - 1]
 
-      expect(mirrorLines).toBeGreaterThanOrEqual(0)
+      // Never 0: that's the Mirror switch's off position, which randomize leaves alone
+      expect(mirrorLines).toBeGreaterThanOrEqual(1)
       expect(mirrorLines).toBeLessThanOrEqual(MAX_MIRROR_LINES)
       expect(mirrorGap).toBeGreaterThanOrEqual(0)
       expect(mirrorGap).toBeLessThanOrEqual(0.9)
@@ -1574,7 +1590,7 @@ describe('SwirlScreen gestures', () => {
   // useRerollUnits.tsx's own MIN_RANDOMIZE_PARTICLE_COUNT comment) - Math.random pinned to 0 lands
   // skewedInRange at its lowest possible draw, which used to round straight down to 0 particles,
   // silently switching the whole layer back off from a reroll that was supposed to just give it a new
-  // look. Floors at 1 instead now.
+  // look. Floors at 1 instead now, through the setter that never moves the Particles switch.
   it('never rerolls particleCount down to 0, even at the lowest possible draw', async () => {
     await renderScreen()
     const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
@@ -1586,7 +1602,7 @@ describe('SwirlScreen gestures', () => {
     })
     randomSpy.mockRestore()
 
-    expect(setParticleCount).toHaveBeenLastCalledWith(1)
+    expect(setParticleCountKeepingSwitch).toHaveBeenLastCalledWith(1)
   })
 
   // Explicitly NOT touched by randomize - deliberate tuning (speed), gesture-feel physics, fixed
@@ -1642,7 +1658,7 @@ describe('SwirlScreen gestures', () => {
     expect(setForegroundColors).toHaveBeenCalled()
     expect(setPattern).toHaveBeenLastCalledWith('flower')
     expect(setDashStyle).toHaveBeenCalled()
-    expect(setMirrorLines).toHaveBeenCalled()
+    expect(setMirrorLinesKeepingSwitch).toHaveBeenCalled()
     expect(setMirrorAlternateColors).toHaveBeenCalled()
     expect(setCropShaped).toHaveBeenCalled()
     expect(setHoleShaped).toHaveBeenCalled()
@@ -1698,6 +1714,43 @@ describe('SwirlScreen gestures', () => {
       getLastControlsProps().onGoBack()
     })
     expect(setPatternVisible).toHaveBeenLastCalledWith(false)
+  })
+
+  // A layer's own randomize (its fan wedge here; its sheet button and trigger long-press go through
+  // randomizeGroup, which shares the same switchOnLayer) turns that layer on, the same way pattern's
+  // own randomize already forces patternVisible on.
+  it.each([
+    ['mirror', () => setMirrorEnabled],
+    ['particles', () => setParticlesEnabled],
+    ['gravity', () => setGravityEnabled]
+  ] as const)("onRandomizeGestureTarget('%s') switches that layer on", async (target, getSwitch) => {
+    mockSettings({ mirrorLines: 0, particleCount: 0, gravity: 0 })
+    await renderScreen()
+
+    await act(async () => {
+      getLastControlsProps().onRandomizeGestureTarget(target)
+    })
+
+    expect(getSwitch()).toHaveBeenCalledWith(true)
+  })
+
+  // Shake (and randomize-everything, the same pool) never moves a layer switch: with mirror and
+  // beads off, their rerolls only change the amounts the switches will put back.
+  it('shake randomize leaves every layer switch where it was', async () => {
+    mockSettings({ mirrorLines: 0, particleCount: 0, gravity: 0 })
+    await renderScreen()
+    const shakeCall = mockedUseShakeToRandomize.mock.calls[mockedUseShakeToRandomize.mock.calls.length - 1]
+    const randomize = shakeCall[1] as () => void
+
+    await act(async () => {
+      randomize()
+    })
+
+    expect(setMirrorLinesKeepingSwitch).toHaveBeenCalled()
+    expect(setParticleCountKeepingSwitch).toHaveBeenCalled()
+    for (const setter of [setMirrorEnabled, setParticlesEnabled, setGravityEnabled, setMirrorLines, setParticleCount, setGravity]) {
+      expect(setter).not.toHaveBeenCalled()
+    }
   })
 
   // Crop and hole moved to their own dedicated randomize (the crop wedge) rather than riding along
@@ -4758,7 +4811,9 @@ describe('SwirlScreen gestures', () => {
     // useRerollUnits' own top comment - randomizing should change the look, not the feel; physics stays
     // reachable only through the gravity group's own dedicated Randomize button). Named here so the
     // "none of these fired" checks below stay exhaustive without repeating the list in every test.
-    const lookSetters = [setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPolygonSides, setStrokeWidth, setTightness]
+    // The *KeepingSwitch setters are what the rerolls themselves call for mirror lines, bead count and
+    // gravity (so a reroll never moves a layer's switch); the plain setters are what restoreLook calls.
+    const lookSetters = [setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setGravityKeepingSwitch, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorLinesKeepingSwitch, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleCountKeepingSwitch, setParticleShapes, setParticleSize, setPattern, setPolygonSides, setStrokeWidth, setTightness]
 
     // Same audio-reactive pool reduction as randomize (see rerollUnits' own comment in index.tsx) -
     // forward/back share the exact same table, so a batch tweak while mic mode is on should never
@@ -4829,7 +4884,7 @@ describe('SwirlScreen gestures', () => {
       })
       randomSpy.mockRestore()
 
-      const touched = [setMirrorGap, setMirrorAlternateColors, setTightness, setMirrorLines]
+      const touched = [setMirrorGap, setMirrorAlternateColors, setTightness, setMirrorLinesKeepingSwitch]
       for (const setter of touched) {
         expect(setter).toHaveBeenCalledTimes(1)
       }

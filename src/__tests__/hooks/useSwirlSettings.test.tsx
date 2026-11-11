@@ -28,17 +28,23 @@ type TestApi = {
   setForegroundCycleSpeed: (speed: number) => void
   setGestureTarget: (target: GestureTarget) => void
   setGravity: (gravity: number) => void
+  setGravityEnabled: (enabled: boolean) => void
+  setGravityKeepingSwitch: (gravity: number) => void
   setHoleRadius: (holeRadius: number) => void
   setHoleShaped: (shaped: boolean) => void
   setMicSensitivity: (sensitivity: number) => void
   setMirrorAlternateColors: (enabled: boolean) => void
   setMirrorGap: (gap: number) => void
   setMirrorLines: (lines: number) => void
+  setMirrorEnabled: (enabled: boolean) => void
+  setMirrorLinesKeepingSwitch: (lines: number) => void
   setMirrorRotationSpeed: (speed: number) => void
   setParticleBorderColors: (colors: string[]) => void
   setParticleBorderWidth: (width: number) => void
   setParticleColors: (colors: string[]) => void
   setParticleCount: (count: number) => void
+  setParticlesEnabled: (enabled: boolean) => void
+  setParticleCountKeepingSwitch: (count: number) => void
   setParticleShapes: (shapes: ParticleShape[]) => void
   setParticleSize: (size: number) => void
   setPatternVisible: (visible: boolean) => void
@@ -61,11 +67,11 @@ function requireApi(value: TestApi | null): TestApi {
 }
 
 function Probe({ onUpdate }: { onUpdate: (api: TestApi) => void }) {
-  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings } = useSwirlSettings()
+  const { settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setGravityEnabled, setGravityKeepingSwitch, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorEnabled, setMirrorLinesKeepingSwitch, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticlesEnabled, setParticleCountKeepingSwitch, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings } = useSwirlSettings()
 
   useEffect(() => {
-    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings })
-  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings, settings])
+    onUpdate({ settings, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setGravityEnabled, setGravityKeepingSwitch, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorEnabled, setMirrorLinesKeepingSwitch, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticlesEnabled, setParticleCountKeepingSwitch, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings })
+  }, [onUpdate, setAudioReactiveEnabled, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setControlsAutoHideSpeed, setCropRadius, setCropShaped, setDashStyle, setDeferBottomEdgeGestures, setFixedSpacing, setFollowSpeed, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setGravityEnabled, setGravityKeepingSwitch, setHoleRadius, setHoleShaped, setMicSensitivity, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorEnabled, setMirrorLinesKeepingSwitch, setMirrorRotationSpeed, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticlesEnabled, setParticleCountKeepingSwitch, setParticleShapes, setParticleSize, setPatternVisible, setPolygonSides, setRotationSpeed, setShakeEnabled, setShowLabels, setStrokeWidth, setTiltEnabled, setTriggerStackExpanded, setZoomSpeed, resetSettings, settings])
 
   return <Text testID='stroke'>{String(settings.strokeWidth)}</Text>
 }
@@ -1286,6 +1292,155 @@ describe('useSwirlSettings', () => {
       expect(getApi().settings.particleSize).toBe(6)
       expect(getApi().settings.particleShapes).toEqual(['circle'])
       expect(getApi().settings.particleColors).toEqual(['#FFFFFF'])
+    })
+  })
+  // Mirror, Particles and Gravity are on whenever their value isn't 0. Their switches move the value
+  // between 0 and a remembered amount (lastMirrorLines/lastParticleCount/lastGravity), which every
+  // nonzero set records, so a twist or slider that passes through 0 keeps the last real amount.
+  describe('layer switches', () => {
+    it('starts every remembered amount at its starter value', async () => {
+      ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+      const { getApi } = await renderProbe()
+
+      expect(getApi().settings.lastMirrorLines).toBe(3)
+      expect(getApi().settings.lastParticleCount).toBe(40)
+      expect(getApi().settings.lastGravity).toBe(1)
+    })
+
+    it('moves mirrorLines between 0 and the remembered amount', async () => {
+      ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+      const { getApi } = await renderProbe()
+
+      await act(async () => {
+        getApi().setMirrorLines(4)
+      })
+      await act(async () => {
+        getApi().setMirrorEnabled(false)
+      })
+      expect(getApi().settings.mirrorLines).toBe(0)
+      expect(getApi().settings.lastMirrorLines).toBe(4)
+
+      await act(async () => {
+        getApi().setMirrorEnabled(true)
+      })
+      expect(getApi().settings.mirrorLines).toBe(4)
+    })
+
+    it('keeps the last nonzero amount when a dial passes through 0', async () => {
+      ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+      const { getApi } = await renderProbe()
+
+      for (const lines of [5, 2, 0]) {
+        await act(async () => {
+          getApi().setMirrorLines(lines)
+        })
+      }
+      expect(getApi().settings.mirrorLines).toBe(0)
+      expect(getApi().settings.lastMirrorLines).toBe(2)
+
+      await act(async () => {
+        getApi().setMirrorEnabled(true)
+      })
+      expect(getApi().settings.mirrorLines).toBe(2)
+    })
+
+    it('turns beads on at the starter count on a fresh install', async () => {
+      ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+      const { getApi } = await renderProbe()
+
+      expect(getApi().settings.particleCount).toBe(0)
+      await act(async () => {
+        getApi().setParticlesEnabled(true)
+      })
+      expect(getApi().settings.particleCount).toBe(40)
+    })
+
+    it('remembers a repelling gravity across off and on', async () => {
+      ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+      const { getApi } = await renderProbe()
+
+      await act(async () => {
+        getApi().setGravity(-2)
+      })
+      await act(async () => {
+        getApi().setGravityEnabled(false)
+      })
+      expect(getApi().settings.gravity).toBe(0)
+      expect(getApi().settings.lastGravity).toBe(-2)
+
+      await act(async () => {
+        getApi().setGravityEnabled(true)
+      })
+      expect(getApi().settings.gravity).toBe(-2)
+    })
+
+    it('never moves a switch from the KeepingSwitch setters randomize and group Reset use', async () => {
+      ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+      const { getApi } = await renderProbe()
+
+      // Off: only the remembered amount changes
+      await act(async () => {
+        getApi().setMirrorLinesKeepingSwitch(5)
+        getApi().setParticleCountKeepingSwitch(90)
+        getApi().setGravityKeepingSwitch(-3)
+      })
+      expect(getApi().settings.mirrorLines).toBe(0)
+      expect(getApi().settings.lastMirrorLines).toBe(5)
+      expect(getApi().settings.particleCount).toBe(0)
+      expect(getApi().settings.lastParticleCount).toBe(90)
+      expect(getApi().settings.gravity).toBe(0)
+      expect(getApi().settings.lastGravity).toBe(-3)
+
+      // On: the live value changes and stays on, never landing on 0
+      await act(async () => {
+        getApi().setMirrorEnabled(true)
+        getApi().setParticlesEnabled(true)
+      })
+      await act(async () => {
+        getApi().setMirrorLinesKeepingSwitch(0)
+        getApi().setParticleCountKeepingSwitch(12)
+        getApi().setGravityKeepingSwitch(0)
+      })
+      expect(getApi().settings.mirrorLines).toBe(1)
+      expect(getApi().settings.particleCount).toBe(12)
+      expect(getApi().settings.gravity).toBe(0)
+      expect(getApi().settings.lastGravity).toBe(-3)
+    })
+
+    it('Reset All leaves only the pattern on and restores the starter amounts', async () => {
+      ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(null)
+      const { getApi } = await renderProbe()
+
+      await act(async () => {
+        getApi().setMirrorLines(5)
+        getApi().setParticleCount(80)
+        getApi().setGravity(2)
+        getApi().setPatternVisible(false)
+      })
+      await act(async () => {
+        getApi().resetSettings()
+      })
+
+      expect(getApi().settings.patternVisible).toBe(true)
+      expect(getApi().settings.mirrorLines).toBe(0)
+      expect(getApi().settings.particleCount).toBe(0)
+      expect(getApi().settings.gravity).toBe(0)
+      expect(getApi().settings.lastMirrorLines).toBe(3)
+      expect(getApi().settings.lastParticleCount).toBe(40)
+      expect(getApi().settings.lastGravity).toBe(1)
+    })
+
+    it('hydrates remembered amounts, keeping the starter for 0 and clamping the rest', async () => {
+      ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ lastMirrorLines: 0, lastParticleCount: 999, lastGravity: -9 }))
+      const { getApi } = await renderProbe()
+      expect(getApi().settings.lastMirrorLines).toBe(3)
+      expect(getApi().settings.lastParticleCount).toBe(150)
+      expect(getApi().settings.lastGravity).toBe(-5)
+
+      ;(AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(JSON.stringify({ lastGravity: 0, lastMirrorLines: 9 }))
+      const { getApi: getSecondApi } = await renderProbe()
+      expect(getSecondApi().settings.lastGravity).toBe(1)
+      expect(getSecondApi().settings.lastMirrorLines).toBe(6)
     })
   })
 })

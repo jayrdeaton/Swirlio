@@ -1,7 +1,7 @@
 import { isDarkColor } from '@rific/auto-paper'
 import { useMemo } from 'react'
 
-import { MAX_MIRROR_LINES, MIN_MIRROR_LINES } from '@/constants/kaleidoscope'
+import { MAX_MIRROR_LINES } from '@/constants/kaleidoscope'
 import { hasSidesForParticleShape, PARTICLE_SHAPE_ORDER } from '@/constants/particleShapes'
 import { hasPolygonSides, PATTERN_ORDER } from '@/constants/patterns'
 import { randomHexColor } from '@/constants/randomColor'
@@ -26,12 +26,11 @@ const RANDOMIZE_MAX_PARTICLE_BORDER_COLORS = 3
 // PARTICLE_SHAPE_ORDER) rather than letting a reroll enable every single one at once, which read as
 // too busy/undifferentiated a mix to actually register as "these particular shapes" on screen.
 const RANDOMIZE_MAX_PARTICLE_SHAPES = 3
-// The particleCount reroll's own floor - deliberately 1, not MIN_PARTICLE_COUNT (0). 0 is that
-// setting's own dedicated off switch (see swirlSettingsRanges.ts's own MIN_PARTICLE_COUNT comment),
-// a distinct, deliberate action (an explicit toggle/slider drag to 0), not a look a "give me a new
-// bead arrangement" reroll should ever land on by chance - someone randomizing beads is, by
-// definition, already engaging with the feature, so a reroll silently switching it back off reads as
-// a bug, not a surprise.
+// The particleCount reroll's own floor - deliberately 1, not MIN_PARTICLE_COUNT (0). 0 is the Beads
+// switch's off position (see swirlSettingsRanges.ts's own MIN_PARTICLE_COUNT comment), and randomize
+// never moves a switch: with beads off, the reroll only changes the amount the switch will put back
+// (setParticleCountKeepingSwitch). A group's own Randomize then switches beads on (see index.tsx's
+// randomizeGroup).
 const MIN_RANDOMIZE_PARTICLE_COUNT = 1
 
 // Broad: everything that's purely "what does this look like" gets rerolled - colors, pattern,
@@ -82,7 +81,7 @@ const MIN_RANDOMIZE_PARTICLE_COUNT = 1
 // than taking settings/setters as params - every field/setter here already lives on that one context,
 // so there's nothing for index.tsx to thread through by hand.
 export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGroup: Record<ControlGroup, (() => void)[]>; rerollUnitsCropHole: (() => void)[] } {
-  const { settings, setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPolygonSides, setStrokeWidth, setTightness } = useSwirlSettings()
+  const { settings, setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravityKeepingSwitch, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLinesKeepingSwitch, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCountKeepingSwitch, setParticleShapes, setParticleSize, setPattern, setPolygonSides, setStrokeWidth, setTightness } = useSwirlSettings()
 
   return useMemo<{ rerollUnits: (() => void)[]; rerollUnitsByGroup: Record<ControlGroup, (() => void)[]>; rerollUnitsCropHole: (() => void)[] }>(() => {
     const randomInRange = (min: number, max: number) => min + Math.random() * (max - min)
@@ -152,7 +151,9 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
         }
       },
       { group: 'line', audioDriven: false, reroll: () => setDashStyle(DASH_STYLE_ORDER[Math.floor(Math.random() * DASH_STYLE_ORDER.length)]) },
-      { group: 'mirror', audioDriven: false, reroll: () => setMirrorLines(randomInt(MIN_MIRROR_LINES, MAX_MIRROR_LINES)) },
+      // 1 and up, never 0: 0 is the Mirror switch's off position, and randomize leaves switches alone
+      // (an off mirror only gets its remembered amount rerolled - see setMirrorLinesKeepingSwitch).
+      { group: 'mirror', audioDriven: false, reroll: () => setMirrorLinesKeepingSwitch(randomInt(1, MAX_MIRROR_LINES)) },
       { group: 'mirror', audioDriven: true, reroll: () => setMirrorGap(skewedInRange(MIN_MIRROR_GAP, MAX_MIRROR_GAP, true)) },
       { group: 'mirror', audioDriven: false, reroll: () => setMirrorAlternateColors(Math.random() < 0.5) },
       { group: 'line', audioDriven: true, reroll: () => setTightness(skewedTowardCenter(MIN_TIGHTNESS, MAX_TIGHTNESS)) },
@@ -166,7 +167,7 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
       // below regardless (see this file's own top comment) - audioReactive has no bearing on that,
       // it's a "look" question, not a mic-input one.
       { group: 'gravity', audioDriven: false, reroll: () => setBounceFriction(skewedInRange(MIN_BOUNCE_FRICTION, MAX_BOUNCE_FRICTION, true)) },
-      { group: 'gravity', audioDriven: false, reroll: () => setGravity(skewedTowardCenter(MIN_GRAVITY, MAX_GRAVITY)) },
+      { group: 'gravity', audioDriven: false, reroll: () => setGravityKeepingSwitch(skewedTowardCenter(MIN_GRAVITY, MAX_GRAVITY)) },
       // Particles' own look units - not audio-driven at all (particles have no audio-reactive override
       // of their own anywhere), so every one below is audioDriven: false.
       {
@@ -210,7 +211,7 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
       // usually land on a modest, comfortable bead count, occasionally reaching all the way to
       // MAX_PARTICLE_COUNT. Floors at MIN_RANDOMIZE_PARTICLE_COUNT (1), not MIN_PARTICLE_COUNT (0) -
       // see that constant's own comment for why a reroll should never turn the whole layer off.
-      { group: 'particles', audioDriven: false, reroll: () => setParticleCount(Math.max(MIN_RANDOMIZE_PARTICLE_COUNT, Math.round(skewedInRange(MIN_PARTICLE_COUNT, MAX_PARTICLE_COUNT, true)))) },
+      { group: 'particles', audioDriven: false, reroll: () => setParticleCountKeepingSwitch(Math.max(MIN_RANDOMIZE_PARTICLE_COUNT, Math.round(skewedInRange(MIN_PARTICLE_COUNT, MAX_PARTICLE_COUNT, true)))) },
       { group: 'particles', audioDriven: false, reroll: () => setParticleSize(skewedInRange(MIN_PARTICLE_SIZE, MAX_PARTICLE_SIZE, true)) },
       // Same "how many, which random hexes" shape as the particleColors unit above, just against
       // particleBorderColors instead - a fully independent list (see useSwirlSettings.tsx's own
@@ -270,5 +271,5 @@ export function useRerollUnits(): { rerollUnits: (() => void)[]; rerollUnitsByGr
     const rerollUnitsCropHole = filteredUnits.filter((unit) => unit.cropHole).map((unit) => unit.reroll)
 
     return { rerollUnits: lookRerolls, rerollUnitsByGroup, rerollUnitsCropHole }
-  }, [settings.audioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravity, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPolygonSides, setStrokeWidth, setTightness])
+  }, [settings.audioReactiveEnabled, setBackgroundColors, setBounceFriction, setCropRadius, setCropShaped, setDashStyle, setForegroundColors, setGravityKeepingSwitch, setHoleRadius, setHoleShaped, setMirrorAlternateColors, setMirrorGap, setMirrorLinesKeepingSwitch, setParticleBorderColors, setParticleBorderWidth, setParticleColors, setParticleCountKeepingSwitch, setParticleShapes, setParticleSize, setPattern, setPolygonSides, setStrokeWidth, setTightness])
 }

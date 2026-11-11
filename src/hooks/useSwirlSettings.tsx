@@ -69,7 +69,10 @@ export {
   MIN_ROTATION_SPEED,
   MIN_STROKE_WIDTH,
   MIN_TIGHTNESS,
-  MIN_ZOOM_SPEED
+  MIN_ZOOM_SPEED,
+  STARTER_GRAVITY,
+  STARTER_MIRROR_LINES,
+  STARTER_PARTICLE_COUNT
 } from '@/constants/swirlSettingsRanges'
 
 export type SwirlSettings = {
@@ -140,9 +143,8 @@ export type SwirlSettings = {
   // Independent of tilt actually moving anything, though: when 'pattern' or 'mirror' is the active
   // gesture target, tilt drives that point directly regardless of this setting (see
   // useEpicenter.ts's own patternManualControl/mirrorManualControl) - this only governs the *separate*,
-  // always-on ambient pull toward wherever gravity's own center happens to be sitting. Nonzero by
-  // default so gravity mode itself (and that ambient pull) does something the moment it's turned on,
-  // without also needing this slider raised first. Also what pulls/pushes beads toward the same well
+  // always-on ambient pull toward wherever gravity's own center happens to be sitting. 0 by default
+  // (gravity off); the gravity sheet's switch puts back lastGravity. Also what pulls/pushes beads toward the same well
   // (see particleMath.ts's own applyGravityAndFriction) - useParticleField.ts reads this exact
   // SharedValue directly rather than a dedicated particleGravity dial of its own, so beads and the
   // pattern/mirror epicentre always agree on how strong gravity currently is.
@@ -170,6 +172,13 @@ export type SwirlSettings = {
   // shaped outer crop can still have a plain circular hole punched out of it (or vice versa). See
   // Spiral.tsx's cropClip.
   holeShaped: boolean
+  // The last nonzero gravity, mirror line count and bead count - what each layer's on switch puts
+  // back after it was switched off (see setGravityEnabled/setMirrorEnabled/setParticlesEnabled).
+  // Recorded by setGravity/setMirrorLines/setParticleCount whenever they set a nonzero value, so a
+  // twist, pinch or slider that passes through 0 keeps the last real amount. Never 0 themselves.
+  lastGravity: number
+  lastMirrorLines: number
+  lastParticleCount: number
   // A linear gain applied to the raw mic RMS before useAudioReactive's own dB normalization (see
   // rmsToUnit there) - shifts the whole quiet-to-loud window rather than just clipping harder at the
   // top the way a post-hoc multiply on the already-normalized 0..1 reading would. 1 is unity gain,
@@ -279,12 +288,20 @@ type SwirlSettingsContextValue = {
   setForegroundCycleSpeed: (speed: number) => void
   setGestureTarget: (target: GestureTarget) => void
   setGravity: (gravity: number) => void
+  // Gravity's on switch: off sets gravity to 0, on puts back lastGravity. Mirror and Beads below work
+  // the same way, so "on" is always just "the value isn't 0".
+  setGravityEnabled: (enabled: boolean) => void
+  // Randomize's version of setGravity/setMirrorLines/setParticleCount: never moves a layer's switch.
+  // Writes the live value when the layer is on, and only the remembered amount when it's off.
+  setGravityKeepingSwitch: (gravity: number) => void
   setGravityMarkerVisible: (visible: boolean) => void
   setHapticsEnabled: (enabled: boolean) => void
   setHoleRadius: (holeRadius: number) => void
   setHoleShaped: (shaped: boolean) => void
   setMicSensitivity: (sensitivity: number) => void
   setMirrorAlternateColors: (enabled: boolean) => void
+  setMirrorEnabled: (enabled: boolean) => void
+  setMirrorLinesKeepingSwitch: (lines: number) => void
   setMirrorGap: (gap: number) => void
   setMirrorLines: (lines: number) => void
   setMirrorRotationSpeed: (speed: number) => void
@@ -294,6 +311,8 @@ type SwirlSettingsContextValue = {
   setParticleCount: (count: number) => void
   setParticleShapes: (shapes: ParticleShape[]) => void
   setParticleSize: (size: number) => void
+  setParticlesEnabled: (enabled: boolean) => void
+  setParticleCountKeepingSwitch: (count: number) => void
   setPattern: (pattern: PatternType) => void
   setPatternVisible: (visible: boolean) => void
   setPolygonSides: (sides: number) => void
@@ -396,15 +415,50 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setForegroundColors: (colors) => setSettings((prev) => (colors.length > 0 ? { ...prev, foregroundColors: colors } : prev)),
       setForegroundCycleSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, foregroundCycleSpeed: clamp(speed, MIN_CYCLE_SPEED, MAX_CYCLE_SPEED) } : prev)),
       setGestureTarget: (target) => setSettings((prev) => ({ ...prev, gestureTarget: target })),
-      setGravity: (gravity) => setSettings((prev) => (Number.isFinite(gravity) ? { ...prev, gravity: clamp(gravity, MIN_GRAVITY, MAX_GRAVITY) } : prev)),
+      // gravity, mirrorLines and particleCount each remember their last nonzero value (lastGravity/
+      // lastMirrorLines/lastParticleCount) for their layer's on switch, set*Enabled below.
+      setGravity: (gravity) =>
+        setSettings((prev) => {
+          if (!Number.isFinite(gravity)) return prev
+          const next = clamp(gravity, MIN_GRAVITY, MAX_GRAVITY)
+          return { ...prev, gravity: next, lastGravity: next !== 0 ? next : prev.lastGravity }
+        }),
+      setGravityEnabled: (enabled) =>
+        setSettings((prev) => {
+          if (enabled === (prev.gravity !== 0)) return prev
+          return enabled ? { ...prev, gravity: prev.lastGravity } : { ...prev, gravity: 0, lastGravity: prev.gravity }
+        }),
+      setGravityKeepingSwitch: (gravity) =>
+        setSettings((prev) => {
+          if (!Number.isFinite(gravity)) return prev
+          const next = clamp(gravity, MIN_GRAVITY, MAX_GRAVITY)
+          if (next === 0) return prev
+          return prev.gravity !== 0 ? { ...prev, gravity: next, lastGravity: next } : { ...prev, lastGravity: next }
+        }),
       setGravityMarkerVisible: (visible) => setSettings((prev) => ({ ...prev, gravityMarkerVisible: visible })),
       setHapticsEnabled: (enabled) => setSettings((prev) => ({ ...prev, hapticsEnabled: enabled })),
       setHoleRadius: (holeRadius) => setSettings((prev) => (Number.isFinite(holeRadius) ? { ...prev, holeRadius: clamp(holeRadius, MIN_HOLE_RADIUS, MAX_HOLE_RADIUS) } : prev)),
       setHoleShaped: (shaped) => setSettings((prev) => ({ ...prev, holeShaped: shaped })),
       setMicSensitivity: (sensitivity) => setSettings((prev) => (Number.isFinite(sensitivity) ? { ...prev, micSensitivity: clamp(sensitivity, MIN_MIC_SENSITIVITY, MAX_MIC_SENSITIVITY) } : prev)),
       setMirrorAlternateColors: (enabled) => setSettings((prev) => ({ ...prev, mirrorAlternateColors: enabled })),
+      setMirrorEnabled: (enabled) =>
+        setSettings((prev) => {
+          if (enabled === prev.mirrorLines > 0) return prev
+          return enabled ? { ...prev, mirrorLines: prev.lastMirrorLines } : { ...prev, mirrorLines: 0, lastMirrorLines: prev.mirrorLines }
+        }),
+      setMirrorLinesKeepingSwitch: (lines) =>
+        setSettings((prev) => {
+          if (!Number.isFinite(lines)) return prev
+          const next = clampInt(lines, 1, MAX_MIRROR_LINES)
+          return prev.mirrorLines > 0 ? { ...prev, mirrorLines: next, lastMirrorLines: next } : { ...prev, lastMirrorLines: next }
+        }),
       setMirrorGap: (gap) => setSettings((prev) => (Number.isFinite(gap) ? { ...prev, mirrorGap: clamp(gap, MIN_MIRROR_GAP, MAX_MIRROR_GAP) } : prev)),
-      setMirrorLines: (lines) => setSettings((prev) => (Number.isFinite(lines) ? { ...prev, mirrorLines: clampInt(lines, MIN_MIRROR_LINES, MAX_MIRROR_LINES) } : prev)),
+      setMirrorLines: (lines) =>
+        setSettings((prev) => {
+          if (!Number.isFinite(lines)) return prev
+          const next = clampInt(lines, MIN_MIRROR_LINES, MAX_MIRROR_LINES)
+          return { ...prev, mirrorLines: next, lastMirrorLines: next > 0 ? next : prev.lastMirrorLines }
+        }),
       setMirrorRotationSpeed: (speed) => setSettings((prev) => (Number.isFinite(speed) ? { ...prev, mirrorRotationSpeed: clamp(speed, MIN_MIRROR_ROTATION_SPEED, MAX_MIRROR_ROTATION_SPEED) } : prev)),
       // Empty lists are refused, same as setForegroundColors/setBackgroundColors above.
       // Empty lists are refused, same as setParticleColors below - there'd be nothing left for a
@@ -412,10 +466,26 @@ export function SwirlSettingsProvider({ children }: { children: React.ReactNode 
       setParticleBorderColors: (colors) => setSettings((prev) => (colors.length > 0 ? { ...prev, particleBorderColors: colors } : prev)),
       setParticleBorderWidth: (width) => setSettings((prev) => (Number.isFinite(width) ? { ...prev, particleBorderWidth: clamp(width, MIN_PARTICLE_BORDER_WIDTH, MAX_PARTICLE_BORDER_WIDTH) } : prev)),
       setParticleColors: (colors) => setSettings((prev) => (colors.length > 0 ? { ...prev, particleColors: colors } : prev)),
-      setParticleCount: (count) => setSettings((prev) => (Number.isFinite(count) ? { ...prev, particleCount: clampInt(count, MIN_PARTICLE_COUNT, MAX_PARTICLE_COUNT) } : prev)),
+      setParticleCount: (count) =>
+        setSettings((prev) => {
+          if (!Number.isFinite(count)) return prev
+          const next = clampInt(count, MIN_PARTICLE_COUNT, MAX_PARTICLE_COUNT)
+          return { ...prev, particleCount: next, lastParticleCount: next > 0 ? next : prev.lastParticleCount }
+        }),
       // Empty lists are refused too - there'd be nothing left for a bead to be drawn as.
+      setParticleCountKeepingSwitch: (count) =>
+        setSettings((prev) => {
+          if (!Number.isFinite(count)) return prev
+          const next = clampInt(count, 1, MAX_PARTICLE_COUNT)
+          return prev.particleCount > 0 ? { ...prev, particleCount: next, lastParticleCount: next } : { ...prev, lastParticleCount: next }
+        }),
       setParticleShapes: (shapes) => setSettings((prev) => (shapes.length > 0 ? { ...prev, particleShapes: shapes } : prev)),
       setParticleSize: (size) => setSettings((prev) => (Number.isFinite(size) ? { ...prev, particleSize: clamp(size, MIN_PARTICLE_SIZE, MAX_PARTICLE_SIZE) } : prev)),
+      setParticlesEnabled: (enabled) =>
+        setSettings((prev) => {
+          if (enabled === prev.particleCount > 0) return prev
+          return enabled ? { ...prev, particleCount: prev.lastParticleCount } : { ...prev, particleCount: 0, lastParticleCount: prev.particleCount }
+        }),
       setPattern: (pattern) => setSettings((prev) => ({ ...prev, pattern })),
       setPatternVisible: (visible) => setSettings((prev) => ({ ...prev, patternVisible: visible })),
       setPolygonSides: (sides) => setSettings((prev) => (Number.isFinite(sides) ? { ...prev, polygonSides: clampInt(sides, MIN_POLYGON_SIDES, MAX_POLYGON_SIDES) } : prev)),

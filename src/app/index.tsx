@@ -309,7 +309,7 @@ export function generateMetadata() {
 }
 
 export default function SwirlScreen() {
-  const { settings, resetSettings, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setDashStyle, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setHoleRadius, setMirrorAlternateColors, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setPattern, setPatternVisible, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setTriggerStackExpanded, setZoomSpeed } = useSwirlSettings()
+  const { settings, resetSettings, setBackgroundColors, setBackgroundCycleSpeed, setBounceFriction, setCropRadius, setDashStyle, setForegroundColors, setForegroundCycleSpeed, setGestureTarget, setGravity, setGravityEnabled, setHoleRadius, setMirrorAlternateColors, setMirrorEnabled, setMirrorGap, setMirrorLines, setMirrorRotationSpeed, setParticleColors, setParticleCount, setParticleShapes, setParticleSize, setParticlesEnabled, setPattern, setPatternVisible, setPolygonSides, setRotationSpeed, setStrokeWidth, setTightness, setTriggerStackExpanded, setZoomSpeed } = useSwirlSettings()
   const { medium, notification: hapticNotification, selection: hapticSelection } = useVibration()
   const playTypewriter = useTypewriterSound()
   const playShutter = useShutterSound()
@@ -1828,12 +1828,28 @@ export default function SwirlScreen() {
   // additionally forces patternVisible back on afterward - same reasoning and same pre-change-value-to-
   // pushHistory shape as nextPattern's own comment above: rerolling the pattern's shape/crop/hole while
   // it's hidden would look like nothing happened at all.
+  // A layer's own Randomize (its sheet button, its trigger's long press, its fan wedge) switches that
+  // layer on: asking to see a random version of it shouldn't leave it hidden. Its rerolls never move
+  // the switch on their own (see useRerollUnits.tsx's *KeepingSwitch setters), so with the layer off
+  // they've just rerolled the amount this puts back. Shake and randomize-everything never call this,
+  // so they leave every switch where it was. Undo restores the switch too: the values it reads from
+  // (mirrorLines, particleCount, gravity) are Look fields, captured before the reroll.
+  const switchOnLayer = useCallback(
+    (group: ControlGroup | GestureTarget) => {
+      if (group === 'mirror') setMirrorEnabled(true)
+      if (group === 'particles') setParticlesEnabled(true)
+      if (group === 'gravity') setGravityEnabled(true)
+    },
+    [setGravityEnabled, setMirrorEnabled, setParticlesEnabled]
+  )
+
   const randomizeGroup = useCallback(
     (group: ControlGroup) => {
       pushHistoryAndReroll(rerollUnitsByGroup[group], group === 'colors' ? { backgroundCycleSpeed: settings.backgroundCycleSpeed, foregroundCycleSpeed: settings.foregroundCycleSpeed } : group === 'pattern' ? { patternVisible: settings.patternVisible } : undefined)
       if (group === 'pattern') setPatternVisible(true)
+      switchOnLayer(group)
     },
-    [pushHistoryAndReroll, rerollUnitsByGroup, setPatternVisible, settings.backgroundCycleSpeed, settings.foregroundCycleSpeed, settings.patternVisible]
+    [pushHistoryAndReroll, rerollUnitsByGroup, setPatternVisible, settings.backgroundCycleSpeed, settings.foregroundCycleSpeed, settings.patternVisible, switchOnLayer]
   )
 
   useRegisterSwirlRandomize(randomizeGroup)
@@ -1857,6 +1873,7 @@ export default function SwirlScreen() {
     (target: GestureTarget) => {
       if (target === 'mirror') {
         pushHistoryAndReroll([...rerollUnitsByGroup.mirror, ...rerollUnitsByGroup.colors], { backgroundCycleSpeed: settings.backgroundCycleSpeed, foregroundCycleSpeed: settings.foregroundCycleSpeed })
+        switchOnLayer(target)
         return
       }
       if (target === 'crop') {
@@ -1870,8 +1887,9 @@ export default function SwirlScreen() {
         return
       }
       pushHistoryAndReroll(rerollUnitsByGroup[target])
+      switchOnLayer(target)
     },
-    [pushHistoryAndReroll, rerollUnitsByGroup, rerollUnitsCropHole, setPatternVisible, settings.backgroundCycleSpeed, settings.foregroundCycleSpeed, settings.patternVisible]
+    [pushHistoryAndReroll, rerollUnitsByGroup, rerollUnitsCropHole, setPatternVisible, settings.backgroundCycleSpeed, settings.foregroundCycleSpeed, settings.patternVisible, switchOnLayer]
   )
 
   // The top-right EdgeRevealZone's own long-press bonus (see its own onRandomizeEverything prop
