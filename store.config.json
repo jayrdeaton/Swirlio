@@ -16,33 +16,6 @@
         "supportUrl": "https://swirlio.infinitetoken.com/support",
         "privacyPolicyUrl": "https://swirlio.infinitetoken.com/privacy"
       }
-    },
-    "advisory": {
-      "alcoholTobaccoOrDrugUseOrReferences": "NONE",
-      "contests": "NONE",
-      "gamblingSimulated": "NONE",
-      "gunsOrOtherWeapons": "NONE",
-      "horrorOrFearThemes": "NONE",
-      "matureOrSuggestiveThemes": "NONE",
-      "medicalOrTreatmentInformation": "NONE",
-      "profanityOrCrudeHumor": "NONE",
-      "sexualContentGraphicAndNudity": "NONE",
-      "sexualContentOrNudity": "NONE",
-      "violenceCartoonOrFantasy": "NONE",
-      "violenceRealistic": "NONE",
-      "violenceRealisticProlongedGraphicOrSadistic": "NONE",
-      "advertising": false,
-      "ageAssurance": false,
-      "gambling": false,
-      "healthOrWellnessTopics": false,
-      "lootBox": false,
-      "messagingAndChat": false,
-      "parentalControls": false,
-      "unrestrictedWebAccess": false,
-      "userGeneratedContent": false,
-      "kidsAgeBand": null,
-      "ageRatingOverride": "NONE",
-      "koreaAgeRatingOverride": "NONE"
     }
   }
 }

@@ -4,7 +4,7 @@ Everything the iOS listing needs. The text lives in `store.config.json` (repo ro
 
 ## Pushed by EAS Metadata (`store.config.json`)
 
-Title, subtitle, promotional text, description, keywords, marketing/support/privacy URLs, copyright, categories (Entertainment, with Graphics & Design second: there's nothing to win, so not Games) and the age rating answers (all None, so 4+).
+Title, subtitle, promotional text, description, keywords, marketing/support/privacy URLs, copyright, categories (Entertainment, with Graphics & Design second: there's nothing to win, so not Games) and What's New. Not the age rating: see Age rating under Set by hand.
 
 ```bash
 eas metadata:lint
@@ -65,6 +65,8 @@ To upload: the version's Product Page Information > Header and Search Results, p
   - Nothing else. Audio Reactive reads the microphone, and tilt and shake read the motion sensors, but both are processed in memory on the device and never stored or sent, which Apple doesn't count as collection. Settings and look history stay in on-device storage. No tracking, so no App Tracking Transparency prompt. The label then reads "Data Not Linked to You: Identifiers, Diagnostics".
 
   The privacy policy's App Updates section (https://swirlio.infinitetoken.com/privacy, `public/privacy.html`) describes the same check, including the failed-update report (added 2026-11-11; it reaches the site with the next web deploy). Revisit both forms if analytics, crash reporting, ads or accounts are ever added.
+
+**Age rating** (App Information, Age Rating; by hand until eas-cli can send it): Apple has required an answer to its Social Media question since September 2026, and eas-cli 27.7.2's metadata schema has no `socialMedia` field, so a push with `advisory` updates everything else and then fails ("You must provide a value for the attribute 'socialMedia'", seen on 1.1.0's push, 2026-11-11). It's out of `store.config.json`, as in the other apps. Every content question None: no violence of any kind, horror or fear, mature or suggestive themes, profanity or crude humor, alcohol, tobacco or drugs, sexual content or nudity, medical or treatment information, guns or other weapons, simulated gambling or contests. No for Gambling, Loot Boxes, Advertising, Messaging and Chat, User-Generated Content, Social Media, Unrestricted Web Access, Parental Controls, Age Assurance and Health or Wellness Topics. Not made for kids (no Kids category). The result is 4+, as 1.0.x had. Google Play's IARC answers (`store/google-play.md`) match these. Put `advisory` back once eas-cli's schema has `socialMedia`.
 
 **App Review Information:** sign-in not required. Contact: name, email and phone (the phone stays out of `store.config.json`, which is public). Notes:
 
