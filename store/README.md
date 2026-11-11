@@ -20,7 +20,7 @@ Limits: title 30, subtitle 30, promotional text 170 (editable any time without r
 
 The three URLs are this app's own web deployment (see "Web" in `.claude/CLAUDE.md`): `public/privacy.html` and `public/support.html` are served at `/privacy` and `/support`. They must be live before review, since the reviewer opens them.
 
-`releaseNotes` (What's New) is left out for the first version, which has none. Add it to `info.en-US` for every later version.
+`releaseNotes` (What's New, 4000 at most) is in `info.en-US` from 1.1.0 on: rewrite it for every version from the commits since the previous version's tag (1.1.0's from `git log v1.0.2..v1.1.0`), with only what an iPhone or iPad player will notice, nothing that only changes fresh installs' defaults, and no claim nobody has checked on a device (1.1.0's leaves out Split View and Stage Manager for that reason).
 
 ## Screenshots (uploaded by hand)
 
