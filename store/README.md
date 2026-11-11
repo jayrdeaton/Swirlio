@@ -1,6 +1,6 @@
 # App Store
 
-Everything the iOS listing needs. The text lives in `store.config.json` (repo root), which `eas metadata:push` sends to App Store Connect. The rest is set by hand in App Store Connect once and carries over to later versions.
+Everything the iOS listing needs. The text lives in `store.config.json` (repo root), which `eas metadata:push` sends to App Store Connect. The rest is set by hand in App Store Connect once and carries over to later versions. Google Play's checklist is `store/google-play.md`; when the description below changes, change Play's the same way.
 
 ## Pushed by EAS Metadata (`store.config.json`)
 
@@ -59,7 +59,12 @@ To upload: the version's Product Page Information > Header and Search Results, p
 
 ## Set by hand in App Store Connect
 
-**App Privacy:** "No, we don't collect data from this app" (Data Not Collected). Audio Reactive reads the microphone, and tilt and shake read the motion sensors, but both are processed in memory on the device and never stored or sent, which Apple doesn't count as collection. Settings and look history stay in on-device storage. Nothing leaves the device except the Expo update check, which carries no personal data (the app version, platform and a random installation ID used to serve the right update), and there is no tracking, so no App Tracking Transparency prompt either. This matches the privacy policy at https://swirlio.infinitetoken.com/privacy. Revisit it if analytics, crash reporting, ads or accounts are ever added.
+**App Privacy:** "Yes, we collect data from this app", two types, matching Google Play's Data safety form (`store/google-play.md`) and following Expo's store privacy guide (https://docs.expo.dev/eas-update/store-privacy-declarations/), as CardTastic, DuelTastic and PuckTastic do (Jay's call for those, 2026-11-11; Swirlio was Data Not Collected through 1.0.2, and the answer changes in App Store Connect by hand). The only thing that leaves the device is Expo's update check at launch: it carries the app version, the platform, a random installation ID the app makes on its first launch (`EAS-Client-ID`, not the advertising identifier or anything tied to the person) and, only after an update failed to start, that update's ID and the first 1,024 characters of its error. Expo keeps the ID to count installs per update and roll updates out, which is longer than serving the request needs, so Apple counts it as collected. In App Store Connect, App Privacy:
+  - **Identifiers > Device ID:** App Functionality and Analytics (Expo counts installs per update); not linked to the user; not used for tracking.
+  - **Diagnostics > Crash Data:** App Functionality; not linked to the user; not used for tracking.
+  - Nothing else. Audio Reactive reads the microphone, and tilt and shake read the motion sensors, but both are processed in memory on the device and never stored or sent, which Apple doesn't count as collection. Settings and look history stay in on-device storage. No tracking, so no App Tracking Transparency prompt. The label then reads "Data Not Linked to You: Identifiers, Diagnostics".
+
+  The privacy policy's App Updates section (https://swirlio.infinitetoken.com/privacy, `public/privacy.html`) describes the same check, including the failed-update report (added 2026-11-11; it reaches the site with the next web deploy). Revisit both forms if analytics, crash reporting, ads or accounts are ever added.
 
 **App Review Information:** sign-in not required. Contact: name, email and phone (the phone stays out of `store.config.json`, which is public). Notes:
 

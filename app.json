@@ -27,7 +27,13 @@
     "android": {
       "predictiveBackGestureEnabled": false,
       "package": "com.infinitetoken.swirlio",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png",
+        "backgroundColor": "#F0F0F0"
+      },
       "blockedPermissions": [
+        "android.permission.ACTIVITY_RECOGNITION",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.SYSTEM_ALERT_WINDOW",

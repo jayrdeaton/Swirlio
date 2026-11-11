@@ -13,7 +13,7 @@ An interactive kaleidoscope toy driven by touch, tilt, and gravity physics (Expo
 ```bash
 npm run lint          # expo lint .
 npm run fix            # expo lint . --fix
-npm test               # Jest (38 suites, 711 tests: 689 run, 22 skipped)
+npm test               # Jest (39 suites, 714 tests: 692 run, 22 skipped)
 npm run test:watch     # Jest --watchAll
 npm run typecheck      # tsc
 npm run verify         # lint + test + typecheck
@@ -218,3 +218,18 @@ The canvas is one kaleidoscope wrapping a stack of layers, so new sources (a cam
 - New layers go in that per-copy render function in `Spiral.tsx`. Anything that imports Skia must stay reachable only through `Spiral.tsx` (the web lazy loader).
 - Toggling or switching the pattern remounts the kaleidoscope, which is cheap since everything it draws from is a SharedValue above it.
 - Checked on the iPhone 18 Pro simulator from a Release build by swapping only the JS bundle: 12 seeded looks pixel-identical before and after, outside the Dynamic Island.
+
+## Google Play (2026-11-11)
+
+Swirlio is set up for its first Google Play release, from the Infinite Token organization account: `store/google-play.md` has Jay's steps, the listing (the App Store text with one Android line), App content, Data safety, the target audience (13 and over, Jay's call, outside the Families policy) and how the screenshots were made. Package `com.infinitetoken.swirlio`, an App (not a Game), category Entertainment.
+
+- **Native, so it ships in a new build:** `app.json`'s `android.adaptiveIcon` and the blocked `ACTIVITY_RECOGNITION` move the fingerprint for iOS too (it hashes the whole config), so the next release is a new build on both platforms.
+- **The adaptive icon** (`assets/images/android-icon-foreground.png`, `android-icon-monochrome.png`, background `#F0F0F0`): the iOS icon (`dark-icon.png`, `#111` arms on `#F0F0F0`) scaled to 700 of the layer's 1024 and centered, so Android's 72dp viewport (683px) shows the same square spiral iOS does, masked to the launcher's shape; the arms are its alpha (`(240 - grey) / 223`), drawn `#111` on the foreground and white on the monochrome (themed icons). Regenerate both if the icon changes:
+  ```bash
+  for c in 0x111111:android-icon-foreground 0xFFFFFF:android-icon-monochrome; do ffmpeg -y -i assets/images/dark-icon.png -f lavfi -i "color=c=${c%%:*}:s=700x700" -filter_complex "[0:v]scale=700:700:flags=lanczos,format=gray,lut=y=clip((240-val)*255/223\,0\,255)[a];[1:v]format=rgba[c];[c][a]alphamerge,pad=1024:1024:162:162:color=0x00000000,format=rgba" -frames:v 1 assets/images/${c#*:}.png; done
+  ```
+  Outside the viewport (the outer 18dp, only seen in launcher effects) the layer is the background color.
+- **`ACTIVITY_RECOGNITION` is blocked:** expo-sensors' manifest asks for it for the pedometer, which Swirlio never uses (DeviceMotion and the accelerometer need no permission). It would have read as physical-activity access to Play.
+- **First run on Android crashed, fixed:** `DashStyleIcon`'s `strokeDasharray={[]}` for Solid made Android's `DashPathEffect` throw on the first frame. The Line is keyed by its dash style now and Solid passes no dasharray; see `store/google-play.md`, First run on Android, for what else was and wasn't checked on the emulator.
+- **Privacy answers moved with the fleet:** the update check's random installation ID and failed-update report are declared (Device or other IDs and Crash logs on Play; Device ID and Crash Data on the App Store, changed by hand), as CardTastic, DuelTastic and PuckTastic did the same day. `public/privacy.html` now mentions the failed-update report, live with the next web deploy.
+- **Store art:** `store/screenshots/google-play/` (gitignored) holds `icon-512.png` (the iOS icon scaled, RGBA) and `feature-graphic.png` (the App Store header cropped to 1024 x 500, no alpha). The commands are in `store/google-play.md`.
