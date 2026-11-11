@@ -105,21 +105,27 @@ svg { position: absolute; left: 0; top: 0; }
   const header = kaleidoscope('h', { look: 'flower', width: 3840, height: 1646, scale: 4, x: 1920, y: 823, pulse: 0.35, rotation: 12, foreground: 0, background: 0.75 })
   const headerFile = page('header', 3840, 1646, header.svg)
 
-  // Search results, 3840 x 2560: state the obvious. The headline (the first screenshot's caption) on the left and that
-  // screenshot in a phone on the right, both inside the safe area (x 836-3004, y 765-1795), the phone running off the
-  // bottom edge. Behind them the same flower look, centred on the phone, drawn in its own two background colors (the
-  // foreground list set to the background one, as the color drawer allows) so it stays quiet under the words.
+  // Search results, 3840 x 2560: state the obvious. The first screenshot's caption on the left and that screenshot in
+  // a phone on the right (whole, ending above the bottom edge). Behind them the same flower look, centred on the phone,
+  // drawn in its own two background colors (the foreground list set to the background one, as the color drawer
+  // allows) so it stays quiet under the words. The iPhone's search card shows only the top of it (the full width, y 0
+  // to about 1500, in App Store Connect's preview), so the words are centered in that strip and the phone starts near
+  // its top (2026-11-11: centered in Apple's template safe area from y 765, as SlingScan and Lumber first had them,
+  // the words sat at the bottom of the iPhone's card). The iPad shows all of it. Check search-iphone.png.
+  const STRIP = 1500
+  const textHeight = 520
   const phoneScale = 0.68
   const phoneW = 1320 * phoneScale
   const phoneH = 2868 * phoneScale
   const bezel = 22
   const phoneLeft = 2100
-  const phoneTop = 700
+  const phoneTop = 230
   const radius = 165 * phoneScale
-  const search = kaleidoscope('s', { look: 'flower', width: 3840, height: 2560, scale: 4, x: phoneLeft + phoneW / 2, y: 1700, pulse: 0.5, rotation: 12, foreground: 0.14, background: 0, overrides: { foregroundColors: LOOKS.looks.flower.backgroundColors } })
+  const search = kaleidoscope('s', { look: 'flower', width: 3840, height: 2560, scale: 4, x: phoneLeft + phoneW / 2, y: STRIP / 2, pulse: 0.5, rotation: 12, foreground: 0.14, background: 0, overrides: { foregroundColors: LOOKS.looks.flower.backgroundColors } })
   const searchOverlay = `
-<div class="overlay" style="left:876px;top:765px;width:1200px;height:1030px;display:flex;flex-direction:column;justify-content:center">
+<div class="overlay" style="left:876px;top:${(STRIP - textHeight) / 2}px;width:1200px;height:${textHeight}px;display:flex;flex-direction:column;justify-content:center;gap:44px">
   <div style="font-size:156px;line-height:1.08;font-weight:700;letter-spacing:-1px;text-shadow:0 8px 40px rgba(0,0,0,0.6)">A Kaleidoscope<br>You Can Touch</div>
+  <div style="font-size:76px;line-height:1.2;font-weight:600;color:rgba(255,255,255,0.8);text-shadow:0 6px 30px rgba(0,0,0,0.6)">Push, pinch, twist, tilt and shake</div>
 </div>
 <div class="overlay" style="left:${phoneLeft - bezel}px;top:${phoneTop - bezel}px;padding:${bezel}px;background:#0a0a0a;border-radius:${radius + bezel}px;box-shadow:0 50px 140px rgba(0,0,0,0.6),0 0 0 4px rgba(255,255,255,0.10)">
   <div style="position:relative;width:${phoneW}px;height:${phoneH}px;border-radius:${radius}px;overflow:hidden">

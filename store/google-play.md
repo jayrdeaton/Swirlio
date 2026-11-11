@@ -127,7 +127,7 @@ Not collected: location, personal info, financial info, health and fitness, mess
 - **Can users request deletion?** No: the ID isn't linked to anyone, so there is nothing to find and delete by person. Uninstalling the app removes it from the phone.
 - **Delete account URL:** none (no accounts).
 
-**The App Store's App Privacy answer matches:** Identifiers > Device ID and Diagnostics > Crash Data, not linked to the user, not tracking (`store/README.md`, App Privacy). It was Data Not Collected through 1.0.2, and changes in App Store Connect by hand.
+**The App Store's App Privacy answer matches:** Identifiers > Device ID and Diagnostics > Crash Data, not linked to the user, not tracking (`store/README.md`, App Privacy). It was Data Not Collected through 1.0.2 and was changed in App Store Connect on 2026-11-11, for 1.1.0.
 
 ## Screenshots
 
