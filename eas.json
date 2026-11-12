@@ -23,6 +23,7 @@
       "channel": "production",
       "environment": "production",
       "android": {
+        "gradleCommand": ":app:bundleRelease --max-workers=2",
         "env": {
           "ORG_GRADLE_PROJECT_reactNativeArchitectures": "armeabi-v7a,arm64-v8a"
         }
