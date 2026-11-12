@@ -2,7 +2,7 @@
   "expo": {
     "name": "Swirlio",
     "slug": "Swirlio",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "orientation": "default",
     "scheme": "swirlio",
     "icon": "./assets/images/dark-icon.png",
