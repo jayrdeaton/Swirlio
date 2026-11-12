@@ -21,7 +21,12 @@
     "production": {
       "autoIncrement": true,
       "channel": "production",
-      "environment": "production"
+      "environment": "production",
+      "android": {
+        "env": {
+          "ORG_GRADLE_PROJECT_reactNativeArchitectures": "armeabi-v7a,arm64-v8a"
+        }
+      }
     }
   },
   "submit": {
