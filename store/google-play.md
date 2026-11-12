@@ -23,7 +23,7 @@ Checked 2026-11-11 against Play Console Help and the Developer Program Policies 
 4. **Upload the first bundle by hand** in Play Console (Test and release, Production, Create new release, upload the `.aab`, release notes below): Google's API can't create an app's first release, so `eas submit -p android` only works from the second one on, with a Google Cloud service account key that has Play Console access.
 5. **Send for review** (Publishing overview). A new account's first app can take several days. Managed publishing holds an approved release until you press Publish, if Swirlio should go live with the iOS release.
 6. **After the first upload:** nothing. Swirlio has no sign-in or App Links, so it needs no `assetlinks.json`.
-7. **The website:** deploy it (a `v*` tag, see `.claude/CLAUDE.md`, Web and App Store) so the privacy page's failed-update sentence (added 2026-11-11) is live before review.
+7. **The website:** deploy it (a `v*` tag, see `.claude/CLAUDE.md`, Web and App Store) so the privacy page's failed-update sentence (added 2026-11-11) and the terms page (`/terms`, 2026-11-12) are live before review.
 
 Every later version: `jrd ship build production`, `eas submit -p android --profile production` (once `submit.production.android` in `eas.json` has a service account key and a track), the release notes, then send for review.
 
@@ -95,11 +95,12 @@ Swirlio's first release on Android.
 
 - **App category:** Entertainment (as on the App Store; Art & Design is the other close one).
 - **Tags:** up to five, picked in the console from Play's list. Look for the nearest to Relaxation, Art, Visualizer, Offline and Single player.
-- **Contact details:** email jay@infinitetoken.com for now (public; support@infinitetoken.com once it reaches someone, as the other apps), website https://swirlio.infinitetoken.com, no phone.
+- **Contact details:** email support@infinitetoken.com (public, as PuckTastic's; 2026-11-12), website https://swirlio.infinitetoken.com, no phone.
 
 ## App content
 
 - **Privacy policy:** https://swirlio.infinitetoken.com/privacy (`public/privacy.html`; it covers Android, and its App Updates section describes the update check below).
+- **Terms of service:** https://swirlio.infinitetoken.com/terms (`public/terms.html`, added 2026-11-12). Live only after the next web deploy (a `v*` tag), so deploy before entering it.
 - **App access:** All functionality is available without special access. No account or sign-in exists.
 - **Ads:** No, the app doesn't contain ads.
 - **Content rating** (IARC questionnaire): email jay@infinitetoken.com; category **All Other App Types** (Swirlio is an app, not a game; pick the nearest if the list's names differ). Violence, fear, sexuality, language, controlled substances and crude humor: none. Gambling: none. Users interact or exchange content: no. Shares the user's location: no. Digital purchases: no. Unrestricted internet access: no. Expected result: Everyone, PEGI 3. Matches the App Store's answers (`store/README.md`, Age rating, all None, so 4+). Swirlio shows a photosensitivity warning on first launch; IARC doesn't ask about flashing images, but if any question touches it, the answer is that the warning is there and the motion can be paused.
