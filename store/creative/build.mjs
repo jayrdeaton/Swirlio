@@ -22,7 +22,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(HERE, '../..')
 const OUT_DIR = path.join(ROOT, 'store', 'screenshots')
 const CREATIVE = process.env.CREATIVE ?? path.join(os.homedir(), '.claude/skills/app-store-prep/scripts/creative.mjs')
-const CAPTURE = path.join(OUT_DIR, 'raw', 'iphone', '01-kaleidoscope.png')
 // SF Pro, the app's own system font (and the screenshot captions').
 const FONT = '/System/Library/Fonts/SFNS.ttf'
 const LOOKS = JSON.parse(fs.readFileSync(path.join(ROOT, 'store', 'seed', 'looks.json'), 'utf8'))
@@ -105,34 +104,26 @@ svg { position: absolute; left: 0; top: 0; }
   const header = kaleidoscope('h', { look: 'flower', width: 3840, height: 1646, scale: 4, x: 1920, y: 823, pulse: 0.35, rotation: 12, foreground: 0, background: 0.75 })
   const headerFile = page('header', 3840, 1646, header.svg)
 
-  // Search results, 3840 x 2560: state the obvious. The first screenshot's caption on the left and that screenshot in
-  // a phone on the right (whole, ending above the bottom edge). Behind them the same flower look, centred on the phone,
-  // drawn in its own two background colors (the foreground list set to the background one, as the color drawer
-  // allows) so it stays quiet under the words. The iPhone's search card shows only the top of it (the full width, y 0
-  // to about 1500, in App Store Connect's preview), so the words are centered in that strip and the phone starts near
-  // its top (2026-11-11: centered in Apple's template safe area from y 765, as SlingScan and Lumber first had them,
-  // the words sat at the bottom of the iPhone's card). The iPad shows all of it. Check search-iphone.png.
-  const STRIP = 1500
-  const textHeight = 520
-  const phoneScale = 0.68
-  const phoneW = 1320 * phoneScale
-  const phoneH = 2868 * phoneScale
-  const bezel = 22
-  const phoneLeft = 2100
-  const phoneTop = 230
-  const radius = 165 * phoneScale
-  const search = kaleidoscope('s', { look: 'flower', width: 3840, height: 2560, scale: 4, x: phoneLeft + phoneW / 2, y: STRIP / 2, pulse: 0.5, rotation: 12, foreground: 0.14, background: 0, overrides: { foregroundColors: LOOKS.looks.flower.backgroundColors } })
+  // Search results, 3840 x 2560: state the obvious, and fill the card. iOS 27's search card shows the whole 3:2 on
+  // iPhone as on iPad, about 390pt wide on a phone (Jay's App Store screenshots, 2026-11-13; App Store Connect's preview
+  // cropping it to the top 1500 was the preview's bug), so ten pixels here are about a point there. The first version,
+  // squeezed into that top strip and the template's middle (x 836-3004), read as mostly empty, with a 16pt headline and
+  // one phone. Now the first screenshot's caption runs across the top at 230px (about 23pt in the card), and under it
+  // three looks fan out in phones running off the bottom: the mirror look's yellow dashes, the flower, the beads.
+  // Behind them the flower look again, centred under the middle phone and drawn in its own two background colors (the
+  // foreground list set to the background one, as the color drawer allows), so it stays quiet under the words. Phones
+  // from the app-store-prep skill's phone.mjs.
+  const SHOTS = ['02-mirror', '01-kaleidoscope', '03-beads'].map((name) => path.join(OUT_DIR, 'raw', 'iphone', `${name}.png`))
+  const { fan } = await import(pathToFileURL(path.join(path.dirname(CREATIVE), 'phone.mjs')).href)
+  const middleTop = 860
+  const search = kaleidoscope('s', { look: 'flower', width: 3840, height: 2560, scale: 4, x: 1920, y: middleTop + 900, pulse: 0.5, rotation: 12, foreground: 0.14, background: 0, overrides: { foregroundColors: LOOKS.looks.flower.backgroundColors } })
   const searchOverlay = `
-<div class="overlay" style="left:876px;top:${(STRIP - textHeight) / 2}px;width:1200px;height:${textHeight}px;display:flex;flex-direction:column;justify-content:center;gap:44px">
-  <div style="font-size:156px;line-height:1.08;font-weight:700;letter-spacing:-1px;text-shadow:0 8px 40px rgba(0,0,0,0.6)">A Kaleidoscope<br>You Can Touch</div>
-  <div style="font-size:76px;line-height:1.2;font-weight:600;color:rgba(255,255,255,0.8);text-shadow:0 6px 30px rgba(0,0,0,0.6)">Push, pinch, twist, tilt and shake</div>
+<div class="overlay" style="inset:0;background:linear-gradient(to bottom, rgba(5,1,20,0.85) 0%, rgba(5,1,20,0.6) 22%, rgba(5,1,20,0) 38%)"></div>
+<div class="overlay" style="left:0;right:0;top:170px;display:flex;flex-direction:column;align-items:center;gap:36px;text-align:center">
+  <div style="font-size:230px;line-height:1.05;font-weight:800;letter-spacing:-5px;white-space:nowrap;text-shadow:0 10px 50px rgba(0,0,0,0.6)">A Kaleidoscope You Can Touch</div>
+  <div style="font-size:112px;line-height:1.15;font-weight:600;color:rgba(255,255,255,0.82);white-space:nowrap;text-shadow:0 8px 40px rgba(0,0,0,0.6)">Push, pinch, twist, tilt and shake</div>
 </div>
-<div class="overlay" style="left:${phoneLeft - bezel}px;top:${phoneTop - bezel}px;padding:${bezel}px;background:#0a0a0a;border-radius:${radius + bezel}px;box-shadow:0 50px 140px rgba(0,0,0,0.6),0 0 0 4px rgba(255,255,255,0.10)">
-  <div style="position:relative;width:${phoneW}px;height:${phoneH}px;border-radius:${radius}px;overflow:hidden">
-    <img src="${pathToFileURL(CAPTURE).href}" style="display:block;width:${phoneW}px;height:${phoneH}px">
-    <div style="position:absolute;left:${(phoneW - 378 * phoneScale) / 2}px;top:${41 * phoneScale}px;width:${378 * phoneScale}px;height:${111 * phoneScale}px;border-radius:${(111 * phoneScale) / 2}px;background:#000"></div>
-  </div>
-</div>`
+${fan(SHOTS, { top: middleTop, scale: 0.74, gap: 1050 - 1320 * 0.74, turn: 6, drop: 190 })}`
   const searchFile = page('search', 3840, 2560, search.svg, searchOverlay)
 
   for (const [file, placement] of [

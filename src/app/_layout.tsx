@@ -3,6 +3,7 @@ import * as AutoPaper from '@rific/auto-paper'
 import { Provider as AutoPaperProvider, useThemeSettings } from '@rific/auto-paper'
 import { DrawerProvider } from '@rific/drawer'
 import { FeedbackPressProvider, useHapticSettings } from '@rific/feedback-press'
+import { setReloadSplash } from '@rific/updater'
 import * as ExpoBlur from 'expo-blur'
 import { useFonts } from 'expo-font'
 import { Stack } from 'expo-router'
@@ -32,6 +33,9 @@ import { SwirlSettingsProvider, useSwirlSettings } from '@/hooks/useSwirlSetting
 // on-screen icon renders through (see FontsGate below) - so the first frame we ever paint is the
 // real one instead of defaults-then-a-sudden-jump, or icons popping in a moment late.
 SplashScreen.preventAutoHideAsync()
+// An OTA update restarts the app behind its splash (app.json's splash images), not expo-updates' white loading
+// screen. @rific/updater takes the colors from app.json itself.
+setReloadSplash({ image: require('../../assets/images/light-splash.png'), darkImage: require('../../assets/images/dark-splash.png') })
 
 // Monochrome to match the swirl itself (black/white by default) rather than a stock accent hue -
 // black on the light background, white on the dark one, so the controls always read clearly instead

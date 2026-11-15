@@ -37,7 +37,7 @@
     "@rific/drawer": "^0.8.2",
     "@rific/feedback-press": "^0.14.1",
     "@rific/splash-gate": "^0.2.3",
-    "@rific/updater": "^0.8.0",
+    "@rific/updater": "^0.9.0",
     "@shopify/react-native-skia": "2.14.0",
     "@tastic/core": "^0.17.0",
     "@tastic/edge-guard": "^0.1.5",
