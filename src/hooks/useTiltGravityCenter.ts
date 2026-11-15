@@ -1,11 +1,10 @@
-import * as ScreenOrientation from 'expo-screen-orientation'
+import { edgeDip, tiltToScreenAxes, trackInterfaceOrientation } from '@tastic/core/interface-orientation'
 import { DeviceMotion } from 'expo-sensors'
 import { useEffect } from 'react'
-import { Dimensions, Platform } from 'react-native'
+import { Platform } from 'react-native'
 import { useAnimatedReaction, useSharedValue, withSpring } from 'react-native-reanimated'
 
 import { clamp } from '@/constants/clamp'
-import { interfaceOrientationFromHold, tiltToScreenAxes } from '@/constants/tiltOrientation'
 
 const UPDATE_INTERVAL_MS = 100
 const NORMALIZE_RADIANS = Math.PI / 4
@@ -71,25 +70,11 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
 
     let subscription: { remove: () => void } | null = null
 
-    // The interface orientation tilt is turned through (see tiltToScreenAxes). Read once and then
-    // followed, since the OS rotates the interface with the device unless its rotation lock is on.
-    // A change that lands before the first read resolves wins over that read's older answer. While
-    // it's UNKNOWN (iOS, from launch until the first turn), heldOrientation stands in for it (see
-    // interfaceOrientationFromHold); Android always reads the display, so it never needs one.
-    let interfaceOrientation = ScreenOrientation.Orientation.UNKNOWN
-    let heldOrientation = ScreenOrientation.Orientation.PORTRAIT_UP
-    let orientationChanged = false
-    const orientationSubscription = ScreenOrientation.addOrientationChangeListener(({ orientationInfo }) => {
-      orientationChanged = true
-      interfaceOrientation = orientationInfo.orientation
-    })
-    ScreenOrientation.getOrientationAsync()
-      .then((orientation) => {
-        if (!orientationChanged) interfaceOrientation = orientation
-      })
-      .catch(() => {
-        // Stays UNKNOWN until the first turn, with the stand-in below covering it on iOS
-      })
+    // The interface orientation tilt is turned through (@tastic/core's tiltToScreenAxes), read once
+    // and then followed, since the OS rotates the interface with the device unless its rotation lock is
+    // on. On iOS it's UNKNOWN from launch until the first turn; the tracker stands in for it from the
+    // window's shape and the hold until then.
+    const interfaceOrientation = trackInterfaceOrientation()
 
     DeviceMotion.isAvailableAsync()
       .then((available) => {
@@ -105,13 +90,13 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
           // portrait-locked, honoring that physical field snapped the gravity target toward the
           // top/bottom right as a roll pinned it at the side edge (that roll crosses iOS's own
           // landscape threshold), a swap the UI never made.
-          let screenOrientation = interfaceOrientation
-          if (screenOrientation === ScreenOrientation.Orientation.UNKNOWN && Platform.OS === 'ios') {
-            const window = Dimensions.get('window')
-            heldOrientation = interfaceOrientationFromHold(window.width > window.height, orientation, heldOrientation)
-            screenOrientation = heldOrientation
-          }
-          const screenTilt = tiltToScreenAxes(rotation.gamma, rotation.beta, screenOrientation)
+          //
+          // The right edge's dip, never gamma: both platforms report gamma as an Euler roll, so held
+          // upright it swung tens of degrees on a tremor and past vertical it jumped by 180, throwing
+          // the swirl at a side edge however level the phone was (see core's edgeDip). Lying flat the
+          // two are the same. Beta, the other axis, reads absolutely from flat on purpose: upright, the
+          // swirl rolls to the bottom edge.
+          const screenTilt = tiltToScreenAxes(edgeDip(rotation.beta, rotation.gamma), rotation.beta, interfaceOrientation.current(orientation))
           const ratioX = applyDeadzone(clamp(screenTilt.x / NORMALIZE_RADIANS, -1, 1), TILT_NOISE_DEADZONE)
           const ratioY = applyDeadzone(clamp(screenTilt.y / NORMALIZE_RADIANS, -1, 1), TILT_NOISE_DEADZONE)
           rawX.value = ratioX * maxOffset
@@ -127,7 +112,7 @@ export function useTiltGravityCenter(maxOffset: number, enabled: boolean) {
 
     return () => {
       subscription?.remove()
-      orientationSubscription.remove()
+      interfaceOrientation.remove()
     }
   }, [enabled, maxOffset, rawTiltX, rawTiltY, rawX, rawY])
 
